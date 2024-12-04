@@ -1,0 +1,1 @@
+TEST.TESTCls.TestFunc(Int32)

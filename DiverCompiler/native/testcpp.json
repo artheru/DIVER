@@ -1,0 +1,9 @@
+{
+    "functions": [
+        {
+            "name": "cfun0",
+            "entry_point": 1
+        }
+    ],
+    "alignment": 8
+}

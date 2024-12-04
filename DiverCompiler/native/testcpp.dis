@@ -1,0 +1,2562 @@
+
+testcpp.elf:     file format elf32-littlearm
+
+
+Disassembly of section .text:
+
+00000000 <cfun0>:
+cfun0():
+D:\src\M2\Test\TestMCURoutine\native/code.c:12
+#define r4 float
+#define ptr void*
+
+// function begins
+
+void* cfun0(u1* args){
+   0:	b5f7      	push	{r0, r1, r2, r4, r5, r6, r7, lr}
+D:\src\M2\Test\TestMCURoutine\native/code.c:16
+//args:
+int argN=0;
+ ptr arg0 = *(ptr*)&args[(argN++)*4];
+int stack_0_ptr_arr_stride_lb = *(int*)&args[(argN++)*4];
+   2:	e9d0 0c00 	ldrd	r0, ip, [r0]
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_005d: stack_2_r4=(stack_2_i4); //IL_005d: conv.r8: s_3, pop1, push1
+IL_005e: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_005e: mul: s_3, pop2, push1
+IL_005f: stack_2_i4=(var1); //IL_005f: ldloc.1: s_2, pop0, push1
+IL_0060: stack_2_r4=(stack_2_i4); //IL_0060: conv.r8: s_3, pop1, push1
+IL_0061: stack_1_r4=((stack_1_r4)/(stack_2_r4)); //IL_0061: div: s_3, pop2, push1
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+   6:	eddf 4a2f 	vldr	s9, [pc, #188]	@ c4 <cfun0+0xc4>
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+   a:	eddf 3a2f 	vldr	s7, [pc, #188]	@ c8 <cfun0+0xc8>
+D:\src\M2\Test\TestMCURoutine\native/code.c:66
+IL_0035: var6=stack_0_i4; //IL_0035: stloc.s V_6: s_1, pop1, push0
+   e:	2300      	movs	r3, #0
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  10:	eebf 5a00 	vmov.f32	s10, #240	@ 0xbf800000 -1.0
+D:\src\M2\Test\TestMCURoutine\native/code.c:173
+IL_00fb: stack_3_i4=(var6); //IL_00fb: ldloc.s V_6: s_3, pop0, push1
+IL_00fd: stack_4_i4=(8); //IL_00fd: ldc.i4.8: s_4, pop0, push1
+IL_00fe: stack_3_i4=((stack_3_i4)%(stack_4_i4)); //IL_00fe: rem: s_5, pop2, push1
+IL_00ff: stack_4_i4=(31); //IL_00ff: ldc.i4.s 31: s_4, pop0, push1
+IL_0101: stack_3_i4=((stack_3_i4)&(stack_4_i4)); //IL_0101: and: s_5, pop2, push1
+IL_0102: stack_2_i4=((stack_2_i4)<<(stack_3_i4)); //IL_0102: shl: s_4, pop2, push1
+  14:	2701      	movs	r7, #1
+D:\src\M2\Test\TestMCURoutine\native/code.c:79
+IL_004d: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_004d: mul: s_3, pop2, push1
+  16:	eeb0 4a08 	vmov.f32	s8, #8	@ 0x40400000  3.0
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+  1a:	eeb8 3a00 	vmov.f32	s6, #128	@ 0xc0000000 -2.0
+D:\src\M2\Test\TestMCURoutine\native/code.c:90
+IL_005d: stack_2_r4=(stack_2_i4); //IL_005d: conv.r8: s_3, pop1, push1
+  1e:	ee07 3a90 	vmov	s15, r3
+  22:	eef8 7ae7 	vcvt.f32.s32	s15, s15
+D:\src\M2\Test\TestMCURoutine\native/code.c:170
+IL_00fe: stack_3_i4=((stack_3_i4)%(stack_4_i4)); //IL_00fe: rem: s_5, pop2, push1
+  26:	f003 0107 	and.w	r1, r3, #7
+D:\src\M2\Test\TestMCURoutine\native/code.c:91
+IL_005e: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_005e: mul: s_3, pop2, push1
+  2a:	ee77 7aa7 	vadd.f32	s15, s15, s15
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  2e:	eef0 5a45 	vmov.f32	s11, s10
+D:\src\M2\Test\TestMCURoutine\native/code.c:159
+IL_00ed: stack_1_i4=((stack_1_i4)/(stack_2_i4)); //IL_00ed: div: s_3, pop2, push1
+  32:	10dd      	asrs	r5, r3, #3
+D:\src\M2\Test\TestMCURoutine\native/code.c:173
+IL_0102: stack_2_i4=((stack_2_i4)<<(stack_3_i4)); //IL_0102: shl: s_4, pop2, push1
+  34:	fa07 f101 	lsl.w	r1, r7, r1
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  38:	eee7 5aa4 	vfma.f32	s11, s15, s9
+D:\src\M2\Test\TestMCURoutine\native/code.c:161
+IL_00ef: stack_1_i4=((stack_1_i4)*(stack_2_i4)); //IL_00ef: mul: s_3, pop2, push1
+  3c:	01ed      	lsls	r5, r5, #7
+D:\src\M2\Test\TestMCURoutine\native/code.c:174
+IL_0103: stack_2_u1=(stack_2_i4); //IL_0103: conv.u1: s_3, pop1, push1
+  3e:	b2c9      	uxtb	r1, r1
+D:\src\M2\Test\TestMCURoutine\native/code.c:70
+IL_003e: var7=stack_0_i4; //IL_003e: stloc.s V_7: s_1, pop1, push0
+  40:	2200      	movs	r2, #0
+  42:	e00b      	b.n	5c <cfun0+0x5c>
+D:\src\M2\Test\TestMCURoutine\native/code.c:154
+IL_00e6: if (!(stack_0_u1)) goto IL_0108; //IL_00e6: brfalse.s IL_0108: s_1, pop1, push0
+  44:	f5b4 7f7a 	cmp.w	r4, #1000	@ 0x3e8
+  48:	d105      	bne.n	56 <cfun0+0x56>
+D:\src\M2\Test\TestMCURoutine\native/code.c:163
+IL_00f2: stack_1_i4=((stack_1_i4)+(stack_2_i4)); //IL_00f2: add: s_3, pop2, push1
+  4a:	1954      	adds	r4, r2, r5
+D:\src\M2\Test\TestMCURoutine\native/code.c:164
+IL_00f3: stack_0_ptr=(( ((i1*)stack_0_ptr)+(stack_1_i4<<stack_0_ptr_arr_stride_lb) )); //IL_00f3: ldelema System.Byte: s_2, pop2, push1
+  4c:	fa04 f40c 	lsl.w	r4, r4, ip
+D:\src\M2\Test\TestMCURoutine\native/code.c:166
+IL_00f9: stack_1_u1=(*(unsigned char*)(stack_1_ptr)); //IL_00f9: ldind.u1: s_2, pop1, push1
+  50:	5d06      	ldrb	r6, [r0, r4]
+D:\src\M2\Test\TestMCURoutine\native/code.c:175
+IL_0104: stack_1_u1=((stack_1_u1)|(stack_2_u1)); //IL_0104: or: s_3, pop2, push1
+  52:	430e      	orrs	r6, r1
+D:\src\M2\Test\TestMCURoutine\native/code.c:177
+IL_0105: stack_1_u1=(stack_1_u1); //IL_0105: conv.u1: s_2, pop1, push1
+IL_0106: *(char*)(stack_0_ptr)=(stack_1_u1); //IL_0106: stind.i1: s_2, pop2, push0
+  54:	5506      	strb	r6, [r0, r4]
+D:\src\M2\Test\TestMCURoutine\native/code.c:182
+IL_0107:
+IL_0108:
+IL_0109: stack_0_i4=(var7); //IL_0109: ldloc.s V_7: s_0, pop0, push1
+IL_010b: stack_1_i4=(1); //IL_010b: ldc.i4.1: s_1, pop0, push1
+IL_010c: stack_0_i4=((stack_0_i4)+(stack_1_i4)); //IL_010c: add: s_2, pop2, push1
+  56:	3201      	adds	r2, #1
+D:\src\M2\Test\TestMCURoutine\native/code.c:189
+IL_010f: stack_0_i4=(var7); //IL_010f: ldloc.s V_7: s_0, pop0, push1
+IL_0111: stack_1_i4=(var0); //IL_0111: ldloc.0: s_1, pop0, push1
+IL_0112: stack_0_i4=((stack_0_i4)<(stack_1_i4)); //IL_0112: clt: s_2, pop2, push1
+IL_0114: var17=stack_0_i4; //IL_0114: stloc.s V_17: s_1, pop1, push0
+IL_0116: stack_0_u1=(var17); //IL_0116: ldloc.s V_17: s_0, pop0, push1
+IL_0118: if (stack_0_u1) goto IL_0045; //IL_0118: brtrue IL_0045: s_1, pop1, push0
+  58:	2a80      	cmp	r2, #128	@ 0x80
+  5a:	d02d      	beq.n	b8 <cfun0+0xb8>
+D:\src\M2\Test\TestMCURoutine\native/code.c:78
+IL_004c: stack_2_r4=(stack_2_i4); //IL_004c: conv.r8: s_3, pop1, push1
+  5c:	ee07 2a90 	vmov	s15, r2
+  60:	eef8 7ae7 	vcvt.f32.s32	s15, s15
+D:\src\M2\Test\TestMCURoutine\native/code.c:100
+IL_0079: var11=stack_0_r4; //IL_0079: stloc.s V_11: s_1, pop1, push0
+  64:	ed9f 7a19 	vldr	s14, [pc, #100]	@ cc <cfun0+0xcc>
+D:\src\M2\Test\TestMCURoutine\native/code.c:79
+IL_004d: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_004d: mul: s_3, pop2, push1
+  68:	ee67 7a84 	vmul.f32	s15, s15, s8
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+  6c:	eef0 2a43 	vmov.f32	s5, s6
+  70:	eee7 2aa3 	vfma.f32	s5, s15, s7
+D:\src\M2\Test\TestMCURoutine\native/code.c:102
+IL_007c: var12=stack_0_i4; //IL_007c: stloc.s V_12: s_1, pop1, push0
+  74:	2400      	movs	r4, #0
+D:\src\M2\Test\TestMCURoutine\native/code.c:98
+IL_006e: var10=stack_0_r4; //IL_006e: stloc.s V_10: s_1, pop1, push0
+  76:	eef0 7a47 	vmov.f32	s15, s14
+D:\src\M2\Test\TestMCURoutine\native/code.c:134
+IL_00bb: stack_0_r4=((stack_0_r4)*(stack_1_r4)); //IL_00bb: mul: s_2, pop2, push1
+  7a:	ee67 6aa7 	vmul.f32	s13, s15, s15
+D:\src\M2\Test\TestMCURoutine\native/code.c:137
+IL_00c0: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_00c0: mul: s_3, pop2, push1
+  7e:	ee27 6a07 	vmul.f32	s12, s14, s14
+D:\src\M2\Test\TestMCURoutine\native/code.c:138
+IL_00c1: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00c1: add: s_2, pop2, push1
+  82:	ee36 2a86 	vadd.f32	s4, s13, s12
+D:\src\M2\Test\TestMCURoutine\native/code.c:140
+IL_00cb: if ((unsigned char)(stack_0_r4)>=(unsigned char)(stack_1_r4)) goto IL_00d5; //IL_00cb: bge.un.s IL_00d5: s_2, pop2, push0
+  86:	eebc 2ac2 	vcvt.u32.f32	s4, s4
+  8a:	ed8d 2a01 	vstr	s4, [sp, #4]
+  8e:	f89d 6004 	ldrb.w	r6, [sp, #4]
+  92:	2e03      	cmp	r6, #3
+  94:	d8d6      	bhi.n	44 <cfun0+0x44>
+D:\src\M2\Test\TestMCURoutine\native/code.c:148
+IL_00da: if (stack_0_u1) goto IL_0087; //IL_00da: brtrue.s IL_0087: s_1, pop1, push0
+  96:	f5b4 7f7a 	cmp.w	r4, #1000	@ 0x3e8
+  9a:	d0d6      	beq.n	4a <cfun0+0x4a>
+D:\src\M2\Test\TestMCURoutine\native/code.c:119
+IL_00a3: stack_0_r4=((stack_0_r4)*(stack_1_r4)); //IL_00a3: mul: s_2, pop2, push1
+  9c:	ee77 7aa7 	vadd.f32	s15, s15, s15
+D:\src\M2\Test\TestMCURoutine\native/code.c:113
+IL_0092: stack_0_r4=((stack_0_r4)-(stack_1_r4)); //IL_0092: sub: s_2, pop2, push1
+  a0:	ee76 6ac6 	vsub.f32	s13, s13, s12
+D:\src\M2\Test\TestMCURoutine\native/code.c:123
+IL_00a9: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00a9: add: s_2, pop2, push1
+  a4:	eeb0 6a65 	vmov.f32	s12, s11
+  a8:	eea7 6a27 	vfma.f32	s12, s14, s15
+D:\src\M2\Test\TestMCURoutine\native/code.c:129
+IL_00b3: stack_0_i4=((stack_0_i4)+(stack_1_i4)); //IL_00b3: add: s_2, pop2, push1
+  ac:	3401      	adds	r4, #1
+D:\src\M2\Test\TestMCURoutine\native/code.c:126
+IL_00ae: var10=stack_0_r4; //IL_00ae: stloc.s V_10: s_1, pop1, push0
+  ae:	ee72 7aa6 	vadd.f32	s15, s5, s13
+D:\src\M2\Test\TestMCURoutine\native/code.c:123
+IL_00a9: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00a9: add: s_2, pop2, push1
+  b2:	eeb0 7a46 	vmov.f32	s14, s12
+D:\src\M2\Test\TestMCURoutine\native/code.c:130
+IL_00b4: var12=stack_0_i4; //IL_00b4: stloc.s V_12: s_1, pop1, push0
+  b6:	e7e0      	b.n	7a <cfun0+0x7a>
+D:\src\M2\Test\TestMCURoutine\native/code.c:193
+IL_011d:
+IL_011e: stack_0_i4=(var6); //IL_011e: ldloc.s V_6: s_0, pop0, push1
+IL_0120: stack_1_i4=(1); //IL_0120: ldc.i4.1: s_1, pop0, push1
+IL_0121: stack_0_i4=((stack_0_i4)+(stack_1_i4)); //IL_0121: add: s_2, pop2, push1
+  b8:	3301      	adds	r3, #1
+D:\src\M2\Test\TestMCURoutine\native/code.c:200
+IL_0124: stack_0_i4=(var6); //IL_0124: ldloc.s V_6: s_0, pop0, push1
+IL_0126: stack_1_i4=(var1); //IL_0126: ldloc.1: s_1, pop0, push1
+IL_0127: stack_0_i4=((stack_0_i4)<(stack_1_i4)); //IL_0127: clt: s_2, pop2, push1
+IL_0129: var18=stack_0_i4; //IL_0129: stloc.s V_18: s_1, pop1, push0
+IL_012b: stack_0_u1=(var18); //IL_012b: ldloc.s V_18: s_0, pop0, push1
+IL_012d: if (stack_0_u1) goto IL_003c; //IL_012d: brtrue IL_003c: s_1, pop1, push0
+  ba:	2b40      	cmp	r3, #64	@ 0x40
+  bc:	d1af      	bne.n	1e <cfun0+0x1e>
+D:\src\M2\Test\TestMCURoutine\native/code.c:206
+IL_0132: stack_0_ptr=(arg0); //IL_0132: ldarg.0: s_0, pop0, push1
+IL_0133: var19=stack_0_ptr; //IL_0133: stloc.s V_19: s_1, pop1, push0
+IL_0135: goto IL_0137; //IL_0135: br.s IL_0137: s_0, pop0, push0
+IL_0137: stack_0_ptr=(var19); //IL_0137: ldloc.s V_19: s_0, pop0, push1
+IL_0139: return stack_0_ptr; //IL_0139: ret: s_1, pop1, push0
+}
+  be:	b003      	add	sp, #12
+  c0:	bdf0      	pop	{r4, r5, r6, r7, pc}
+  c2:	bf00      	nop
+  c4:	3c800000 	stccc	0, cr0, [r0], {0}
+  c8:	3c000000 	stccc	0, cr0, [r0], {-0}
+  cc:	00000000 	andeq	r0, r0, r0
+
+Disassembly of section .debug_info:
+
+00000000 <.debug_info>:
+D:\src\M2\Test\TestMCURoutine\native/code.c:12
+void* cfun0(u1* args){
+   0:	00000977 	andeq	r0, r0, r7, ror r9
+D:\src\M2\Test\TestMCURoutine\native/code.c:16
+int stack_0_ptr_arr_stride_lb = *(int*)&args[(argN++)*4];
+   4:	04010005 	streq	r0, [r1], #-5
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+   8:	00000000 	andeq	r0, r0, r0
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+   c:	0004a809 	andeq	sl, r4, r9, lsl #16
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  10:	043b1d00 	ldrteq	r1, [fp], #-3328	@ 0xfffff300
+D:\src\M2\Test\TestMCURoutine\native/code.c:173
+IL_0102: stack_2_i4=((stack_2_i4)<<(stack_3_i4)); //IL_0102: shl: s_4, pop2, push1
+  14:	06b60000 	ldrteq	r0, [r6], r0
+D:\src\M2\Test\TestMCURoutine\native/code.c:79
+IL_004d: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_004d: mul: s_3, pop2, push1
+  18:	000c0000 	andeq	r0, ip, r0
+	...
+D:\src\M2\Test\TestMCURoutine\native/code.c:90
+IL_005d: stack_2_r4=(stack_2_i4); //IL_005d: conv.r8: s_3, pop1, push1
+  24:	04030000 	streq	r0, [r3], #-0
+D:\src\M2\Test\TestMCURoutine\native/code.c:170
+IL_00fe: stack_3_i4=((stack_3_i4)%(stack_4_i4)); //IL_00fe: rem: s_5, pop2, push1
+  28:	00043504 	andeq	r3, r4, r4, lsl #10
+D:\src\M2\Test\TestMCURoutine\native/code.c:91
+IL_005e: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_005e: mul: s_3, pop2, push1
+  2c:	05040a00 	streq	r0, [r4, #-2560]	@ 0xfffff600
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  30:	00746e69 	rsbseq	r6, r4, r9, ror #28
+D:\src\M2\Test\TestMCURoutine\native/code.c:173
+IL_0102: stack_2_i4=((stack_2_i4)<<(stack_3_i4)); //IL_0102: shl: s_4, pop2, push1
+  34:	13070803 	movwne	r0, #30723	@ 0x7803
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  38:	03000001 	movweq	r0, #1
+D:\src\M2\Test\TestMCURoutine\native/code.c:161
+IL_00ef: stack_1_i4=((stack_1_i4)*(stack_2_i4)); //IL_00ef: mul: s_3, pop2, push1
+  3c:	011d0704 	tsteq	sp, r4, lsl #14
+D:\src\M2\Test\TestMCURoutine\native/code.c:70
+IL_003e: var7=stack_0_i4; //IL_003e: stloc.s V_7: s_1, pop1, push0
+  40:	180b0000 	stmdane	fp, {}	@ <UNPREDICTABLE>
+D:\src\M2\Test\TestMCURoutine\native/code.c:154
+IL_00e6: if (!(stack_0_u1)) goto IL_0108; //IL_00e6: brfalse.s IL_0108: s_1, pop1, push0
+  44:	01000006 	tsteq	r0, r6
+  48:	096b070c 	stmdbeq	fp!, {r2, r3, r8, r9, sl}^
+D:\src\M2\Test\TestMCURoutine\native/code.c:164
+IL_00f3: stack_0_ptr=(( ((i1*)stack_0_ptr)+(stack_1_i4<<stack_0_ptr_arr_stride_lb) )); //IL_00f3: ldelema System.Byte: s_2, pop2, push1
+  4c:	00000000 	andeq	r0, r0, r0
+D:\src\M2\Test\TestMCURoutine\native/code.c:166
+IL_00f9: stack_1_u1=(*(unsigned char*)(stack_1_ptr)); //IL_00f9: ldind.u1: s_2, pop1, push1
+  50:	00d00000 	sbcseq	r0, r0, r0
+D:\src\M2\Test\TestMCURoutine\native/code.c:177
+IL_0106: *(char*)(stack_0_ptr)=(stack_1_u1); //IL_0106: stind.i1: s_2, pop2, push0
+  54:	9c010000 	stcls	0, cr0, [r1], {-0}
+D:\src\M2\Test\TestMCURoutine\native/code.c:189
+IL_0118: if (stack_0_u1) goto IL_0045; //IL_0118: brtrue IL_0045: s_1, pop1, push0
+  58:	0000096b 	andeq	r0, r0, fp, ror #18
+D:\src\M2\Test\TestMCURoutine\native/code.c:78
+IL_004c: stack_2_r4=(stack_2_i4); //IL_004c: conv.r8: s_3, pop1, push1
+  5c:	0006f30c 	andeq	pc, r6, ip, lsl #6
+  60:	110c0100 	mrsne	r0, (UNDEF: 28)
+D:\src\M2\Test\TestMCURoutine\native/code.c:100
+IL_0079: var11=stack_0_r4; //IL_0079: stloc.s V_11: s_1, pop1, push0
+  64:	0000096d 	andeq	r0, r0, sp, ror #18
+D:\src\M2\Test\TestMCURoutine\native/code.c:79
+IL_004d: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_004d: mul: s_3, pop2, push1
+  68:	00000010 	andeq	r0, r0, r0, lsl r0
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+  6c:	0000000c 	andeq	r0, r0, ip
+  70:	00064602 	andeq	r4, r6, r2, lsl #12
+D:\src\M2\Test\TestMCURoutine\native/code.c:102
+IL_007c: var12=stack_0_i4; //IL_007c: stloc.s V_12: s_1, pop1, push0
+  74:	2d050e00 	stccs	14, cr0, [r5, #-0]
+D:\src\M2\Test\TestMCURoutine\native/code.c:98
+IL_006e: var10=stack_0_r4; //IL_006e: stloc.s V_10: s_1, pop1, push0
+  78:	2e000000 	cdpcs	0, 0, cr0, cr0, cr0, {0}
+D:\src\M2\Test\TestMCURoutine\native/code.c:134
+IL_00bb: stack_0_r4=((stack_0_r4)*(stack_1_r4)); //IL_00bb: mul: s_2, pop2, push1
+  7c:	2a000000 	bcs	84 <cfun0+0x84>
+D:\src\M2\Test\TestMCURoutine\native/code.c:137
+IL_00c0: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_00c0: mul: s_3, pop2, push1
+  80:	06000000 	streq	r0, [r0], -r0
+D:\src\M2\Test\TestMCURoutine\native/code.c:138
+IL_00c1: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00c1: add: s_2, pop2, push1
+  84:	000005d8 	ldrdeq	r0, [r0], -r8
+D:\src\M2\Test\TestMCURoutine\native/code.c:140
+IL_00cb: if ((unsigned char)(stack_0_r4)>=(unsigned char)(stack_1_r4)) goto IL_00d5; //IL_00cb: bge.un.s IL_00d5: s_2, pop2, push0
+  88:	096b060f 	stmdbeq	fp!, {r0, r1, r2, r3, r9, sl}^
+  8c:	50010000 	andpl	r0, r1, r0
+  90:	00021902 	andeq	r1, r2, r2, lsl #18
+  94:	2d051000 	stccs	0, cr1, [r5, #-0]
+D:\src\M2\Test\TestMCURoutine\native/code.c:148
+IL_00da: if (stack_0_u1) goto IL_0087; //IL_00da: brtrue.s IL_0087: s_1, pop1, push0
+  98:	43000000 	movwmi	r0, #0
+D:\src\M2\Test\TestMCURoutine\native/code.c:119
+IL_00a3: stack_0_r4=((stack_0_r4)*(stack_1_r4)); //IL_00a3: mul: s_2, pop2, push1
+  9c:	41000000 	mrsmi	r0, (UNDEF: 0)
+D:\src\M2\Test\TestMCURoutine\native/code.c:113
+IL_0092: stack_0_r4=((stack_0_r4)-(stack_1_r4)); //IL_0092: sub: s_2, pop2, push1
+  a0:	02000000 	andeq	r0, r0, #0
+D:\src\M2\Test\TestMCURoutine\native/code.c:123
+IL_00a9: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00a9: add: s_2, pop2, push1
+  a4:	0000057d 	andeq	r0, r0, sp, ror r5
+  a8:	002d0412 	eoreq	r0, sp, r2, lsl r4
+D:\src\M2\Test\TestMCURoutine\native/code.c:129
+IL_00b3: stack_0_i4=((stack_0_i4)+(stack_1_i4)); //IL_00b3: add: s_2, pop2, push1
+  ac:	00770000 	rsbseq	r0, r7, r0
+D:\src\M2\Test\TestMCURoutine\native/code.c:126
+IL_00ae: var10=stack_0_r4; //IL_00ae: stloc.s V_10: s_1, pop1, push0
+  b0:	004d0000 	subeq	r0, sp, r0
+D:\src\M2\Test\TestMCURoutine\native/code.c:123
+IL_00a9: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00a9: add: s_2, pop2, push1
+  b4:	a3020000 	movwge	r0, #8192	@ 0x2000
+D:\src\M2\Test\TestMCURoutine\native/code.c:193
+IL_0121: stack_0_i4=((stack_0_i4)+(stack_1_i4)); //IL_0121: add: s_2, pop2, push1
+  b8:	13000006 	movwne	r0, #6
+D:\src\M2\Test\TestMCURoutine\native/code.c:200
+IL_012d: if (stack_0_u1) goto IL_003c; //IL_012d: brtrue IL_003c: s_1, pop1, push0
+  bc:	00002604 	andeq	r2, r0, r4, lsl #12
+D:\src\M2\Test\TestMCURoutine\native/code.c:206
+}
+  c0:	00016200 	andeq	r6, r1, r0, lsl #4
+  c4:	00013400 	andeq	r3, r1, r0, lsl #8
+  c8:	047d0200 	ldrbteq	r0, [sp], #-512	@ 0xfffffe00
+  cc:	04140000 	ldreq	r0, [r4], #-0
+  d0:	0000002d 	andeq	r0, r0, sp, lsr #32
+  d4:	0000027b 	andeq	r0, r0, fp, ror r2
+  d8:	00000261 	andeq	r0, r0, r1, ror #4
+  dc:	00029e02 	andeq	r9, r2, r2, lsl #28
+  e0:	73041500 	movwvc	r1, #17664	@ 0x4500
+  e4:	fd000009 	stc2	0, cr0, [r0, #-36]	@ 0xffffffdc
+  e8:	e9000002 	stmdb	r0, {r1}
+  ec:	02000002 	andeq	r0, r0, #2
+  f0:	00000569 	andeq	r0, r0, r9, ror #10
+  f4:	096b0516 	stmdbeq	fp!, {r1, r2, r4, r8, sl}^
+  f8:	036a0000 	cmneq	sl, #0
+  fc:	03660000 	cmneq	r6, #0
+ 100:	dd020000 	stcle	0, cr0, [r2, #-0]
+ 104:	17000005 	strne	r0, [r0, -r5]
+ 108:	00002604 	andeq	r2, r0, r4, lsl #12
+ 10c:	0003a300 	andeq	sl, r3, r0, lsl #6
+ 110:	00037f00 	andeq	r7, r3, r0, lsl #30
+ 114:	05460200 	strbeq	r0, [r6, #-512]	@ 0xfffffe00
+ 118:	04180000 	ldreq	r0, [r8], #-0
+ 11c:	00000026 	andeq	r0, r0, r6, lsr #32
+ 120:	00000480 	andeq	r0, r0, r0, lsl #9
+ 124:	00000470 	andeq	r0, r0, r0, ror r4
+ 128:	00041a02 	andeq	r1, r4, r2, lsl #20
+ 12c:	2d041900 	vstrcs.16	s2, [r4, #-0]	@ <UNPREDICTABLE>
+ 130:	dc000000 	stcle	0, cr0, [r0], {-0}
+ 134:	cc000004 	stcgt	0, cr0, [r0], {4}
+ 138:	02000004 	andeq	r0, r0, #4
+ 13c:	00000303 	andeq	r0, r0, r3, lsl #6
+ 140:	096b051a 	stmdbeq	fp!, {r1, r3, r4, r8, sl}^
+ 144:	05160000 	ldreq	r0, [r6, #-0]
+ 148:	05140000 	ldreq	r0, [r4, #-0]
+ 14c:	b6020000 	strlt	r0, [r2], -r0
+ 150:	1b000001 	blne	15c <cfun0+0x15c>
+ 154:	00097304 	andeq	r7, r9, r4, lsl #6
+ 158:	00052800 	andeq	r2, r5, r0, lsl #16
+ 15c:	00052400 	andeq	r2, r5, r0, lsl #8
+ 160:	036f0700 	cmneq	pc, #0, 14
+ 164:	041c0000 	ldreq	r0, [ip], #-0
+ 168:	0000002d 	andeq	r0, r0, sp, lsr #32
+ 16c:	00027302 	andeq	r7, r2, r2, lsl #6
+ 170:	2d041d00 	stccs	13, cr1, [r4, #-0]
+ 174:	4a000000 	bmi	17c <cfun0+0x17c>
+ 178:	46000005 	strmi	r0, [r0], -r5
+ 17c:	06000005 	streq	r0, [r0], -r5
+ 180:	000000e8 	andeq	r0, r0, r8, ror #1
+ 184:	0973041e 	ldmdbeq	r3!, {r1, r2, r3, r4, sl}^
+ 188:	51010000 	mrspl	r0, (UNDEF: 1)
+ 18c:	0002c108 	andeq	ip, r2, r8, lsl #2
+ 190:	002d2000 	eoreq	r2, sp, r0
+ 194:	08800000 	stmeq	r0, {}	@ <UNPREDICTABLE>
+ 198:	000002c6 	andeq	r0, r0, r6, asr #5
+ 19c:	00002d21 	andeq	r2, r0, r1, lsr #26
+ 1a0:	cb044000 	blgt	1101a8 <cfun0+0x1101a8>
+ 1a4:	22000002 	andcs	r0, r0, #2
+ 1a8:	00000026 	andeq	r0, r0, r6, lsr #32
+ 1ac:	00000004 	andeq	r0, r0, r4
+ 1b0:	02d004c0 	sbcseq	r0, r0, #192, 8	@ 0xc0000000
+ 1b4:	26230000 	strtcs	r0, [r3], -r0
+ 1b8:	04000000 	streq	r0, [r0], #-0
+ 1bc:	3f800000 	svccc	0x00800000
+ 1c0:	0002d504 	andeq	sp, r2, r4, lsl #10
+ 1c4:	00262400 	eoreq	r2, r6, r0, lsl #8
+ 1c8:	00040000 	andeq	r0, r4, r0
+ 1cc:	04bf8000 	ldrteq	r8, [pc], #0	@ 1d4 <cfun0+0x1d4>
+ 1d0:	000002da 	ldrdeq	r0, [r0], -sl
+ 1d4:	00002625 	andeq	r2, r0, r5, lsr #12
+ 1d8:	00000400 	andeq	r0, r0, r0, lsl #8
+ 1dc:	df023f80 	svcle	0x00023f80
+ 1e0:	26000002 	strcs	r0, [r0], -r2
+ 1e4:	00002d04 	andeq	r2, r0, r4, lsl #26
+ 1e8:	00056400 	andeq	r6, r5, r0, lsl #8
+ 1ec:	00055c00 	andeq	r5, r5, r0, lsl #24
+ 1f0:	02e40200 	rsceq	r0, r4, #0, 4
+ 1f4:	04270000 	strteq	r0, [r7], #-0
+ 1f8:	0000002d 	andeq	r0, r0, sp, lsr #32
+ 1fc:	0000058e 	andeq	r0, r0, lr, lsl #11
+ 200:	00000586 	andeq	r0, r0, r6, lsl #11
+ 204:	0002e902 	andeq	lr, r2, r2, lsl #18
+ 208:	26042800 	strcs	r2, [r4], -r0, lsl #16
+ 20c:	b0000000 	andlt	r0, r0, r0
+ 210:	ac000005 	stcge	0, cr0, [r0], {5}
+ 214:	02000005 	andeq	r0, r0, #5
+ 218:	000002ee 	andeq	r0, r0, lr, ror #5
+ 21c:	00260429 	eoreq	r0, r6, r9, lsr #8
+ 220:	05c90000 	strbeq	r0, [r9]
+ 224:	05c30000 	strbeq	r0, [r3]
+ 228:	2a020000 	bcs	80230 <cfun0+0x80230>
+ 22c:	2a000001 	bcs	238 <cfun0+0x238>
+ 230:	00002604 	andeq	r2, r0, r4, lsl #12
+ 234:	00063e00 	andeq	r3, r6, r0, lsl #28
+ 238:	00063600 	andeq	r3, r6, r0, lsl #12
+ 23c:	01300200 	teqeq	r0, r0, lsl #4
+ 240:	042b0000 	strteq	r0, [fp], #-0
+ 244:	00000026 	andeq	r0, r0, r6, lsr #32
+ 248:	0000066b 	andeq	r0, r0, fp, ror #12
+ 24c:	00000661 	andeq	r0, r0, r1, ror #12
+ 250:	00013602 	andeq	r3, r1, r2, lsl #12
+ 254:	2d042c00 	stccs	12, cr2, [r4, #-0]
+ 258:	9e000000 	cdpls	0, 0, cr0, cr0, cr0, {0}
+ 25c:	94000006 	strls	r0, [r0], #-6
+ 260:	02000006 	andeq	r0, r0, #6
+ 264:	0000013c 	andeq	r0, r0, ip, lsr r1
+ 268:	002d042d 	eoreq	r0, sp, sp, lsr #8
+ 26c:	06c40000 	strbeq	r0, [r4], r0
+ 270:	06c00000 	strbeq	r0, [r0], r0
+ 274:	42020000 	andmi	r0, r2, #0
+ 278:	2e000001 	cdpcs	0, 0, cr0, cr0, cr1, {0}
+ 27c:	00002604 	andeq	r2, r0, r4, lsl #12
+ 280:	0006df00 	andeq	sp, r6, r0, lsl #30
+ 284:	0006db00 	andeq	sp, r6, r0, lsl #22
+ 288:	01480200 	mrseq	r0, (UNDEF: 104)
+ 28c:	042f0000 	strteq	r0, [pc], #-0	@ 294 <cfun0+0x294>
+ 290:	00000973 	andeq	r0, r0, r3, ror r9
+ 294:	000006fb 	strdeq	r0, [r0], -fp
+ 298:	000006f7 	strdeq	r0, [r0], -r7
+ 29c:	00014e02 	andeq	r4, r1, r2, lsl #28
+ 2a0:	73043000 	movwvc	r3, #16384	@ 0x4000
+ 2a4:	1b000009 	blne	2d0 <cfun0+0x2d0>
+ 2a8:	17000007 	strne	r0, [r0, -r7]
+ 2ac:	02000007 	andeq	r0, r0, #7
+ 2b0:	00000154 	andeq	r0, r0, r4, asr r1
+ 2b4:	09730431 	ldmdbeq	r3!, {r0, r4, r5, sl}^
+ 2b8:	073a0000 	ldreq	r0, [sl, -r0]!
+ 2bc:	07320000 	ldreq	r0, [r2, -r0]!
+ 2c0:	5a020000 	bpl	802c8 <cfun0+0x802c8>
+ 2c4:	32000001 	andcc	r0, r0, #1
+ 2c8:	00097304 	andeq	r7, r9, r4, lsl #6
+ 2cc:	00076d00 	andeq	r6, r7, r0, lsl #26
+ 2d0:	00076500 	andeq	r6, r7, r0, lsl #10
+ 2d4:	01600700 	cmneq	r0, r0, lsl #14
+ 2d8:	05330000 	ldreq	r0, [r3, #-0]!
+ 2dc:	0000096b 	andeq	r0, r0, fp, ror #18
+ 2e0:	00020901 	andeq	r0, r2, r1, lsl #18
+ 2e4:	06023400 	streq	r3, [r2], -r0, lsl #8
+ 2e8:	01000000 	mrseq	r0, (UNDEF: 0)
+ 2ec:	00000211 	andeq	r0, r0, r1, lsl r2
+ 2f0:	00060135 	andeq	r0, r6, r5, lsr r1
+ 2f4:	33010000 	movwcc	r0, #4096	@ 0x1000
+ 2f8:	36000002 	strcc	r0, [r0], -r2
+ 2fc:	00000601 	andeq	r0, r0, r1, lsl #12
+ 300:	023b0100 	eorseq	r0, fp, #0, 2
+ 304:	01370000 	teqeq	r7, r0
+ 308:	00000006 	andeq	r0, r0, r6
+ 30c:	00024301 	andeq	r4, r2, r1, lsl #6
+ 310:	06013800 	streq	r3, [r1], -r0, lsl #16
+ 314:	01000000 	mrseq	r0, (UNDEF: 0)
+ 318:	0000016e 	andeq	r0, r0, lr, ror #2
+ 31c:	00060139 	andeq	r0, r6, r9, lsr r1
+ 320:	3f010000 	svccc	0x00010000
+ 324:	3a000003 	bcc	338 <cfun0+0x338>
+ 328:	00000601 	andeq	r0, r0, r1, lsl #12
+ 32c:	03470100 	movteq	r0, #28928	@ 0x7100
+ 330:	013b0000 	teqeq	fp, r0
+ 334:	00000006 	andeq	r0, r0, r6
+ 338:	00040a01 	andeq	r0, r4, r1, lsl #20
+ 33c:	06013c00 	streq	r3, [r1], -r0, lsl #24
+ 340:	01000000 	mrseq	r0, (UNDEF: 0)
+ 344:	00000412 	andeq	r0, r0, r2, lsl r4
+ 348:	0006013d 	andeq	r0, r6, sp, lsr r1
+ 34c:	2d010000 	stccs	0, cr0, [r1, #-0]
+ 350:	3e000004 	cdpcc	0, 0, cr0, cr0, cr4, {0}
+ 354:	00000601 	andeq	r0, r0, r1, lsl #12
+ 358:	04250100 	strteq	r0, [r5], #-256	@ 0xffffff00
+ 35c:	013f0000 	teqeq	pc, r0
+ 360:	00000006 	andeq	r0, r0, r6
+ 364:	00048801 	andeq	r8, r4, r1, lsl #16
+ 368:	06014000 	streq	r4, [r1], -r0
+ 36c:	01000000 	mrseq	r0, (UNDEF: 0)
+ 370:	00000490 	muleq	r0, r0, r4
+ 374:	00060141 	andeq	r0, r6, r1, asr #2
+ 378:	98010000 	stmdals	r1, {}	@ <UNPREDICTABLE>
+ 37c:	42000004 	andmi	r0, r0, #4
+ 380:	00000601 	andeq	r0, r0, r1, lsl #12
+ 384:	04a00100 	strteq	r0, [r0], #256	@ 0x100
+ 388:	01430000 	mrseq	r0, (UNDEF: 67)
+ 38c:	00000006 	andeq	r0, r0, r6
+ 390:	00019e01 	andeq	r9, r1, r1, lsl #28
+ 394:	ba01c300 	blt	70f9c <cfun0+0x70f9c>
+ 398:	01000000 	mrseq	r0, (UNDEF: 0)
+ 39c:	00000575 	andeq	r0, r0, r5, ror r5
+ 3a0:	00580144 	subseq	r0, r8, r4, asr #2
+ 3a4:	00010000 	andeq	r0, r1, r0
+ 3a8:	45000000 	strmi	r0, [r0, #-0]
+ 3ac:	00005801 	andeq	r5, r0, r1, lsl #16
+ 3b0:	05880100 	streq	r0, [r8, #256]	@ 0x100
+ 3b4:	01460000 	mrseq	r0, (UNDEF: 70)
+ 3b8:	00000058 	andeq	r0, r0, r8, asr r0
+ 3bc:	00059001 	andeq	r9, r5, r1
+ 3c0:	58014700 	stmdapl	r1, {r8, r9, sl, lr}
+ 3c4:	01000000 	mrseq	r0, (UNDEF: 0)
+ 3c8:	00000166 	andeq	r0, r0, r6, ror #2
+ 3cc:	005801b8 	ldrheq	r0, [r8], #-24	@ 0xffffffe8
+ 3d0:	98010000 	stmdals	r1, {}	@ <UNPREDICTABLE>
+ 3d4:	48000005 	stmdami	r0, {r0, r2}
+ 3d8:	00005c01 	andeq	r5, r0, r1, lsl #24
+ 3dc:	05a00100 	streq	r0, [r0, #256]!	@ 0x100
+ 3e0:	01490000 	mrseq	r0, (UNDEF: 73)
+ 3e4:	0000005c 	andeq	r0, r0, ip, asr r0
+ 3e8:	0005a801 	andeq	sl, r5, r1, lsl #16
+ 3ec:	5c014a00 			@ <UNDEFINED> instruction: 0x5c014a00
+ 3f0:	01000000 	mrseq	r0, (UNDEF: 0)
+ 3f4:	000005b0 			@ <UNDEFINED> instruction: 0x000005b0
+ 3f8:	005c014b 	subseq	r0, ip, fp, asr #2
+ 3fc:	b8010000 	stmdalt	r1, {}	@ <UNPREDICTABLE>
+ 400:	4c000005 	stcmi	0, cr0, [r0], {5}
+ 404:	00005c01 	andeq	r5, r0, r1, lsl #24
+ 408:	063e0100 	ldrteq	r0, [lr], -r0, lsl #2
+ 40c:	014d0000 	mrseq	r0, (UNDEF: 77)
+ 410:	0000005c 	andeq	r0, r0, ip, asr r0
+ 414:	00020101 	andeq	r0, r2, r1, lsl #2
+ 418:	5c014e00 	stcpl	14, cr4, [r1], {-0}
+ 41c:	01000000 	mrseq	r0, (UNDEF: 0)
+ 420:	0000064b 	andeq	r0, r0, fp, asr #12
+ 424:	005c014f 	subseq	r0, ip, pc, asr #2
+ 428:	53010000 	movwpl	r0, #4096	@ 0x1000
+ 42c:	50000006 	andpl	r0, r0, r6
+ 430:	00005c01 	andeq	r5, r0, r1, lsl #24
+ 434:	065b0100 	ldrbeq	r0, [fp], -r0, lsl #2
+ 438:	01510000 	cmpeq	r1, r0
+ 43c:	0000005c 	andeq	r0, r0, ip, asr r0
+ 440:	00066301 	andeq	r6, r6, r1, lsl #6
+ 444:	5c015200 	sfmpl	f5, 4, [r1], {-0}
+ 448:	01000000 	mrseq	r0, (UNDEF: 0)
+ 44c:	0000066b 	andeq	r0, r0, fp, ror #12
+ 450:	005c0153 	subseq	r0, ip, r3, asr r1
+ 454:	73010000 	movwvc	r0, #4096	@ 0x1000
+ 458:	54000006 	strpl	r0, [r0], #-6
+ 45c:	00007401 	andeq	r7, r0, r1, lsl #8
+ 460:	067b0100 	ldrbteq	r0, [fp], -r0, lsl #2
+ 464:	01550000 	cmpeq	r5, r0
+ 468:	00000074 	andeq	r0, r0, r4, ror r0
+ 46c:	00068301 	andeq	r8, r6, r1, lsl #6
+ 470:	74015600 	strvc	r5, [r1], #-1536	@ 0xfffffa00
+ 474:	01000000 	mrseq	r0, (UNDEF: 0)
+ 478:	0000068b 	andeq	r0, r0, fp, lsl #13
+ 47c:	00740157 	rsbseq	r0, r4, r7, asr r1
+ 480:	10010000 	andne	r0, r1, r0
+ 484:	58000000 	stmdapl	r0, {}	@ <UNPREDICTABLE>
+ 488:	00007401 	andeq	r7, r0, r1, lsl #8
+ 48c:	00180100 	andseq	r0, r8, r0, lsl #2
+ 490:	01590000 	cmpeq	r9, r0
+ 494:	00000074 	andeq	r0, r0, r4, ror r0
+ 498:	00002001 	andeq	r2, r0, r1
+ 49c:	74015a00 	strvc	r5, [r1], #-2560	@ 0xfffff600
+ 4a0:	01000000 	mrseq	r0, (UNDEF: 0)
+ 4a4:	00000028 	andeq	r0, r0, r8, lsr #32
+ 4a8:	0074015b 	rsbseq	r0, r4, fp, asr r1
+ 4ac:	30010000 	andcc	r0, r1, r0
+ 4b0:	5c000000 	stcpl	0, cr0, [r0], {-0}
+ 4b4:	00007401 	andeq	r7, r0, r1, lsl #8
+ 4b8:	00480100 	subeq	r0, r8, r0, lsl #2
+ 4bc:	015d0000 	cmpeq	sp, r0
+ 4c0:	00000074 	andeq	r0, r0, r4, ror r0
+ 4c4:	00005001 	andeq	r5, r0, r1
+ 4c8:	74015e00 	strvc	r5, [r1], #-3584	@ 0xfffff200
+ 4cc:	01000000 	mrseq	r0, (UNDEF: 0)
+ 4d0:	00000058 	andeq	r0, r0, r8, asr r0
+ 4d4:	0074015f 	rsbseq	r0, r4, pc, asr r1
+ 4d8:	60010000 	andvs	r0, r1, r0
+ 4dc:	60000000 	andvs	r0, r0, r0
+ 4e0:	00007401 	andeq	r7, r0, r1, lsl #8
+ 4e4:	00700100 	rsbseq	r0, r0, r0, lsl #2
+ 4e8:	01610000 	cmneq	r1, r0
+ 4ec:	00000074 	andeq	r0, r0, r4, ror r0
+ 4f0:	00010b01 	andeq	r0, r1, r1, lsl #22
+ 4f4:	74016200 	strvc	r6, [r1], #-512	@ 0xfffffe00
+ 4f8:	01000000 	mrseq	r0, (UNDEF: 0)
+ 4fc:	000005f0 	strdeq	r0, [r0], -r0	@ <UNPREDICTABLE>
+ 500:	00740163 	rsbseq	r0, r4, r3, ror #2
+ 504:	7e010000 	cdpvc	0, 0, cr0, cr1, cr0, {0}
+ 508:	64000001 	strvs	r0, [r0], #-1
+ 50c:	00007401 	andeq	r7, r0, r1, lsl #8
+ 510:	024b0100 	subeq	r0, fp, #0, 2
+ 514:	01650000 	cmneq	r5, r0
+ 518:	00000074 	andeq	r0, r0, r4, ror r0
+ 51c:	00025301 	andeq	r5, r2, r1, lsl #6
+ 520:	74016600 	strvc	r6, [r1], #-1536	@ 0xfffffa00
+ 524:	01000000 	mrseq	r0, (UNDEF: 0)
+ 528:	0000025b 	andeq	r0, r0, fp, asr r2
+ 52c:	00740167 	rsbseq	r0, r4, r7, ror #2
+ 530:	7e010000 	cdpvc	0, 0, cr0, cr1, cr0, {0}
+ 534:	68000002 	stmdavs	r0, {r1}
+ 538:	00007401 	andeq	r7, r0, r1, lsl #8
+ 53c:	02860100 	addeq	r0, r6, #0, 2
+ 540:	01690000 	cmneq	r9, r0
+ 544:	00000074 	andeq	r0, r0, r4, ror r0
+ 548:	0001a601 	andeq	sl, r1, r1, lsl #12
+ 54c:	7a018400 	bvc	61554 <cfun0+0x61554>
+ 550:	01000000 	mrseq	r0, (UNDEF: 0)
+ 554:	0000028e 	andeq	r0, r0, lr, lsl #5
+ 558:	009c016a 	addseq	r0, ip, sl, ror #2
+ 55c:	96010000 	strls	r0, [r1], -r0
+ 560:	6b000002 	blvs	570 <cfun0+0x570>
+ 564:	00009c01 	andeq	r9, r0, r1, lsl #24
+ 568:	034f0100 	movteq	r0, #61696	@ 0xf100
+ 56c:	016c0000 	cmneq	ip, r0
+ 570:	0000009c 	muleq	r0, ip, r0
+ 574:	00035701 	andeq	r5, r3, r1, lsl #14
+ 578:	9c016d00 	stcls	13, cr6, [r1], {-0}
+ 57c:	01000000 	mrseq	r0, (UNDEF: 0)
+ 580:	0000035f 	andeq	r0, r0, pc, asr r3
+ 584:	009c016e 	addseq	r0, ip, lr, ror #2
+ 588:	67010000 	strvs	r0, [r1, -r0]
+ 58c:	6f000003 	svcvs	0x00000003
+ 590:	00009c01 	andeq	r9, r0, r1, lsl #24
+ 594:	038a0100 	orreq	r0, sl, #0, 2
+ 598:	01700000 	cmneq	r0, r0
+ 59c:	0000009c 	muleq	r0, ip, r0
+ 5a0:	00039201 	andeq	r9, r3, r1, lsl #4
+ 5a4:	9c017100 	stflss	f7, [r1], {-0}
+ 5a8:	01000000 	mrseq	r0, (UNDEF: 0)
+ 5ac:	0000039a 	muleq	r0, sl, r3
+ 5b0:	00a40172 	adceq	r0, r4, r2, ror r1
+ 5b4:	a2010000 	andge	r0, r1, #0
+ 5b8:	73000003 	movwvc	r0, #3
+ 5bc:	0000a401 	andeq	sl, r0, r1, lsl #8
+ 5c0:	03aa0100 			@ <UNDEFINED> instruction: 0x03aa0100
+ 5c4:	01740000 	cmneq	r4, r0
+ 5c8:	000000a4 	andeq	r0, r0, r4, lsr #1
+ 5cc:	0003b201 	andeq	fp, r3, r1, lsl #4
+ 5d0:	a4017500 	strge	r7, [r1], #-1280	@ 0xfffffb00
+ 5d4:	01000000 	mrseq	r0, (UNDEF: 0)
+ 5d8:	0000052e 	andeq	r0, r0, lr, lsr #10
+ 5dc:	00a40176 	adceq	r0, r4, r6, ror r1
+ 5e0:	36010000 	strcc	r0, [r1], -r0
+ 5e4:	77000005 	strvc	r0, [r0, -r5]
+ 5e8:	0000a401 	andeq	sl, r0, r1, lsl #8
+ 5ec:	053e0100 	ldreq	r0, [lr, #-256]!	@ 0xffffff00
+ 5f0:	01780000 	cmneq	r8, r0
+ 5f4:	000000a4 	andeq	r0, r0, r4, lsr #1
+ 5f8:	00046701 	andeq	r6, r4, r1, lsl #14
+ 5fc:	a4017900 	strge	r7, [r1], #-2304	@ 0xfffff700
+ 600:	01000000 	mrseq	r0, (UNDEF: 0)
+ 604:	00000551 	andeq	r0, r0, r1, asr r5
+ 608:	00a4017a 	adceq	r0, r4, sl, ror r1
+ 60c:	61010000 	mrsvs	r0, (UNDEF: 1)
+ 610:	7b000005 	blvc	62c <cfun0+0x62c>
+ 614:	0000a401 	andeq	sl, r0, r1, lsl #8
+ 618:	05c00100 	strbeq	r0, [r0, #256]	@ 0x100
+ 61c:	017c0000 	cmneq	ip, r0
+ 620:	000000b6 	strheq	r0, [r0], -r6
+ 624:	0005c801 	andeq	ip, r5, r1, lsl #16
+ 628:	b6017d00 	strlt	r7, [r1], -r0, lsl #26
+ 62c:	01000000 	mrseq	r0, (UNDEF: 0)
+ 630:	000005d0 	ldrdeq	r0, [r0], -r0	@ <UNPREDICTABLE>
+ 634:	00b6017e 	adcseq	r0, r6, lr, ror r1
+ 638:	e8010000 	stmda	r1, {}	@ <UNPREDICTABLE>
+ 63c:	7f000005 	svcvc	0x00000005
+ 640:	0000b601 	andeq	fp, r0, r1, lsl #12
+ 644:	05f80100 	ldrbeq	r0, [r8, #256]!	@ 0x100
+ 648:	01800000 	orreq	r0, r0, r0
+ 64c:	000000b6 	strheq	r0, [r0], -r6
+ 650:	00060001 	andeq	r0, r6, r1
+ 654:	b6018100 	strlt	r8, [r1], -r0, lsl #2
+ 658:	01000000 	mrseq	r0, (UNDEF: 0)
+ 65c:	00000608 	andeq	r0, r0, r8, lsl #12
+ 660:	00b60182 	adcseq	r0, r6, r2, lsl #3
+ 664:	10010000 	andne	r0, r1, r0
+ 668:	83000006 	movwhi	r0, #6
+ 66c:	00007a01 	andeq	r7, r0, r1, lsl #20
+ 670:	061e0100 	ldreq	r0, [lr], -r0, lsl #2
+ 674:	01850000 	orreq	r0, r5, r0
+ 678:	0000007a 	andeq	r0, r0, sl, ror r0
+ 67c:	00069b01 	andeq	r9, r6, r1, lsl #22
+ 680:	7a018600 	bvc	61e88 <cfun0+0x61e88>
+ 684:	01000000 	mrseq	r0, (UNDEF: 0)
+ 688:	0000032f 	andeq	r0, r0, pc, lsr #6
+ 68c:	007e0187 	rsbseq	r0, lr, r7, lsl #3
+ 690:	ae010000 	cdpge	0, 0, cr0, cr1, cr0, {0}
+ 694:	88000006 	stmdahi	r0, {r1, r2}
+ 698:	00007e01 	andeq	r7, r0, r1, lsl #28
+ 69c:	06f80100 	ldrbteq	r0, [r8], r0, lsl #2
+ 6a0:	01890000 	orreq	r0, r9, r0
+ 6a4:	0000007e 	andeq	r0, r0, lr, ror r0
+ 6a8:	00070001 	andeq	r0, r7, r1
+ 6ac:	82018a00 	andhi	r8, r1, #0, 20
+ 6b0:	01000000 	mrseq	r0, (UNDEF: 0)
+ 6b4:	00000708 	andeq	r0, r0, r8, lsl #14
+ 6b8:	0082018b 	addeq	r0, r2, fp, lsl #3
+ 6bc:	80010000 	andhi	r0, r1, r0
+ 6c0:	8c000000 	stchi	0, cr0, [r0], {-0}
+ 6c4:	00008201 	andeq	r8, r0, r1, lsl #4
+ 6c8:	00f30100 	rscseq	r0, r3, r0, lsl #2
+ 6cc:	01910000 	orrseq	r0, r1, r0
+ 6d0:	00000044 	andeq	r0, r0, r4, asr #32
+ 6d4:	00008801 	andeq	r8, r0, r1, lsl #16
+ 6d8:	96018d00 	strls	r8, [r1], -r0, lsl #26
+ 6dc:	01000000 	mrseq	r0, (UNDEF: 0)
+ 6e0:	00000090 	muleq	r0, r0, r0
+ 6e4:	0096018e 	addseq	r0, r6, lr, lsl #3
+ 6e8:	e0010000 	and	r0, r1, r0
+ 6ec:	8f000000 	svchi	0x00000000
+ 6f0:	00009601 	andeq	r9, r0, r1, lsl #12
+ 6f4:	05590100 	ldrbeq	r0, [r9, #-256]	@ 0xffffff00
+ 6f8:	01900000 	orrseq	r0, r0, r0
+ 6fc:	00000096 	muleq	r0, r6, r0
+ 700:	0000fb01 	andeq	pc, r0, r1, lsl #22
+ 704:	96019200 	strls	r9, [r1], -r0, lsl #4
+ 708:	01000000 	mrseq	r0, (UNDEF: 0)
+ 70c:	00000103 	andeq	r0, r0, r3, lsl #2
+ 710:	00960193 	umullseq	r0, r6, r3, r1
+ 714:	86010000 	strhi	r0, [r1], -r0
+ 718:	94000001 	strls	r0, [r0], #-1
+ 71c:	00009601 	andeq	r9, r0, r1, lsl #12
+ 720:	018e0100 	orreq	r0, lr, r0, lsl #2
+ 724:	01950000 	orrseq	r0, r5, r0
+ 728:	00000044 	andeq	r0, r0, r4, asr #32
+ 72c:	00019601 	andeq	r9, r1, r1, lsl #12
+ 730:	44019600 	strmi	r9, [r1], #-1536	@ 0xfffffa00
+ 734:	01000000 	mrseq	r0, (UNDEF: 0)
+ 738:	000001d9 	ldrdeq	r0, [r0], -r9
+ 73c:	00440197 	umaaleq	r0, r4, r7, r1
+ 740:	e1010000 	mrs	r0, (UNDEF: 1)
+ 744:	98000001 	stmdals	r0, {r0}
+ 748:	00004401 	andeq	r4, r0, r1, lsl #8
+ 74c:	01e90100 	mvneq	r0, r0, lsl #2
+ 750:	01990000 	orrseq	r0, r9, r0
+ 754:	00000044 	andeq	r0, r0, r4, asr #32
+ 758:	0001f101 	andeq	pc, r1, r1, lsl #2
+ 75c:	44019a00 	strmi	r9, [r1], #-2560	@ 0xfffff600
+ 760:	01000000 	mrseq	r0, (UNDEF: 0)
+ 764:	000000d0 	ldrdeq	r0, [r0], -r0	@ <UNPREDICTABLE>
+ 768:	005601b3 	ldrheq	r0, [r6], #-19	@ 0xffffffed
+ 76c:	f9010000 			@ <UNDEFINED> instruction: 0xf9010000
+ 770:	9b000001 	blls	77c <cfun0+0x77c>
+ 774:	00004a01 	andeq	r4, r0, r1, lsl #20
+ 778:	00080100 	andeq	r0, r8, r0, lsl #2
+ 77c:	019c0000 	orrseq	r0, ip, r0
+ 780:	0000004a 	andeq	r0, r0, sl, asr #32
+ 784:	0002a901 	andeq	sl, r2, r1, lsl #18
+ 788:	4a019d00 	bmi	67b90 <cfun0+0x67b90>
+ 78c:	01000000 	mrseq	r0, (UNDEF: 0)
+ 790:	000002b1 			@ <UNDEFINED> instruction: 0x000002b1
+ 794:	004a019e 	umaaleq	r0, sl, lr, r1
+ 798:	b9010000 	stmdblt	r1, {}	@ <UNPREDICTABLE>
+ 79c:	9f000002 	svcls	0x00000002
+ 7a0:	00004a01 	andeq	r4, r0, r1, lsl #20
+ 7a4:	00380100 	eorseq	r0, r8, r0, lsl #2
+ 7a8:	01a00000 	moveq	r0, r0
+ 7ac:	0000004a 	andeq	r0, r0, sl, asr #32
+ 7b0:	00004001 	andeq	r4, r0, r1
+ 7b4:	4a01a100 	bmi	68bbc <cfun0+0x68bbc>
+ 7b8:	01000000 	mrseq	r0, (UNDEF: 0)
+ 7bc:	000002fb 	strdeq	r0, [r0], -fp
+ 7c0:	004a01a2 	subeq	r0, sl, r2, lsr #3
+ 7c4:	0f010000 	svceq	0x00010000
+ 7c8:	a3000003 	movwge	r0, #3
+ 7cc:	00004a01 	andeq	r4, r0, r1, lsl #20
+ 7d0:	03170100 	tsteq	r7, #0, 2
+ 7d4:	01a40000 			@ <UNDEFINED> instruction: 0x01a40000
+ 7d8:	0000004a 	andeq	r0, r0, sl, asr #32
+ 7dc:	00031f01 	andeq	r1, r3, r1, lsl #30
+ 7e0:	5001a500 	andpl	sl, r1, r0, lsl #10
+ 7e4:	01000000 	mrseq	r0, (UNDEF: 0)
+ 7e8:	00000327 	andeq	r0, r0, r7, lsr #6
+ 7ec:	005001a6 	subseq	r0, r0, r6, lsr #3
+ 7f0:	ba010000 	blt	407f8 <cfun0+0x407f8>
+ 7f4:	a7000003 	strge	r0, [r0, -r3]
+ 7f8:	00005201 	andeq	r5, r0, r1, lsl #4
+ 7fc:	03c20100 	biceq	r0, r2, #0, 2
+ 800:	01a80000 			@ <UNDEFINED> instruction: 0x01a80000
+ 804:	00000052 	andeq	r0, r0, r2, asr r0
+ 808:	0003ca01 	andeq	ip, r3, r1, lsl #20
+ 80c:	5201a900 	andpl	sl, r1, #0, 18
+ 810:	01000000 	mrseq	r0, (UNDEF: 0)
+ 814:	000003d2 	ldrdeq	r0, [r0], -r2
+ 818:	005201aa 	subseq	r0, r2, sl, lsr #3
+ 81c:	da010000 	ble	40824 <cfun0+0x40824>
+ 820:	ab000003 	blge	834 <cfun0+0x834>
+ 824:	00005201 	andeq	r5, r0, r1, lsl #4
+ 828:	00980100 	addseq	r0, r8, r0, lsl #2
+ 82c:	01ac0000 			@ <UNDEFINED> instruction: 0x01ac0000
+ 830:	00000052 	andeq	r0, r0, r2, asr r0
+ 834:	0000a001 	andeq	sl, r0, r1
+ 838:	5201ad00 	andpl	sl, r1, #0, 26
+ 83c:	01000000 	mrseq	r0, (UNDEF: 0)
+ 840:	000000a8 	andeq	r0, r0, r8, lsr #1
+ 844:	005201ae 	subseq	r0, r2, lr, lsr #3
+ 848:	b0010000 	andlt	r0, r1, r0
+ 84c:	af000000 	svcge	0x00000000
+ 850:	00005201 	andeq	r5, r0, r1, lsl #4
+ 854:	00b80100 	adcseq	r0, r8, r0, lsl #2
+ 858:	01b00000 	movseq	r0, r0
+ 85c:	00000052 	andeq	r0, r0, r2, asr r0
+ 860:	0000c001 	andeq	ip, r0, r1
+ 864:	5201b100 	andpl	fp, r1, #0, 2
+ 868:	01000000 	mrseq	r0, (UNDEF: 0)
+ 86c:	000000c8 	andeq	r0, r0, r8, asr #1
+ 870:	005601b2 	ldrheq	r0, [r6], #-18	@ 0xffffffee
+ 874:	d8010000 	stmdale	r1, {}	@ <UNPREDICTABLE>
+ 878:	b4000000 	strlt	r0, [r0], #-0
+ 87c:	00005601 	andeq	r5, r0, r1, lsl #12
+ 880:	06260100 	strteq	r0, [r6], -r0, lsl #2
+ 884:	01b50000 			@ <UNDEFINED> instruction: 0x01b50000
+ 888:	00000056 	andeq	r0, r0, r6, asr r0
+ 88c:	00062e01 	andeq	r2, r6, r1, lsl #28
+ 890:	5601b600 	strpl	fp, [r1], -r0, lsl #12
+ 894:	01000000 	mrseq	r0, (UNDEF: 0)
+ 898:	00000636 	andeq	r0, r0, r6, lsr r6
+ 89c:	005801b7 	ldrheq	r0, [r8], #-23	@ 0xffffffe9
+ 8a0:	93010000 	movwls	r0, #4096	@ 0x1000
+ 8a4:	b9000006 	stmdblt	r0, {r1, r2}
+ 8a8:	00005801 	andeq	r5, r0, r1, lsl #16
+ 8ac:	03370100 	teqeq	r7, #0, 2
+ 8b0:	01ba0000 			@ <UNDEFINED> instruction: 0x01ba0000
+ 8b4:	00000058 	andeq	r0, r0, r8, asr r0
+ 8b8:	0001ae01 	andeq	sl, r1, r1, lsl #28
+ 8bc:	5801bb00 	stmdapl	r1, {r8, r9, fp, ip, sp, pc}
+ 8c0:	01000000 	mrseq	r0, (UNDEF: 0)
+ 8c4:	000001c1 	andeq	r0, r0, r1, asr #3
+ 8c8:	005801bc 	ldrheq	r0, [r8], #-28	@ 0xffffffe4
+ 8cc:	d1010000 	mrsle	r0, (UNDEF: 1)
+ 8d0:	bd000001 	stclt	0, cr0, [r0, #-4]
+ 8d4:	00005801 	andeq	r5, r0, r1, lsl #16
+ 8d8:	02630100 	rsbeq	r0, r3, #0, 2
+ 8dc:	01be0000 			@ <UNDEFINED> instruction: 0x01be0000
+ 8e0:	000000b8 	strheq	r0, [r0], -r8
+ 8e4:	00026b01 	andeq	r6, r2, r1, lsl #22
+ 8e8:	b801bf00 	stmdalt	r1, {r8, r9, sl, fp, ip, sp, pc}
+ 8ec:	01000000 	mrseq	r0, (UNDEF: 0)
+ 8f0:	00000176 	andeq	r0, r0, r6, ror r1
+ 8f4:	00b801c0 	adcseq	r0, r8, r0, asr #3
+ 8f8:	68010000 	stmdavs	r1, {}	@ <UNPREDICTABLE>
+ 8fc:	c1000000 	mrsgt	r0, (UNDEF: 0)
+ 900:	0000b801 	andeq	fp, r0, r1, lsl #16
+ 904:	00780100 	rsbseq	r0, r8, r0, lsl #2
+ 908:	01c20000 	biceq	r0, r2, r0
+ 90c:	000000ba 	strheq	r0, [r0], -sl
+ 910:	0006eb01 	andeq	lr, r6, r1, lsl #22
+ 914:	1e01c400 	cfcpysne	mvf12, mvf1
+ 918:	01000000 	mrseq	r0, (UNDEF: 0)
+ 91c:	000001c9 	andeq	r0, r0, r9, asr #3
+ 920:	001e01c5 	andseq	r0, lr, r5, asr #3
+ 924:	f3010000 	vhadd.u8	d0, d1, d0
+ 928:	c6000002 	strgt	r0, [r0], -r2
+ 92c:	00001e01 	andeq	r1, r0, r1, lsl #28
+ 930:	037a0100 	cmneq	sl, #0, 2
+ 934:	01c70000 	biceq	r0, r7, r0
+ 938:	0000001e 	andeq	r0, r0, lr, lsl r0
+ 93c:	00038201 	andeq	r8, r3, r1, lsl #4
+ 940:	1e01c800 	cdpne	8, 0, cr12, cr1, cr0, {0}
+ 944:	01000000 	mrseq	r0, (UNDEF: 0)
+ 948:	000003e2 	andeq	r0, r0, r2, ror #7
+ 94c:	00be01c9 	adcseq	r0, lr, r9, asr #3
+ 950:	ea050000 	b	140958 <cfun0+0x140958>
+ 954:	ca000003 	bgt	968 <cfun0+0x968>
+ 958:	0003f205 	andeq	pc, r3, r5, lsl #4
+ 95c:	fa05cb00 	blx	173564 <cfun0+0x173564>
+ 960:	cc000003 	stcgt	0, cr0, [r0], {3}
+ 964:	00040205 	andeq	r0, r4, r5, lsl #4
+ 968:	0d00cd00 	stceq	13, cr12, [r0, #-0]
+ 96c:	73040e04 	movwvc	r0, #19972	@ 0x4e04
+ 970:	03000009 	movweq	r0, #9
+ 974:	046f0801 	strbteq	r0, [pc], #-2049	@ 97c <cfun0+0x97c>
+ 978:	Address 0x978 is out of bounds.
+
+
+Disassembly of section .debug_abbrev:
+
+00000000 <.debug_abbrev>:
+D:\src\M2\Test\TestMCURoutine\native/code.c:12
+void* cfun0(u1* args){
+   0:	03000a01 	movweq	r0, #2561	@ 0xa01
+D:\src\M2\Test\TestMCURoutine\native/code.c:16
+int stack_0_ptr_arr_stride_lb = *(int*)&args[(argN++)*4];
+   4:	01213a0e 			@ <UNDEFINED> instruction: 0x01213a0e
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+   8:	0b390b3b 	bleq	e42cfc <cfun0+0xe42cfc>
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+   c:	00000111 	andeq	r0, r0, r1, lsl r1
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  10:	03003402 	movweq	r3, #1026	@ 0x402
+D:\src\M2\Test\TestMCURoutine\native/code.c:173
+IL_0102: stack_2_i4=((stack_2_i4)<<(stack_3_i4)); //IL_0102: shl: s_4, pop2, push1
+  14:	01213a0e 			@ <UNDEFINED> instruction: 0x01213a0e
+D:\src\M2\Test\TestMCURoutine\native/code.c:79
+IL_004d: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_004d: mul: s_3, pop2, push1
+  18:	0b390b3b 	bleq	e42d0c <cfun0+0xe42d0c>
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+  1c:	17021349 	strne	r1, [r2, -r9, asr #6]
+D:\src\M2\Test\TestMCURoutine\native/code.c:90
+IL_005d: stack_2_r4=(stack_2_i4); //IL_005d: conv.r8: s_3, pop1, push1
+  20:	001742b7 			@ <UNDEFINED> instruction: 0x001742b7
+  24:	00240300 	eoreq	r0, r4, r0, lsl #6
+D:\src\M2\Test\TestMCURoutine\native/code.c:170
+IL_00fe: stack_3_i4=((stack_3_i4)%(stack_4_i4)); //IL_00fe: rem: s_5, pop2, push1
+  28:	0b3e0b0b 	bleq	f82c5c <cfun0+0xf82c5c>
+D:\src\M2\Test\TestMCURoutine\native/code.c:91
+IL_005e: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_005e: mul: s_3, pop2, push1
+  2c:	00000e03 	andeq	r0, r0, r3, lsl #28
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  30:	03003404 	movweq	r3, #1028	@ 0x404
+D:\src\M2\Test\TestMCURoutine\native/code.c:173
+IL_0102: stack_2_i4=((stack_2_i4)<<(stack_3_i4)); //IL_0102: shl: s_4, pop2, push1
+  34:	01213a0e 			@ <UNDEFINED> instruction: 0x01213a0e
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  38:	21390b3b 	teqcs	r9, fp, lsr fp
+D:\src\M2\Test\TestMCURoutine\native/code.c:161
+IL_00ef: stack_1_i4=((stack_1_i4)*(stack_2_i4)); //IL_00ef: mul: s_3, pop2, push1
+  3c:	1c134904 			@ <UNDEFINED> instruction: 0x1c134904
+D:\src\M2\Test\TestMCURoutine\native/code.c:70
+IL_003e: var7=stack_0_i4; //IL_003e: stloc.s V_7: s_1, pop1, push0
+  40:	0500000a 	streq	r0, [r0, #-10]
+D:\src\M2\Test\TestMCURoutine\native/code.c:154
+IL_00e6: if (!(stack_0_u1)) goto IL_0108; //IL_00e6: brfalse.s IL_0108: s_1, pop1, push0
+  44:	0e03000a 	cdpeq	0, 0, cr0, cr3, cr10, {0}
+  48:	3b01213a 	blcc	48538 <cfun0+0x48538>
+D:\src\M2\Test\TestMCURoutine\native/code.c:164
+IL_00f3: stack_0_ptr=(( ((i1*)stack_0_ptr)+(stack_1_i4<<stack_0_ptr_arr_stride_lb) )); //IL_00f3: ldelema System.Byte: s_2, pop2, push1
+  4c:	0121390b 			@ <UNDEFINED> instruction: 0x0121390b
+D:\src\M2\Test\TestMCURoutine\native/code.c:166
+IL_00f9: stack_1_u1=(*(unsigned char*)(stack_1_ptr)); //IL_00f9: ldind.u1: s_2, pop1, push1
+  50:	34060000 	strcc	r0, [r6], #-0
+D:\src\M2\Test\TestMCURoutine\native/code.c:177
+IL_0106: *(char*)(stack_0_ptr)=(stack_1_u1); //IL_0106: stind.i1: s_2, pop2, push0
+  54:	3a0e0300 	bcc	380c5c <cfun0+0x380c5c>
+D:\src\M2\Test\TestMCURoutine\native/code.c:189
+IL_0118: if (stack_0_u1) goto IL_0045; //IL_0118: brtrue IL_0045: s_1, pop1, push0
+  58:	0b3b0121 	bleq	ec04e4 <cfun0+0xec04e4>
+D:\src\M2\Test\TestMCURoutine\native/code.c:78
+IL_004c: stack_2_r4=(stack_2_i4); //IL_004c: conv.r8: s_3, pop1, push1
+  5c:	13490b39 	movtne	r0, #39737	@ 0x9b39
+  60:	00001802 	andeq	r1, r0, r2, lsl #16
+D:\src\M2\Test\TestMCURoutine\native/code.c:100
+IL_0079: var11=stack_0_r4; //IL_0079: stloc.s V_11: s_1, pop1, push0
+  64:	03003407 	movweq	r3, #1031	@ 0x407
+D:\src\M2\Test\TestMCURoutine\native/code.c:79
+IL_004d: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_004d: mul: s_3, pop2, push1
+  68:	01213a0e 			@ <UNDEFINED> instruction: 0x01213a0e
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+  6c:	0b390b3b 	bleq	e42d60 <cfun0+0xe42d60>
+  70:	00001349 	andeq	r1, r0, r9, asr #6
+D:\src\M2\Test\TestMCURoutine\native/code.c:102
+IL_007c: var12=stack_0_i4; //IL_007c: stloc.s V_12: s_1, pop1, push0
+  74:	03003408 	movweq	r3, #1032	@ 0x408
+D:\src\M2\Test\TestMCURoutine\native/code.c:98
+IL_006e: var10=stack_0_r4; //IL_006e: stloc.s V_10: s_1, pop1, push0
+  78:	01213a0e 			@ <UNDEFINED> instruction: 0x01213a0e
+D:\src\M2\Test\TestMCURoutine\native/code.c:134
+IL_00bb: stack_0_r4=((stack_0_r4)*(stack_1_r4)); //IL_00bb: mul: s_2, pop2, push1
+  7c:	21390b3b 	teqcs	r9, fp, lsr fp
+D:\src\M2\Test\TestMCURoutine\native/code.c:137
+IL_00c0: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_00c0: mul: s_3, pop2, push1
+  80:	1c134904 			@ <UNDEFINED> instruction: 0x1c134904
+D:\src\M2\Test\TestMCURoutine\native/code.c:138
+IL_00c1: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00c1: add: s_2, pop2, push1
+  84:	0900000b 	stmdbeq	r0, {r0, r1, r3}
+D:\src\M2\Test\TestMCURoutine\native/code.c:140
+IL_00cb: if ((unsigned char)(stack_0_r4)>=(unsigned char)(stack_1_r4)) goto IL_00d5; //IL_00cb: bge.un.s IL_00d5: s_2, pop2, push0
+  88:	0e250111 	mcreq	1, 1, r0, cr5, cr1, {0}
+  8c:	0e030b13 	vmoveq.32	d3[0], r0
+  90:	17550e1b 	smmlane	r5, fp, lr, r0
+  94:	17100111 			@ <UNDEFINED> instruction: 0x17100111
+D:\src\M2\Test\TestMCURoutine\native/code.c:148
+IL_00da: if (stack_0_u1) goto IL_0087; //IL_00da: brtrue.s IL_0087: s_1, pop1, push0
+  98:	240a0000 	strcs	r0, [sl], #-0
+D:\src\M2\Test\TestMCURoutine\native/code.c:119
+IL_00a3: stack_0_r4=((stack_0_r4)*(stack_1_r4)); //IL_00a3: mul: s_2, pop2, push1
+  9c:	3e0b0b00 	vmlacc.f64	d0, d11, d0
+D:\src\M2\Test\TestMCURoutine\native/code.c:113
+IL_0092: stack_0_r4=((stack_0_r4)-(stack_1_r4)); //IL_0092: sub: s_2, pop2, push1
+  a0:	0008030b 	andeq	r0, r8, fp, lsl #6
+D:\src\M2\Test\TestMCURoutine\native/code.c:123
+IL_00a9: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00a9: add: s_2, pop2, push1
+  a4:	012e0b00 			@ <UNDEFINED> instruction: 0x012e0b00
+  a8:	0e03193f 			@ <UNDEFINED> instruction: 0x0e03193f
+D:\src\M2\Test\TestMCURoutine\native/code.c:129
+IL_00b3: stack_0_i4=((stack_0_i4)+(stack_1_i4)); //IL_00b3: add: s_2, pop2, push1
+  ac:	0b3b0b3a 	bleq	ec2d9c <cfun0+0xec2d9c>
+D:\src\M2\Test\TestMCURoutine\native/code.c:126
+IL_00ae: var10=stack_0_r4; //IL_00ae: stloc.s V_10: s_1, pop1, push0
+  b0:	19270b39 	stmdbne	r7!, {r0, r3, r4, r5, r8, r9, fp}
+D:\src\M2\Test\TestMCURoutine\native/code.c:123
+IL_00a9: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00a9: add: s_2, pop2, push1
+  b4:	01111349 	tsteq	r1, r9, asr #6
+D:\src\M2\Test\TestMCURoutine\native/code.c:193
+IL_0121: stack_0_i4=((stack_0_i4)+(stack_1_i4)); //IL_0121: add: s_2, pop2, push1
+  b8:	18400612 	stmdane	r0, {r1, r4, r9, sl}^
+D:\src\M2\Test\TestMCURoutine\native/code.c:200
+IL_012d: if (stack_0_u1) goto IL_003c; //IL_012d: brtrue IL_003c: s_1, pop1, push0
+  bc:	1301197a 	movwne	r1, #6522	@ 0x197a
+D:\src\M2\Test\TestMCURoutine\native/code.c:206
+}
+  c0:	050c0000 	streq	r0, [ip, #-0]
+  c4:	3a0e0300 	bcc	380ccc <cfun0+0x380ccc>
+  c8:	390b3b0b 	stmdbcc	fp, {r0, r1, r3, r8, r9, fp, ip, sp}
+  cc:	0213490b 	andseq	r4, r3, #180224	@ 0x2c000
+  d0:	1742b717 	smlaldne	fp, r2, r7, r7
+  d4:	0f0d0000 	svceq	0x000d0000
+  d8:	000b0b00 	andeq	r0, fp, r0, lsl #22
+  dc:	000f0e00 	andeq	r0, pc, r0, lsl #28
+  e0:	13490b0b 	movtne	r0, #39691	@ 0x9b0b
+  e4:	Address 0xe4 is out of bounds.
+
+
+Disassembly of section .debug_loclists:
+
+00000000 <.debug_loclists>:
+D:\src\M2\Test\TestMCURoutine\native/code.c:12
+void* cfun0(u1* args){
+   0:	00000798 	muleq	r0, r8, r7
+D:\src\M2\Test\TestMCURoutine\native/code.c:16
+int stack_0_ptr_arr_stride_lb = *(int*)&args[(argN++)*4];
+   4:	00040005 	andeq	r0, r4, r5
+	...
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  10:	00000006 	andeq	r0, r0, r6
+D:\src\M2\Test\TestMCURoutine\native/code.c:173
+IL_0102: stack_2_i4=((stack_2_i4)<<(stack_3_i4)); //IL_0102: shl: s_4, pop2, push1
+  14:	06000400 	streq	r0, [r0], -r0, lsl #8
+D:\src\M2\Test\TestMCURoutine\native/code.c:79
+IL_004d: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_004d: mul: s_3, pop2, push1
+  18:	06045001 	streq	r5, [r4], -r1
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+  1c:	a30a01d0 	movwge	r0, #41424	@ 0xa1d0
+D:\src\M2\Test\TestMCURoutine\native/code.c:90
+IL_005d: stack_2_r4=(stack_2_i4); //IL_005d: conv.r8: s_3, pop1, push1
+  20:	3400a503 	strcc	sl, [r0], #-1283	@ 0xfffffafd
+  24:	00a83ba8 	adceq	r3, r8, r8, lsr #23
+D:\src\M2\Test\TestMCURoutine\native/code.c:170
+IL_00fe: stack_3_i4=((stack_3_i4)%(stack_4_i4)); //IL_00fe: rem: s_5, pop2, push1
+  28:	0302009f 	movweq	r0, #8351	@ 0x209f
+D:\src\M2\Test\TestMCURoutine\native/code.c:91
+IL_005e: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_005e: mul: s_3, pop2, push1
+  2c:	00060003 	andeq	r0, r6, r3
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  30:	04000000 	streq	r0, [r0], #-0
+D:\src\M2\Test\TestMCURoutine\native/code.c:173
+IL_0102: stack_2_i4=((stack_2_i4)<<(stack_3_i4)); //IL_0102: shl: s_4, pop2, push1
+  34:	30020000 	andcc	r0, r2, r0
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  38:	d000049f 	mulle	r0, pc, r4	@ <UNPREDICTABLE>
+D:\src\M2\Test\TestMCURoutine\native/code.c:161
+IL_00ef: stack_1_i4=((stack_1_i4)*(stack_2_i4)); //IL_00ef: mul: s_3, pop2, push1
+  3c:	9f310201 	svcls	0x00310201
+D:\src\M2\Test\TestMCURoutine\native/code.c:70
+IL_003e: var7=stack_0_i4; //IL_003e: stloc.s V_7: s_1, pop1, push0
+  40:	08000000 	stmdaeq	r0, {}	@ <UNPREDICTABLE>
+D:\src\M2\Test\TestMCURoutine\native/code.c:154
+IL_00e6: if (!(stack_0_u1)) goto IL_0108; //IL_00e6: brfalse.s IL_0108: s_1, pop1, push0
+  44:	00000006 	andeq	r0, r0, r6
+  48:	5c0101ca 	stfpls	f0, [r1], {202}	@ 0xca
+D:\src\M2\Test\TestMCURoutine\native/code.c:164
+IL_00f3: stack_0_ptr=(( ((i1*)stack_0_ptr)+(stack_1_i4<<stack_0_ptr_arr_stride_lb) )); //IL_00f3: ldelema System.Byte: s_2, pop2, push1
+  4c:	31312f00 	teqcc	r1, r0, lsl #30
+D:\src\M2\Test\TestMCURoutine\native/code.c:166
+IL_00f9: stack_1_u1=(*(unsigned char*)(stack_1_ptr)); //IL_00f9: ldind.u1: s_2, pop1, push1
+  50:	40403b3b 	submi	r3, r0, fp, lsr fp
+D:\src\M2\Test\TestMCURoutine\native/code.c:177
+IL_0106: *(char*)(stack_0_ptr)=(stack_1_u1); //IL_0106: stind.i1: s_2, pop2, push0
+  54:	03030100 	movweq	r0, #12544	@ 0x3100
+D:\src\M2\Test\TestMCURoutine\native/code.c:189
+IL_0118: if (stack_0_u1) goto IL_0045; //IL_0118: brtrue IL_0045: s_1, pop1, push0
+  58:	03030100 	movweq	r0, #12544	@ 0x3100
+D:\src\M2\Test\TestMCURoutine\native/code.c:78
+IL_004c: stack_2_r4=(stack_2_i4); //IL_004c: conv.r8: s_3, pop1, push1
+  5c:	01000000 	mrseq	r0, (UNDEF: 0)
+  60:	04040201 	streq	r0, [r4], #-513	@ 0xfffffdff
+D:\src\M2\Test\TestMCURoutine\native/code.c:100
+IL_0079: var11=stack_0_r4; //IL_0079: stloc.s V_11: s_1, pop1, push0
+  64:	14141212 	ldrne	r1, [r4], #-530	@ 0xfffffdee
+D:\src\M2\Test\TestMCURoutine\native/code.c:79
+IL_004d: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_004d: mul: s_3, pop2, push1
+  68:	03030100 	movweq	r0, #12544	@ 0x3100
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+  6c:	06040000 	streq	r0, [r4], -r0
+  70:	01010000 	mrseq	r0, (UNDEF: 1)
+D:\src\M2\Test\TestMCURoutine\native/code.c:102
+IL_007c: var12=stack_0_i4; //IL_007c: stloc.s V_12: s_1, pop1, push0
+  74:	06000404 	streq	r0, [r0], -r4, lsl #8
+D:\src\M2\Test\TestMCURoutine\native/code.c:98
+IL_006e: var10=stack_0_r4; //IL_006e: stloc.s V_10: s_1, pop1, push0
+  78:	00000006 	andeq	r0, r0, r6
+D:\src\M2\Test\TestMCURoutine\native/code.c:134
+IL_00bb: stack_0_r4=((stack_0_r4)*(stack_1_r4)); //IL_00bb: mul: s_2, pop2, push1
+  7c:	03000004 	movweq	r0, #4
+D:\src\M2\Test\TestMCURoutine\native/code.c:137
+IL_00c0: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_00c0: mul: s_3, pop2, push1
+  80:	049f8008 	ldreq	r8, [pc], #8	@ 88 <cfun0+0x88>
+D:\src\M2\Test\TestMCURoutine\native/code.c:138
+IL_00c1: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00c1: add: s_2, pop2, push1
+  84:	08030000 	stmdaeq	r3, {}	@ <UNPREDICTABLE>
+D:\src\M2\Test\TestMCURoutine\native/code.c:140
+IL_00cb: if ((unsigned char)(stack_0_r4)>=(unsigned char)(stack_1_r4)) goto IL_00d5; //IL_00cb: bge.un.s IL_00d5: s_2, pop2, push0
+  88:	00049f40 	andeq	r9, r4, r0, asr #30
+  8c:	9f300200 	svcls	0x00300200
+  90:	02180004 	andseq	r0, r8, #4
+  94:	18049f31 	stmdane	r4, {r0, r4, r5, r8, r9, sl, fp, ip, pc}
+D:\src\M2\Test\TestMCURoutine\native/code.c:148
+IL_00da: if (stack_0_u1) goto IL_0087; //IL_00da: brtrue.s IL_0087: s_1, pop1, push0
+  98:	9f300218 	svcls	0x00300218
+D:\src\M2\Test\TestMCURoutine\native/code.c:119
+IL_00a3: stack_0_r4=((stack_0_r4)*(stack_1_r4)); //IL_00a3: mul: s_2, pop2, push1
+  9c:	023e1804 	eorseq	r1, lr, #4, 16	@ 0x40000
+D:\src\M2\Test\TestMCURoutine\native/code.c:113
+IL_0092: stack_0_r4=((stack_0_r4)-(stack_1_r4)); //IL_0092: sub: s_2, pop2, push1
+  a0:	3e049f31 	mcrcc	15, 0, r9, cr4, cr1, {1}
+D:\src\M2\Test\TestMCURoutine\native/code.c:123
+IL_00a9: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00a9: add: s_2, pop2, push1
+  a4:	0454013e 	ldrbeq	r0, [r4], #-318	@ 0xfffffec2
+  a8:	740a443e 	strvc	r4, [sl], #-1086	@ 0xfffffbc2
+D:\src\M2\Test\TestMCURoutine\native/code.c:129
+IL_00b3: stack_0_i4=((stack_0_i4)+(stack_1_i4)); //IL_00b3: add: s_2, pop2, push1
+  ac:	03e80a00 	mvneq	r0, #0, 20
+D:\src\M2\Test\TestMCURoutine\native/code.c:126
+IL_00ae: var10=stack_0_r4; //IL_00ae: stloc.s V_10: s_1, pop1, push0
+  b0:	1aff0829 	bne	fffc215c <cfun0+0xfffc215c>
+D:\src\M2\Test\TestMCURoutine\native/code.c:123
+IL_00a9: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00a9: add: s_2, pop2, push1
+  b4:	5044049f 	umaalpl	r0, r4, pc, r4	@ <UNPREDICTABLE>
+D:\src\M2\Test\TestMCURoutine\native/code.c:193
+IL_0121: stack_0_i4=((stack_0_i4)+(stack_1_i4)); //IL_0121: add: s_2, pop2, push1
+  b8:	049f3102 	ldreq	r3, [pc], #258	@ c0 <cfun0+0xc0>
+D:\src\M2\Test\TestMCURoutine\native/code.c:200
+IL_012d: if (stack_0_u1) goto IL_003c; //IL_012d: brtrue IL_003c: s_1, pop1, push0
+  bc:	52015250 	andpl	r5, r1, #80, 4
+D:\src\M2\Test\TestMCURoutine\native/code.c:206
+}
+  c0:	01525204 	cmpeq	r2, r4, lsl #4
+  c4:	6e520452 	mrcvs	4, 2, r0, cr2, cr2, {2}
+  c8:	08007209 	stmdaeq	r0, {r0, r3, r9, ip, sp, lr}
+  cc:	ff082c7f 			@ <UNDEFINED> instruction: 0xff082c7f
+  d0:	6e049f1a 	mcrvs	15, 0, r9, cr4, cr10, {0}
+  d4:	9f30026e 	svcls	0x0030026e
+  d8:	04746e04 	ldrbteq	r6, [r4], #-3588	@ 0xfffff1fc
+  dc:	9f03e80a 	svcls	0x0003e80a
+  e0:	90019004 	andls	r9, r1, r4
+  e4:	04540101 	ldrbeq	r0, [r4], #-257	@ 0xfffffeff
+  e8:	01a80190 			@ <UNDEFINED> instruction: 0x01a80190
+  ec:	0a00740a 	beq	1d11c <cfun0+0x1d11c>
+  f0:	082c03e7 	stmdaeq	ip!, {r0, r1, r2, r5, r6, r7, r8, r9}
+  f4:	049f1aff 	ldreq	r1, [pc], #2815	@ fc <cfun0+0xfc>
+  f8:	01b001a8 	lsrseq	r0, r8, #3
+  fc:	0a7f740a 	beq	1fdd12c <cfun0+0x1fdd12c>
+ 100:	082c03e7 	stmdaeq	ip!, {r0, r1, r2, r5, r6, r7, r8, r9}
+ 104:	049f1aff 	ldreq	r1, [pc], #2815	@ 10c <cfun0+0x10c>
+ 108:	01b201b0 			@ <UNDEFINED> instruction: 0x01b201b0
+ 10c:	b2045401 	andlt	r5, r4, #16777216	@ 0x1000000
+ 110:	0901b201 	stmdbeq	r1, {r0, r9, ip, sp, pc}
+ 114:	7f080072 	svcvc	0x00080072
+ 118:	1aff082c 	bne	fffc21d0 <cfun0+0xfffc21d0>
+ 11c:	01b2049f 			@ <UNDEFINED> instruction: 0x01b2049f
+ 120:	530101b4 	movwpl	r0, #4532	@ 0x11b4
+ 124:	ca01b404 	bgt	6d13c <cfun0+0x6d13c>
+ 128:	00730901 	rsbseq	r0, r3, r1, lsl #18
+ 12c:	082c3f08 	stmdaeq	ip!, {r3, r8, r9, sl, fp, ip, sp}
+ 130:	009f1aff 			@ <UNDEFINED> instruction: 0x009f1aff
+ 134:	37353533 			@ <UNDEFINED> instruction: 0x37353533
+ 138:	00393937 	eorseq	r3, r9, r7, lsr r9
+ 13c:	00020000 	andeq	r0, r2, r0
+ 140:	0c020200 	sfmeq	f0, 4, [r2], {-0}
+ 144:	000e0e0c 	andeq	r0, lr, ip, lsl #28
+ 148:	01000001 	tsteq	r0, r1
+ 14c:	00000001 	andeq	r0, r0, r1
+ 150:	04020200 	streq	r0, [r2], #-512	@ 0xfffffe00
+ 154:	04020204 	streq	r0, [r2], #-516	@ 0xfffffdfc
+ 158:	08060604 	stmdaeq	r6, {r2, r9, sl}
+ 15c:	02000008 	andeq	r0, r0, #8
+ 160:	06060002 	streq	r0, [r6], -r2
+ 164:	04000000 	streq	r0, [r0], #-0
+ 168:	9e060000 	cdpls	0, 0, cr0, cr6, cr0, {0}
+ 16c:	00000004 	andeq	r0, r0, r4
+ 170:	000004c0 	andeq	r0, r0, r0, asr #9
+ 174:	00049e06 	andeq	r9, r4, r6, lsl #28
+ 178:	043f8000 	ldrteq	r8, [pc], #-0	@ 180 <cfun0+0x180>
+ 17c:	9e060000 	cdpls	0, 0, cr0, cr6, cr0, {0}
+ 180:	80000004 	andhi	r0, r0, r4
+ 184:	180004bf 	stmdane	r0, {r0, r1, r2, r3, r4, r5, r7, sl}
+ 188:	00049e06 	andeq	r9, r4, r6, lsl #28
+ 18c:	043f8000 	ldrteq	r8, [pc], #-0	@ 194 <cfun0+0x194>
+ 190:	a508443e 	strge	r4, [r8, #-1086]	@ 0xfffffbc2
+ 194:	4ca5264d 	stcmi	6, cr2, [r5], #308	@ 0x134
+ 198:	049f2226 	ldreq	r2, [pc], #550	@ 1a0 <cfun0+0x1a0>
+ 19c:	9e066e56 	mcrls	14, 0, r6, cr6, cr6, {2}
+ 1a0:	00000004 	andeq	r0, r0, r4
+ 1a4:	6e6e04c0 	cdpvs	4, 6, cr0, cr14, cr0, {6}
+ 1a8:	04459002 	strbeq	r9, [r5], #-2
+ 1ac:	9e066e6e 	cdpls	14, 0, cr6, cr6, cr14, {3}
+ 1b0:	80000004 	andhi	r0, r0, r4
+ 1b4:	6e6e04bf 	mcrvs	4, 3, r0, cr14, cr15, {5}
+ 1b8:	a800731e 	stmdage	r0, {r1, r2, r3, r4, r8, r9, ip, sp, lr}
+ 1bc:	7326a82d 			@ <UNDEFINED> instruction: 0x7326a82d
+ 1c0:	a82da800 	stmdage	sp!, {fp, sp, pc}
+ 1c4:	26a42226 	strtcs	r2, [r4], r6, lsr #4
+ 1c8:	80000004 	andhi	r0, r0, r4
+ 1cc:	26a41e3c 			@ <UNDEFINED> instruction: 0x26a41e3c
+ 1d0:	80000004 	andhi	r0, r0, r4
+ 1d4:	049f1c3f 	ldreq	r1, [pc], #3135	@ 1dc <cfun0+0x1dc>
+ 1d8:	9e06746e 	cdpls	4, 0, cr7, cr6, cr14, {3}
+ 1dc:	00000004 	andeq	r0, r0, r4
+ 1e0:	78740400 	ldmdavc	r4!, {sl}^
+ 1e4:	044f9002 	strbeq	r9, [pc], #-2	@ 1ec <cfun0+0x1ec>
+ 1e8:	90027c78 	andls	r7, r2, r8, ror ip
+ 1ec:	807c044d 	rsbshi	r0, ip, sp, asr #8
+ 1f0:	4da50801 	stcmi	8, cr0, [r5, #4]!
+ 1f4:	264ca526 	strbcs	sl, [ip], -r6, lsr #10
+ 1f8:	80049f22 	andhi	r9, r4, r2, lsr #30
+ 1fc:	02018401 	andeq	r8, r1, #16777216	@ 0x1000000
+ 200:	84044490 	strhi	r4, [r4], #-1168	@ 0xfffffb70
+ 204:	08019601 	stmdaeq	r1, {r0, r9, sl, ip, pc}
+ 208:	a5264da5 	strge	r4, [r6, #-3493]!	@ 0xfffff25b
+ 20c:	9f22264c 	svcls	0x0022264c
+ 210:	96019604 	strls	r9, [r1], -r4, lsl #12
+ 214:	4f900201 	svcmi	0x00900201
+ 218:	9e019604 	cfmadd32ls	mvax0, mvfx9, mvfx1, mvfx4
+ 21c:	4d900201 	lfmmi	f0, 4, [r0, #4]
+ 220:	9e019e04 	cdpls	14, 0, cr9, cr1, cr4, {0}
+ 224:	45a50801 	strmi	r0, [r5, #2049]!	@ 0x801
+ 228:	264da526 	strbcs	sl, [sp], -r6, lsr #10
+ 22c:	9e049f22 	cdpls	15, 0, cr9, cr4, cr2, {1}
+ 230:	06019e01 	streq	r9, [r1], -r1, lsl #28
+ 234:	0000049e 	muleq	r0, lr, r4
+ 238:	9e044000 	cdpls	0, 0, cr4, cr4, cr0, {0}
+ 23c:	02019e01 	andeq	r9, r1, #1, 28
+ 240:	9e044f90 	mcrls	15, 0, r4, cr4, cr0, {4}
+ 244:	0801ac01 	stmdaeq	r1, {r0, sl, fp, sp, pc}
+ 248:	a5264ea5 	strge	r4, [r6, #-3749]!	@ 0xfffff15b
+ 24c:	9f1e264f 	svcls	0x001e264f
+ 250:	b001b004 	andlt	fp, r1, r4
+ 254:	4c900201 	lfmmi	f0, 4, [r0], {1}
+ 258:	b201b004 	andlt	fp, r1, #4
+ 25c:	4f900201 	svcmi	0x00900201
+ 260:	02023f00 	andeq	r3, r2, #0, 30
+ 264:	08000200 	stmdaeq	r0, {r9}
+ 268:	00000000 	andeq	r0, r0, r0
+ 26c:	03030200 	movweq	r0, #12800	@ 0x3200
+ 270:	05050200 	streq	r0, [r5, #-512]	@ 0xfffffe00
+ 274:	02020000 	andeq	r0, r2, #0
+ 278:	06000303 	streq	r0, [r0], -r3, lsl #6
+ 27c:	00000006 	andeq	r0, r0, r6
+ 280:	03180004 	tsteq	r8, #4
+ 284:	049f4008 	ldreq	r4, [pc], #8	@ 28c <cfun0+0x28c>
+ 288:	08033e18 	stmdaeq	r3, {r3, r4, r9, sl, fp, ip, sp}
+ 28c:	3e049f80 	cdpcc	15, 0, cr9, cr4, cr0, {4}
+ 290:	e80a0444 	stmda	sl, {r2, r6, sl}
+ 294:	44049f03 	strmi	r9, [r4], #-3843	@ 0xfffff0fd
+ 298:	00720646 	rsbseq	r0, r2, r6, asr #12
+ 29c:	9f220075 	svcls	0x00220075
+ 2a0:	014a4604 	cmpeq	sl, r4, lsl #12
+ 2a4:	504a0454 	subpl	r0, sl, r4, asr r4
+ 2a8:	75007206 	strvc	r7, [r0, #-518]	@ 0xfffffdfa
+ 2ac:	049f2200 	ldreq	r2, [pc], #512	@ 2b4 <cfun0+0x2b4>
+ 2b0:	31025250 	tstcc	r2, r0, asr r2
+ 2b4:	7452049f 	ldrbvc	r0, [r2], #-1183	@ 0xfffffb61
+ 2b8:	9f800803 	svcls	0x00800803
+ 2bc:	b0019004 	andlt	r9, r1, r4
+ 2c0:	e80a0401 	stmda	sl, {r0, sl}
+ 2c4:	b0049f03 	andlt	r9, r4, r3, lsl #30
+ 2c8:	0201b201 	andeq	fp, r1, #268435456	@ 0x10000000
+ 2cc:	b2049f31 	andlt	r9, r4, #49, 30	@ 0xc4
+ 2d0:	0301b201 	movweq	fp, #4609	@ 0x1201
+ 2d4:	049f8008 	ldreq	r8, [pc], #8	@ 2dc <cfun0+0x2dc>
+ 2d8:	01b401b2 			@ <UNDEFINED> instruction: 0x01b401b2
+ 2dc:	049f3102 	ldreq	r3, [pc], #258	@ 2e4 <cfun0+0x2e4>
+ 2e0:	01ca01b4 	strheq	r0, [sl, #20]
+ 2e4:	9f400803 	svcls	0x00400803
+ 2e8:	00004200 	andeq	r4, r0, r0, lsl #4
+ 2ec:	05000505 	streq	r0, [r0, #-1285]	@ 0xfffffafb
+ 2f0:	06000000 	streq	r0, [r0], -r0
+ 2f4:	00000600 	andeq	r0, r0, r0, lsl #12
+ 2f8:	06060000 	streq	r0, [r6], -r0
+ 2fc:	00060600 	andeq	r0, r6, r0, lsl #12
+ 300:	00040000 	andeq	r0, r4, r0
+ 304:	9f310218 	svcls	0x00310218
+ 308:	06181804 	ldreq	r1, [r8], -r4, lsl #16
+ 30c:	3f080073 	svccc	0x00080073
+ 310:	18049f2c 	stmdane	r4, {r2, r3, r5, r8, r9, sl, fp, ip, pc}
+ 314:	9f31023e 	svcls	0x0031023e
+ 318:	07443e04 	strbeq	r3, [r4, -r4, lsl #28]
+ 31c:	e80a0074 	stmda	sl, {r2, r4, r5, r6}
+ 320:	049f2903 	ldreq	r2, [pc], #2307	@ 328 <cfun0+0x328>
+ 324:	31025044 	tstcc	r2, r4, asr #32
+ 328:	7452049f 	ldrbvc	r0, [r2], #-1183	@ 0xfffffb61
+ 32c:	08007206 	stmdaeq	r0, {r1, r2, r9, ip, sp, lr}
+ 330:	049f2c7f 	ldreq	r2, [pc], #3199	@ 338 <cfun0+0x338>
+ 334:	01a80190 			@ <UNDEFINED> instruction: 0x01a80190
+ 338:	0a007407 	beq	1d35c <cfun0+0x1d35c>
+ 33c:	9f2c03e7 	svcls	0x002c03e7
+ 340:	b201a804 	andlt	sl, r1, #4, 16	@ 0x40000
+ 344:	7f740701 	svcvc	0x00740701
+ 348:	2c03e70a 	stccs	7, cr14, [r3], {10}
+ 34c:	01b2049f 			@ <UNDEFINED> instruction: 0x01b2049f
+ 350:	720601b4 	andvc	r0, r6, #180, 2	@ 0x2d
+ 354:	2c7f0800 	ldclcs	8, cr0, [pc], #-0	@ 35c <cfun0+0x35c>
+ 358:	01b4049f 			@ <UNDEFINED> instruction: 0x01b4049f
+ 35c:	730601ca 	movwvc	r0, #25034	@ 0x61ca
+ 360:	2c3f0800 	ldccs	8, cr0, [pc], #-0	@ 368 <cfun0+0x368>
+ 364:	0001009f 	muleq	r1, pc, r0	@ <UNPREDICTABLE>
+ 368:	4a060000 	bmi	180370 <cfun0+0x180370>
+ 36c:	04000000 	streq	r0, [r0], #-0
+ 370:	50010600 	andpl	r0, r1, r0, lsl #12
+ 374:	060c0604 	streq	r0, [ip], -r4, lsl #12
+ 378:	00740070 	rsbseq	r0, r4, r0, ror r0
+ 37c:	00009f22 	andeq	r9, r0, r2, lsr #30
+ 380:	05050300 	streq	r0, [r5, #-768]	@ 0xfffffd00
+ 384:	0b0b0808 	bleq	2c23ac <cfun0+0x2c23ac>
+ 388:	05050303 	streq	r0, [r5, #-771]	@ 0xfffffcfd
+ 38c:	01010208 	tsteq	r1, r8, lsl #4
+ 390:	02020000 	andeq	r0, r2, #0
+ 394:	05050303 	streq	r0, [r5, #-771]	@ 0xfffffcfd
+ 398:	01010707 	tsteq	r1, r7, lsl #14
+ 39c:	09090705 	stmdbeq	r9, {r0, r2, r8, r9, sl}
+ 3a0:	06000000 	streq	r0, [r0], -r0
+ 3a4:	00000044 	andeq	r0, r0, r4, asr #32
+ 3a8:	06180004 	ldreq	r0, [r8], -r4
+ 3ac:	0000049e 	muleq	r0, lr, r4
+ 3b0:	18044080 	stmdane	r4, {r7, lr}
+ 3b4:	049e0618 	ldreq	r0, [lr], #1560	@ 0x618
+ 3b8:	3f800000 	svccc	0x00800000
+ 3bc:	06181804 	ldreq	r1, [r8], -r4, lsl #16
+ 3c0:	0000049e 	muleq	r0, lr, r4
+ 3c4:	18044040 	stmdane	r4, {r6, lr}
+ 3c8:	00720f18 	rsbseq	r0, r2, r8, lsl pc
+ 3cc:	26a82da8 	strtcs	r2, [r8], r8, lsr #27
+ 3d0:	000426a4 	andeq	r2, r4, r4, lsr #13
+ 3d4:	1e404000 	cdpne	0, 4, cr4, cr0, cr0, {0}
+ 3d8:	3018049f 	mulscc	r8, pc, r4	@ <UNPREDICTABLE>
+ 3dc:	a8007217 	stmdage	r0, {r0, r1, r2, r4, r9, ip, sp, lr}
+ 3e0:	a426a82d 	strtge	sl, [r6], #-2093	@ 0xfffff7d3
+ 3e4:	00000426 	andeq	r0, r0, r6, lsr #8
+ 3e8:	a41e4040 	ldrge	r4, [lr], #-64	@ 0xffffffc0
+ 3ec:	00000426 	andeq	r0, r0, r6, lsr #8
+ 3f0:	9f1e3c00 	svcls	0x001e3c00
+ 3f4:	06303004 	ldrteq	r3, [r0], -r4
+ 3f8:	0000049e 	muleq	r0, lr, r4
+ 3fc:	30043f80 	andcc	r3, r4, r0, lsl #31
+ 400:	049e0630 	ldreq	r0, [lr], #1584	@ 0x630
+ 404:	40000000 	andmi	r0, r0, r0
+ 408:	023a3604 	eorseq	r3, sl, #4, 12	@ 0x400000
+ 40c:	3a044f90 	bcc	114254 <cfun0+0x114254>
+ 410:	4e90023e 	mrcmi	2, 4, r0, cr0, cr14, {1}
+ 414:	023e3e04 	eorseq	r3, lr, #4, 28	@ 0x40
+ 418:	3e044c90 	mcrcc	12, 0, r4, cr4, cr0, {4}
+ 41c:	049e0658 	ldreq	r0, [lr], #1624	@ 0x658
+ 420:	40800000 	addmi	r0, r0, r0
+ 424:	02585804 	subseq	r5, r8, #4, 16	@ 0x40000
+ 428:	58044f90 	stmdapl	r4, {r4, r7, r8, r9, sl, fp, lr}
+ 42c:	4e900258 	mrcmi	2, 4, r0, cr0, cr8, {2}
+ 430:	02605804 	rsbeq	r5, r0, #4, 16	@ 0x40000
+ 434:	60044c90 	mulvs	r4, r0, ip
+ 438:	45900260 	ldrmi	r0, [r0, #608]	@ 0x260
+ 43c:	02606004 	rsbeq	r6, r0, #4
+ 440:	60044e90 	mulvs	r4, r0, lr
+ 444:	00731e74 	rsbseq	r1, r3, r4, ror lr
+ 448:	26a82da8 	strtcs	r2, [r8], r8, lsr #27
+ 44c:	2da80073 	stccs	0, cr0, [r8, #460]!	@ 0x1cc
+ 450:	a42226a8 	strtge	r2, [r2], #-1704	@ 0xfffff958
+ 454:	00000426 	andeq	r0, r0, r6, lsr #8
+ 458:	a41e3c80 	ldrge	r3, [lr], #-3200	@ 0xfffff380
+ 45c:	00000426 	andeq	r0, r0, r6, lsr #8
+ 460:	9f1c3f80 	svcls	0x001c3f80
+ 464:	018c7404 	orreq	r7, ip, r4, lsl #8
+ 468:	00049e06 	andeq	r9, r4, r6, lsl #28
+ 46c:	00408000 	subeq	r8, r0, r0
+ 470:	07040000 	streq	r0, [r4, -r0]
+ 474:	040a0a07 	streq	r0, [sl], #-2567	@ 0xfffff5f9
+ 478:	000a0704 	andeq	r0, sl, r4, lsl #14
+ 47c:	00000002 	andeq	r0, r0, r2
+ 480:	00004406 	andeq	r4, r0, r6, lsl #8
+ 484:	18000400 	stmdane	r0, {sl}
+ 488:	044e9002 	strbeq	r9, [lr], #-2
+ 48c:	9e061818 	mcrls	8, 0, r1, cr6, cr8, {0}
+ 490:	00000004 	andeq	r0, r0, r4
+ 494:	181804c0 	ldmdane	r8, {r6, r7, sl}
+ 498:	a8007207 	stmdage	r0, {r0, r1, r2, r9, ip, sp, lr}
+ 49c:	9f26a82d 	svcls	0x0026a82d
+ 4a0:	06301804 	ldrteq	r1, [r0], -r4, lsl #16
+ 4a4:	0000049e 	muleq	r0, lr, r4
+ 4a8:	30044300 	andcc	r4, r4, r0, lsl #6
+ 4ac:	049e0630 	ldreq	r0, [lr], #1584	@ 0x630
+ 4b0:	bf800000 	svclt	0x00800000
+ 4b4:	06363004 	ldrteq	r3, [r6], -r4
+ 4b8:	0000049e 	muleq	r0, lr, r4
+ 4bc:	3a044280 	bcc	110ec4 <cfun0+0x110ec4>
+ 4c0:	4e900272 	mrcmi	2, 4, r0, cr0, cr2, {3}
+ 4c4:	018c7404 	orreq	r7, ip, r4, lsl #8
+ 4c8:	004e9002 	subeq	r9, lr, r2
+ 4cc:	05030300 	streq	r0, [r3, #-768]	@ 0xfffffd00
+ 4d0:	01070705 	tsteq	r7, r5, lsl #14
+ 4d4:	09060701 	stmdbeq	r6, {r0, r8, r9, sl}
+ 4d8:	00090609 	andeq	r0, r9, r9, lsl #12
+ 4dc:	00004406 	andeq	r4, r0, r6, lsl #8
+ 4e0:	06000400 	streq	r0, [r0], -r0, lsl #8
+ 4e4:	9f400803 	svcls	0x00400803
+ 4e8:	02060604 	andeq	r0, r6, #4, 12	@ 0x400000
+ 4ec:	06049f38 			@ <UNDEFINED> instruction: 0x06049f38
+ 4f0:	80080306 	andhi	r0, r8, r6, lsl #6
+ 4f4:	0e06049f 	mcreq	4, 0, r0, cr6, cr15, {4}
+ 4f8:	0e045201 	cdpeq	2, 0, cr5, cr4, cr1, {0}
+ 4fc:	9f31020e 	svcls	0x0031020e
+ 500:	01181804 	tsteq	r8, r4, lsl #16
+ 504:	30180452 	andscc	r0, r8, r2, asr r4
+ 508:	9f800803 	svcls	0x00800803
+ 50c:	03743004 	cmneq	r4, #4
+ 510:	009f4008 	addseq	r4, pc, r8
+ 514:	50080001 	andpl	r0, r8, r1
+ 518:	06000000 	streq	r0, [r0], -r0
+ 51c:	74007006 	strvc	r7, [r0], #-6
+ 520:	009f2200 	addseq	r2, pc, r0, lsl #4
+ 524:	00090900 	andeq	r0, r9, r0, lsl #18
+ 528:	00005206 	andeq	r5, r0, r6, lsl #4
+ 52c:	00000400 	andeq	r0, r0, r0, lsl #8
+ 530:	74007005 	strvc	r7, [r0], #-5
+ 534:	00042200 	andeq	r2, r4, r0, lsl #4
+ 538:	00700b04 	rsbseq	r0, r0, r4, lsl #22
+ 53c:	94220074 	strtls	r0, [r2], #-116	@ 0xffffff8c
+ 540:	21007101 	tstcs	r0, r1, lsl #2
+ 544:	0503009f 	streq	r0, [r3, #-159]	@ 0xffffff61
+ 548:	52060005 	andpl	r0, r6, #5
+ 54c:	04000000 	streq	r0, [r0], #-0
+ 550:	38020000 	stmdacc	r2, {}	@ <UNPREDICTABLE>
+ 554:	0400049f 	streq	r0, [r0], #-1183	@ 0xfffffb61
+ 558:	009f4f02 	addseq	r4, pc, r2, lsl #30
+ 55c:	0000003c 	andeq	r0, r0, ip, lsr r0
+ 560:	00010100 	andeq	r0, r1, r0, lsl #2
+ 564:	00000606 	andeq	r0, r0, r6, lsl #12
+ 568:	18000400 	stmdane	r0, {sl}
+ 56c:	049f3002 	ldreq	r3, [pc], #2	@ 574 <cfun0+0x574>
+ 570:	0101b418 	tsteq	r1, r8, lsl r4
+ 574:	01b40453 			@ <UNDEFINED> instruction: 0x01b40453
+ 578:	730301b4 	movwvc	r0, #12724	@ 0x31b4
+ 57c:	b4049f7f 	strlt	r9, [r4], #-3967	@ 0xfffff081
+ 580:	0101ca01 	tsteq	r1, r1, lsl #20
+ 584:	00000053 	andeq	r0, r0, r3, asr r0
+ 588:	01000000 	mrseq	r0, (UNDEF: 0)
+ 58c:	1e060001 	cdpne	0, 0, cr0, cr6, cr1, {0}
+ 590:	04000000 	streq	r0, [r0], #-0
+ 594:	30022600 	andcc	r2, r2, r0, lsl #12
+ 598:	3a26049f 	bcc	98181c <cfun0+0x98181c>
+ 59c:	3a045201 	bcc	114da8 <cfun0+0x114da8>
+ 5a0:	7f72033a 	svcvc	0x0072033a
+ 5a4:	b23a049f 	eorslt	r0, sl, #-1627389952	@ 0x9f000000
+ 5a8:	00520101 	subseq	r0, r2, r1, lsl #2
+ 5ac:	00010000 	andeq	r0, r1, r0
+ 5b0:	00004406 	andeq	r4, r0, r6, lsl #8
+ 5b4:	18000400 	stmdane	r0, {sl}
+ 5b8:	04459002 	strbeq	r9, [r5], #-2
+ 5bc:	02018c30 	andeq	r8, r1, #48, 24	@ 0x3000
+ 5c0:	00004590 	muleq	r0, r0, r5
+ 5c4:	00000d00 	andeq	r0, r0, r0, lsl #26
+ 5c8:	00440600 	subeq	r0, r4, r0, lsl #12
+ 5cc:	00040000 	andeq	r0, r4, r0
+ 5d0:	00731e18 	rsbseq	r1, r3, r8, lsl lr
+ 5d4:	26a82da8 	strtcs	r2, [r8], r8, lsr #27
+ 5d8:	2da80073 	stccs	0, cr0, [r8, #460]!	@ 0x1cc
+ 5dc:	a42226a8 	strtge	r2, [r2], #-1704	@ 0xfffff958
+ 5e0:	00000426 	andeq	r0, r0, r6, lsr #8
+ 5e4:	a41e3c80 	ldrge	r3, [lr], #-3200	@ 0xfffff380
+ 5e8:	00000426 	andeq	r0, r0, r6, lsr #8
+ 5ec:	9f1c3f80 	svcls	0x001c3f80
+ 5f0:	1e763004 	cdpne	0, 7, cr3, cr6, cr4, {0}
+ 5f4:	2da80073 	stccs	0, cr0, [r8, #460]!	@ 0x1cc
+ 5f8:	007326a8 	rsbseq	r2, r3, r8, lsr #13
+ 5fc:	26a82da8 	strtcs	r2, [r8], r8, lsr #27
+ 600:	0426a422 	strteq	sl, [r6], #-1058	@ 0xfffffbde
+ 604:	3c800000 	stccc	0, cr0, [r0], {0}
+ 608:	0426a41e 	strteq	sl, [r6], #-1054	@ 0xfffffbe2
+ 60c:	3f800000 	svccc	0x00800000
+ 610:	76049f1c 			@ <UNDEFINED> instruction: 0x76049f1c
+ 614:	731e018c 	tstvc	lr, #140, 2	@ 0x23
+ 618:	a82da87f 	stmdage	sp!, {r0, r1, r2, r3, r4, r5, r6, fp, sp, pc}
+ 61c:	a87f7326 	ldmdage	pc!, {r1, r2, r5, r8, r9, ip, sp, lr}^	@ <UNPREDICTABLE>
+ 620:	2226a82d 	eorcs	sl, r6, #2949120	@ 0x2d0000
+ 624:	000426a4 	andeq	r2, r4, r4, lsr #13
+ 628:	1e3c8000 	cdpne	0, 3, cr8, cr12, cr0, {0}
+ 62c:	000426a4 	andeq	r2, r4, r4, lsr #13
+ 630:	1c3f8000 	ldcne	0, cr8, [pc], #-0	@ 638 <cfun0+0x638>
+ 634:	0000009f 	muleq	r0, pc, r0	@ <UNPREDICTABLE>
+ 638:	0000000f 	andeq	r0, r0, pc
+ 63c:	44060003 	strmi	r0, [r6], #-3
+ 640:	04000000 	streq	r0, [r0], #-0
+ 644:	90021800 	andls	r1, r2, r0, lsl #16
+ 648:	3630044f 	ldrtcc	r0, [r0], -pc, asr #8
+ 64c:	00049e06 	andeq	r9, r4, r6, lsl #28
+ 650:	04000000 	streq	r0, [r0], #-0
+ 654:	90025c36 	andls	r5, r2, r6, lsr ip
+ 658:	8c72044f 	cfldrdhi	mvd0, [r2], #-316	@ 0xfffffec4
+ 65c:	4f900201 	svcmi	0x00900201
+ 660:	11000000 	mrsne	r0, (UNDEF: 0)
+ 664:	01000000 	mrseq	r0, (UNDEF: 0)
+ 668:	06000000 	streq	r0, [r0], -r0
+ 66c:	00000044 	andeq	r0, r0, r4, asr #32
+ 670:	02180004 	andseq	r0, r8, #4
+ 674:	30044e90 	mulcc	r4, r0, lr
+ 678:	049e0636 	ldreq	r0, [lr], #1590	@ 0x636
+ 67c:	00000000 	andeq	r0, r0, r0
+ 680:	02723604 	rsbseq	r3, r2, #4, 12	@ 0x400000
+ 684:	72044e90 	andvc	r4, r4, #144, 28	@ 0x900
+ 688:	4c900274 	lfmmi	f0, 4, [r0], {116}	@ 0x74
+ 68c:	018c7404 	orreq	r7, ip, r4, lsl #8
+ 690:	004e9002 	subeq	r9, lr, r2
+ 694:	00130000 	andseq	r0, r3, r0
+ 698:	07000000 	streq	r0, [r0, -r0]
+ 69c:	44060007 	strmi	r0, [r6], #-7
+ 6a0:	04000000 	streq	r0, [r0], #-0
+ 6a4:	54010800 	strpl	r0, [r1], #-2048	@ 0xfffff800
+ 6a8:	02363004 	eorseq	r3, r6, #4
+ 6ac:	36049f30 			@ <UNDEFINED> instruction: 0x36049f30
+ 6b0:	0454016a 	ldrbeq	r0, [r4], #-362	@ 0xfffffe96
+ 6b4:	7403726a 	strvc	r7, [r3], #-618	@ 0xfffffd96
+ 6b8:	72049f7f 	andvc	r9, r4, #508	@ 0x1fc
+ 6bc:	00540174 	subseq	r0, r4, r4, ror r1
+ 6c0:	00150000 	andseq	r0, r5, r0
+ 6c4:	00004406 	andeq	r4, r0, r6, lsl #8
+ 6c8:	18000400 	stmdane	r0, {sl}
+ 6cc:	03e80a04 	mvneq	r0, #4, 20	@ 0x4000
+ 6d0:	8c30049f 	cfldrshi	mvf0, [r0], #-636	@ 0xfffffd84
+ 6d4:	e80a0401 	stmda	sl, {r0, sl}
+ 6d8:	03009f03 	movweq	r9, #3843	@ 0xf03
+ 6dc:	06000000 	streq	r0, [r0], -r0
+ 6e0:	000000a4 	andeq	r0, r0, r4, lsr #1
+ 6e4:	080e0004 	stmdaeq	lr, {r2}
+ 6e8:	a52645a5 	strge	r4, [r6, #-1445]!	@ 0xfffffa5b
+ 6ec:	9f22264d 	svcls	0x0022264d
+ 6f0:	02140e04 	andseq	r0, r4, #4, 28	@ 0x40
+ 6f4:	05004f90 	streq	r4, [r0, #-3984]	@ 0xfffff070
+ 6f8:	06000000 	streq	r0, [r0], -r0
+ 6fc:	00000096 	muleq	r0, r6, r0
+ 700:	07180004 	ldreq	r0, [r8, -r4]
+ 704:	e70a0074 	smlsdx	sl, r4, r0, r0
+ 708:	049f2c03 	ldreq	r2, [pc], #3075	@ 710 <cfun0+0x710>
+ 70c:	74072218 	strvc	r2, [r7], #-536	@ 0xfffffde8
+ 710:	03e70a7f 	mvneq	r0, #520192	@ 0x7f000
+ 714:	04009f2c 	streq	r9, [r0], #-3884	@ 0xfffff0d4
+ 718:	06000000 	streq	r0, [r0], -r0
+ 71c:	00000044 	andeq	r0, r0, r4, asr #32
+ 720:	07060004 	streq	r0, [r6, -r4]
+ 724:	e80a0074 	stmda	sl, {r2, r4, r5, r6}
+ 728:	049f2903 	ldreq	r2, [pc], #2307	@ 730 <cfun0+0x730>
+ 72c:	31021206 	tstcc	r2, r6, lsl #4
+ 730:	0004009f 	muleq	r4, pc, r0	@ <UNPREDICTABLE>
+ 734:	04000000 	streq	r0, [r0], #-0
+ 738:	1e060004 	cdpne	0, 0, cr0, cr6, cr4, {0}
+ 73c:	04000000 	streq	r0, [r0], #-0
+ 740:	31022600 	tstcc	r2, r0, lsl #12
+ 744:	3a26049f 	bcc	9819c8 <cfun0+0x9819c8>
+ 748:	08007206 	stmdaeq	r0, {r1, r2, r9, ip, sp, lr}
+ 74c:	049f2c7f 	ldreq	r2, [pc], #3199	@ 754 <cfun0+0x754>
+ 750:	72063a3a 	andvc	r3, r6, #237568	@ 0x3a000
+ 754:	2c7f087f 	ldclcs	8, cr0, [pc], #-508	@ 560 <cfun0+0x560>
+ 758:	b23a049f 	eorslt	r0, sl, #-1627389952	@ 0x9f000000
+ 75c:	00720601 	rsbseq	r0, r2, r1, lsl #12
+ 760:	9f2c7f08 	svcls	0x002c7f08
+ 764:	00004100 	andeq	r4, r0, r0, lsl #2
+ 768:	04040000 	streq	r0, [r4], #-0
+ 76c:	00060600 	andeq	r0, r6, r0, lsl #12
+ 770:	00040000 	andeq	r0, r4, r0
+ 774:	9f310218 	svcls	0x00310218
+ 778:	01b41804 			@ <UNDEFINED> instruction: 0x01b41804
+ 77c:	08007306 	stmdaeq	r0, {r1, r2, r8, r9, ip, sp, lr}
+ 780:	049f2c3f 	ldreq	r2, [pc], #3135	@ 788 <cfun0+0x788>
+ 784:	01b401b4 			@ <UNDEFINED> instruction: 0x01b401b4
+ 788:	087f7306 	ldmdaeq	pc!, {r1, r2, r8, r9, ip, sp, lr}^	@ <UNPREDICTABLE>
+ 78c:	049f2c3f 	ldreq	r2, [pc], #3135	@ 794 <cfun0+0x794>
+ 790:	01ca01b4 	strheq	r0, [sl, #20]
+ 794:	08007306 	stmdaeq	r0, {r1, r2, r8, r9, ip, sp, lr}
+ 798:	009f2c3f 	addseq	r2, pc, pc, lsr ip	@ <UNPREDICTABLE>
+
+Disassembly of section .debug_aranges:
+
+00000000 <.debug_aranges>:
+D:\src\M2\Test\TestMCURoutine\native/code.c:12
+void* cfun0(u1* args){
+   0:	0000001c 	andeq	r0, r0, ip, lsl r0
+D:\src\M2\Test\TestMCURoutine\native/code.c:16
+int stack_0_ptr_arr_stride_lb = *(int*)&args[(argN++)*4];
+   4:	00000002 	andeq	r0, r0, r2
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+   8:	00040000 	andeq	r0, r4, r0
+	...
+D:\src\M2\Test\TestMCURoutine\native/code.c:173
+IL_0102: stack_2_i4=((stack_2_i4)<<(stack_3_i4)); //IL_0102: shl: s_4, pop2, push1
+  14:	000000d0 	ldrdeq	r0, [r0], -r0	@ <UNPREDICTABLE>
+	...
+
+Disassembly of section .debug_rnglists:
+
+00000000 <.debug_rnglists>:
+D:\src\M2\Test\TestMCURoutine\native/code.c:12
+void* cfun0(u1* args){
+   0:	00000010 	andeq	r0, r0, r0, lsl r0
+D:\src\M2\Test\TestMCURoutine\native/code.c:16
+int stack_0_ptr_arr_stride_lb = *(int*)&args[(argN++)*4];
+   4:	00040005 	andeq	r0, r4, r5
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+   8:	00000000 	andeq	r0, r0, r0
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+   c:	00000007 	andeq	r0, r0, r7
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  10:	0001d000 	andeq	sp, r1, r0
+
+Disassembly of section .debug_line:
+
+00000000 <.debug_line>:
+D:\src\M2\Test\TestMCURoutine\native/code.c:12
+void* cfun0(u1* args){
+   0:	00000262 	andeq	r0, r0, r2, ror #4
+D:\src\M2\Test\TestMCURoutine\native/code.c:16
+int stack_0_ptr_arr_stride_lb = *(int*)&args[(argN++)*4];
+   4:	00420003 	subeq	r0, r2, r3
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+   8:	01020000 	mrseq	r0, (UNDEF: 2)
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+   c:	000d0efb 	strdeq	r0, [sp], -fp
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  10:	01010101 	tsteq	r1, r1, lsl #2
+D:\src\M2\Test\TestMCURoutine\native/code.c:173
+IL_0102: stack_2_i4=((stack_2_i4)<<(stack_3_i4)); //IL_0102: shl: s_4, pop2, push1
+  14:	01000000 	mrseq	r0, (UNDEF: 0)
+D:\src\M2\Test\TestMCURoutine\native/code.c:79
+IL_004d: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_004d: mul: s_3, pop2, push1
+  18:	44010000 	strmi	r0, [r1], #-0
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+  1c:	72735c3a 	rsbsvc	r5, r3, #14848	@ 0x3a00
+D:\src\M2\Test\TestMCURoutine\native/code.c:90
+IL_005d: stack_2_r4=(stack_2_i4); //IL_005d: conv.r8: s_3, pop1, push1
+  20:	324d5c63 	subcc	r5, sp, #25344	@ 0x6300
+  24:	7365545c 	cmnvc	r5, #92, 8	@ 0x5c000000
+D:\src\M2\Test\TestMCURoutine\native/code.c:170
+IL_00fe: stack_3_i4=((stack_3_i4)%(stack_4_i4)); //IL_00fe: rem: s_5, pop2, push1
+  28:	65545c74 	ldrbvs	r5, [r4, #-3188]	@ 0xfffff38c
+D:\src\M2\Test\TestMCURoutine\native/code.c:91
+IL_005e: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_005e: mul: s_3, pop2, push1
+  2c:	434d7473 	movtmi	r7, #54387	@ 0xd473
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  30:	756f5255 	strbvc	r5, [pc, #-597]!	@ fffffde3 <cfun0+0xfffffde3>
+D:\src\M2\Test\TestMCURoutine\native/code.c:173
+IL_0102: stack_2_i4=((stack_2_i4)<<(stack_3_i4)); //IL_0102: shl: s_4, pop2, push1
+  34:	656e6974 	strbvs	r6, [lr, #-2420]!	@ 0xfffff68c
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  38:	74616e5c 	strbtvc	r6, [r1], #-3676	@ 0xfffff1a4
+D:\src\M2\Test\TestMCURoutine\native/code.c:161
+IL_00ef: stack_1_i4=((stack_1_i4)*(stack_2_i4)); //IL_00ef: mul: s_3, pop2, push1
+  3c:	00657669 	rsbeq	r7, r5, r9, ror #12
+D:\src\M2\Test\TestMCURoutine\native/code.c:70
+IL_003e: var7=stack_0_i4; //IL_003e: stloc.s V_7: s_1, pop1, push0
+  40:	646f6300 	strbtvs	r6, [pc], #-768	@ 48 <cfun0+0x48>
+D:\src\M2\Test\TestMCURoutine\native/code.c:154
+IL_00e6: if (!(stack_0_u1)) goto IL_0108; //IL_00e6: brfalse.s IL_0108: s_1, pop1, push0
+  44:	00632e65 	rsbeq	r2, r3, r5, ror #28
+  48:	00000001 	andeq	r0, r0, r1
+D:\src\M2\Test\TestMCURoutine\native/code.c:164
+IL_00f3: stack_0_ptr=(( ((i1*)stack_0_ptr)+(stack_1_i4<<stack_0_ptr_arr_stride_lb) )); //IL_00f3: ldelema System.Byte: s_2, pop2, push1
+  4c:	05001605 	streq	r1, [r0, #-1541]	@ 0xfffff9fb
+D:\src\M2\Test\TestMCURoutine\native/code.c:166
+IL_00f9: stack_1_u1=(*(unsigned char*)(stack_1_ptr)); //IL_00f9: ldind.u1: s_2, pop1, push1
+  50:	00000002 	andeq	r0, r0, r2
+D:\src\M2\Test\TestMCURoutine\native/code.c:177
+IL_0106: *(char*)(stack_0_ptr)=(stack_1_u1); //IL_0106: stind.i1: s_2, pop2, push0
+  54:	010b0300 	mrseq	r0, (UNDEF: 59)
+D:\src\M2\Test\TestMCURoutine\native/code.c:189
+IL_0118: if (stack_0_u1) goto IL_0045; //IL_0118: brtrue IL_0045: s_1, pop1, push0
+  58:	05140105 	ldreq	r0, [r4, #-261]	@ 0xfffffefb
+D:\src\M2\Test\TestMCURoutine\native/code.c:78
+IL_004c: stack_2_r4=(stack_2_i4); //IL_004c: conv.r8: s_3, pop1, push1
+  5c:	16051302 	strne	r1, [r5], -r2, lsl #6
+  60:	05050f06 	streq	r0, [r5, #-3846]	@ 0xfffff0fa
+D:\src\M2\Test\TestMCURoutine\native/code.c:100
+IL_0079: var11=stack_0_r4; //IL_0079: stloc.s V_11: s_1, pop1, push0
+  64:	06010524 	streq	r0, [r1], -r4, lsr #10
+D:\src\M2\Test\TestMCURoutine\native/code.c:79
+IL_004d: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_004d: mul: s_3, pop2, push1
+  68:	010f0530 	tsteq	pc, r0, lsr r5	@ <UNPREDICTABLE>
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+  6c:	05130105 	ldreq	r0, [r3, #-261]	@ 0xfffffefb
+  70:	0105010f 	tsteq	r5, pc, lsl #2
+D:\src\M2\Test\TestMCURoutine\native/code.c:102
+IL_007c: var12=stack_0_i4; //IL_007c: stloc.s V_12: s_1, pop1, push0
+  74:	010f0513 	tsteq	pc, r3, lsl r5	@ <UNPREDICTABLE>
+D:\src\M2\Test\TestMCURoutine\native/code.c:98
+IL_006e: var10=stack_0_r4; //IL_006e: stloc.s V_10: s_1, pop1, push0
+  78:	05130105 	ldreq	r0, [r3, #-261]	@ 0xfffffefb
+D:\src\M2\Test\TestMCURoutine\native/code.c:134
+IL_00bb: stack_0_r4=((stack_0_r4)*(stack_1_r4)); //IL_00bb: mul: s_2, pop2, push1
+  7c:	0105010f 	tsteq	r5, pc, lsl #2
+D:\src\M2\Test\TestMCURoutine\native/code.c:137
+IL_00c0: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_00c0: mul: s_3, pop2, push1
+  80:	01110513 	tsteq	r1, r3, lsl r5
+D:\src\M2\Test\TestMCURoutine\native/code.c:138
+IL_00c1: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00c1: add: s_2, pop2, push1
+  84:	05130105 	ldreq	r0, [r3, #-261]	@ 0xfffffefb
+D:\src\M2\Test\TestMCURoutine\native/code.c:140
+IL_00cb: if ((unsigned char)(stack_0_r4)>=(unsigned char)(stack_1_r4)) goto IL_00d5; //IL_00cb: bge.un.s IL_00d5: s_2, pop2, push0
+  88:	0105010f 	tsteq	r5, pc, lsl #2
+  8c:	010f0513 	tsteq	pc, r3, lsl r5	@ <UNPREDICTABLE>
+  90:	05130105 	ldreq	r0, [r3, #-261]	@ 0xfffffefb
+  94:	0105010f 	tsteq	r5, pc, lsl #2
+D:\src\M2\Test\TestMCURoutine\native/code.c:148
+IL_00da: if (stack_0_u1) goto IL_0087; //IL_00da: brtrue.s IL_0087: s_1, pop1, push0
+  98:	01110513 	tsteq	r1, r3, lsl r5
+D:\src\M2\Test\TestMCURoutine\native/code.c:119
+IL_00a3: stack_0_r4=((stack_0_r4)*(stack_1_r4)); //IL_00a3: mul: s_2, pop2, push1
+  9c:	05130105 	ldreq	r0, [r3, #-261]	@ 0xfffffefb
+D:\src\M2\Test\TestMCURoutine\native/code.c:113
+IL_0092: stack_0_r4=((stack_0_r4)-(stack_1_r4)); //IL_0092: sub: s_2, pop2, push1
+  a0:	0105010f 	tsteq	r5, pc, lsl #2
+D:\src\M2\Test\TestMCURoutine\native/code.c:123
+IL_00a9: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00a9: add: s_2, pop2, push1
+  a4:	010f0513 	tsteq	pc, r3, lsl r5	@ <UNPREDICTABLE>
+  a8:	05130105 	ldreq	r0, [r3, #-261]	@ 0xfffffefb
+D:\src\M2\Test\TestMCURoutine\native/code.c:129
+IL_00b3: stack_0_i4=((stack_0_i4)+(stack_1_i4)); //IL_00b3: add: s_2, pop2, push1
+  ac:	0105010f 	tsteq	r5, pc, lsl #2
+D:\src\M2\Test\TestMCURoutine\native/code.c:126
+IL_00ae: var10=stack_0_r4; //IL_00ae: stloc.s V_10: s_1, pop1, push0
+  b0:	010f0513 	tsteq	pc, r3, lsl r5	@ <UNPREDICTABLE>
+D:\src\M2\Test\TestMCURoutine\native/code.c:123
+IL_00a9: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00a9: add: s_2, pop2, push1
+  b4:	13140105 	tstne	r4, #1073741825	@ 0x40000001
+D:\src\M2\Test\TestMCURoutine\native/code.c:193
+IL_0121: stack_0_i4=((stack_0_i4)+(stack_1_i4)); //IL_0121: add: s_2, pop2, push1
+  b8:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+D:\src\M2\Test\TestMCURoutine\native/code.c:200
+IL_012d: if (stack_0_u1) goto IL_003c; //IL_012d: brtrue IL_003c: s_1, pop1, push0
+  bc:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+D:\src\M2\Test\TestMCURoutine\native/code.c:206
+}
+  c0:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+  c4:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+  c8:	0a051313 	beq	144d1c <cfun0+0x144d1c>
+  cc:	13131314 	tstne	r3, #20, 6	@ 0x50000000
+  d0:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+  d4:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+  d8:	03131313 	tsteq	r3, #1275068416	@ 0x4c000000
+  dc:	13010180 	movwne	r0, #4480	@ 0x1180
+  e0:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+  e4:	03061405 	movweq	r1, #25605	@ 0x6405
+  e8:	03017f97 	movweq	r7, #8087	@ 0x1f97
+  ec:	0e052e74 	mcreq	14, 0, r2, cr5, cr4, {3}
+  f0:	052e6f03 	streq	r6, [lr, #-3843]!	@ 0xfffff0fd
+  f4:	201d0314 	andscs	r0, sp, r4, lsl r3
+  f8:	2e00ce03 	cdpcs	14, 0, cr12, cr0, cr3, {0}
+  fc:	207fa203 	rsbscs	sl, pc, r3, lsl #4
+ 100:	060a0532 			@ <UNDEFINED> instruction: 0x060a0532
+ 104:	2e00e503 	cfsh32cs	mvfx14, mvfx0, #3
+ 108:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+ 10c:	06140513 			@ <UNDEFINED> instruction: 0x06140513
+ 110:	017f9d03 	cmneq	pc, r3, lsl #26
+ 114:	4a00d003 	bmi	34128 <cfun0+0x34128>
+ 118:	2e7fb103 	expcse	f3, f3
+ 11c:	00c00332 	sbceq	r0, r0, r2, lsr r3
+ 120:	200e032e 	andcs	r0, lr, lr, lsr #6
+ 124:	2e7fb203 	cdpcs	2, 7, cr11, cr15, cr3, {0}
+ 128:	2e00c203 	cdpcs	2, 0, cr12, cr0, cr3, {0}
+ 12c:	05200d03 	streq	r0, [r0, #-3331]!	@ 0xfffff2fd
+ 130:	7f98030e 	svcvc	0x0098030e
+ 134:	060a0520 	streq	r0, [sl], -r0, lsr #10
+ 138:	2e00cf03 	cdpcs	15, 0, cr12, cr0, cr3, {0}
+ 13c:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+ 140:	060d0513 			@ <UNDEFINED> instruction: 0x060d0513
+ 144:	060a0501 	streq	r0, [sl], -r1, lsl #10
+ 148:	1313133e 	tstne	r3, #-134217728	@ 0xf8000000
+ 14c:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+ 150:	06140513 			@ <UNDEFINED> instruction: 0x06140513
+ 154:	21370511 	teqcs	r7, r1, lsl r5
+ 158:	2f060a05 	svccs	0x00060a05
+ 15c:	06140513 			@ <UNDEFINED> instruction: 0x06140513
+ 160:	060a0501 	streq	r0, [sl], -r1, lsl #10
+ 164:	13131321 	tstne	r3, #-2080374784	@ 0x84000000
+ 168:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+ 16c:	05131313 	ldreq	r1, [r3, #-787]	@ 0xfffffced
+ 170:	05100614 	ldreq	r0, [r0, #-1556]	@ 0xfffff9ec
+ 174:	0a05221f 	beq	1489f8 <cfun0+0x1489f8>
+ 178:	13132306 	tstne	r3, #402653184	@ 0x18000000
+ 17c:	01061405 	tsteq	r6, r5, lsl #8
+ 180:	21060a05 	tstcs	r6, r5, lsl #20
+ 184:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+ 188:	0d051313 	stceq	3, cr1, [r5, #-76]	@ 0xffffffb4
+ 18c:	1a050106 	bne	1405ac <cfun0+0x1405ac>
+ 190:	01040200 	mrseq	r0, R12_usr
+ 194:	0a052e06 	beq	14b9b4 <cfun0+0x14b9b4>
+ 198:	017f8c03 	cmneq	pc, r3, lsl #24
+ 19c:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+ 1a0:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+ 1a4:	14051313 	strne	r1, [r5], #-787	@ 0xfffffced
+ 1a8:	0f050d06 	svceq	0x00050d06
+ 1ac:	054a1603 	strbeq	r1, [sl, #-1539]	@ 0xfffff9fd
+ 1b0:	2e6b0314 	mcrcs	3, 3, r0, cr11, cr4, {0}
+ 1b4:	060a0532 			@ <UNDEFINED> instruction: 0x060a0532
+ 1b8:	1313134b 	tstne	r3, #738197505	@ 0x2c000001
+ 1bc:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+ 1c0:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+ 1c4:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+ 1c8:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+ 1cc:	0f051313 	svceq	0x00051313
+ 1d0:	051c0f06 	ldreq	r0, [ip, #-3846]	@ 0xfffff0fa
+ 1d4:	2203060a 	andcs	r0, r3, #10485760	@ 0xa00000
+ 1d8:	0513132e 	ldreq	r1, [r3, #-814]	@ 0xfffffcd2
+ 1dc:	05010614 	streq	r0, [r1, #-1556]	@ 0xfffff9ec
+ 1e0:	132f060a 			@ <UNDEFINED> instruction: 0x132f060a
+ 1e4:	06140513 			@ <UNDEFINED> instruction: 0x06140513
+ 1e8:	060a0501 	streq	r0, [sl], -r1, lsl #10
+ 1ec:	0513132f 	ldreq	r1, [r3, #-815]	@ 0xfffffcd1
+ 1f0:	05100614 	ldreq	r0, [r0, #-1556]	@ 0xfffff9ec
+ 1f4:	052e300e 	streq	r3, [lr, #-14]!
+ 1f8:	0a052e0d 	beq	14ba34 <cfun0+0x14ba34>
+ 1fc:	13134b06 	tstne	r3, #6144	@ 0x1800
+ 200:	13131413 	tstne	r3, #318767104	@ 0x13000000
+ 204:	01060d05 	tsteq	r6, r5, lsl #26
+ 208:	02001a05 	andeq	r1, r0, #20480	@ 0x5000
+ 20c:	3c060104 	stfccs	f0, [r6], {4}
+ 210:	57030a05 	strpl	r0, [r3, -r5, lsl #20]
+ 214:	13131301 	tstne	r3, #67108864	@ 0x4000000
+ 218:	05131313 	ldreq	r1, [r3, #-787]	@ 0xfffffced
+ 21c:	03180614 	tsteq	r8, #20, 12	@ 0x1400000
+ 220:	0a052e7a 	beq	14bc10 <cfun0+0x14bc10>
+ 224:	13132f06 	tstne	r3, #6, 30
+ 228:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+ 22c:	05131313 	ldreq	r1, [r3, #-787]	@ 0xfffffced
+ 230:	50010614 	andpl	r0, r1, r4, lsl r6
+ 234:	051d0f05 	ldreq	r0, [sp, #-3845]	@ 0xfffff0fb
+ 238:	0a052b14 	beq	14ae90 <cfun0+0x14ae90>
+ 23c:	13132f06 	tstne	r3, #6, 30
+ 240:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+ 244:	03060106 	movweq	r0, #24838	@ 0x6106
+ 248:	1313203d 	tstne	r3, #61	@ 0x3d
+ 24c:	01061405 	tsteq	r6, r5, lsl #8
+ 250:	21060a05 	tstcs	r6, r5, lsl #20
+ 254:	13131313 	tstne	r3, #1275068416	@ 0x4c000000
+ 258:	0d051313 	stceq	3, cr1, [r5, #-76]	@ 0xffffffb4
+ 25c:	01050106 	tsteq	r5, r6, lsl #2
+ 260:	00090234 	andeq	r0, r9, r4, lsr r2
+ 264:	Address 0x264 is out of bounds.
+
+
+Disassembly of section .debug_str:
+
+00000000 <.debug_str>:
+D:\src\M2\Test\TestMCURoutine\native/code.c:12
+void* cfun0(u1* args){
+   0:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:16
+int stack_0_ptr_arr_stride_lb = *(int*)&args[(argN++)*4];
+   4:	00643330 	rsbeq	r3, r4, r0, lsr r3
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+   8:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+   c:	00396530 	eorseq	r6, r9, r0, lsr r5
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  10:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:173
+IL_0102: stack_2_i4=((stack_2_i4)<<(stack_3_i4)); //IL_0102: shl: s_4, pop2, push1
+  14:	00613530 	rsbeq	r3, r1, r0, lsr r5
+D:\src\M2\Test\TestMCURoutine\native/code.c:79
+IL_004d: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_004d: mul: s_3, pop2, push1
+  18:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+  1c:	00623530 	rsbeq	r3, r2, r0, lsr r5
+D:\src\M2\Test\TestMCURoutine\native/code.c:90
+IL_005d: stack_2_r4=(stack_2_i4); //IL_005d: conv.r8: s_3, pop1, push1
+  20:	305f4c49 	subscc	r4, pc, r9, asr #24
+  24:	00643530 	rsbeq	r3, r4, r0, lsr r5
+D:\src\M2\Test\TestMCURoutine\native/code.c:170
+IL_00fe: stack_3_i4=((stack_3_i4)%(stack_4_i4)); //IL_00fe: rem: s_5, pop2, push1
+  28:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:91
+IL_005e: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_005e: mul: s_3, pop2, push1
+  2c:	00653530 	rsbeq	r3, r5, r0, lsr r5
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  30:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:173
+IL_0102: stack_2_i4=((stack_2_i4)<<(stack_3_i4)); //IL_0102: shl: s_4, pop2, push1
+  34:	00663530 	rsbeq	r3, r6, r0, lsr r5
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  38:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:161
+IL_00ef: stack_1_i4=((stack_1_i4)*(stack_2_i4)); //IL_00ef: mul: s_3, pop2, push1
+  3c:	00656530 	rsbeq	r6, r5, r0, lsr r5
+D:\src\M2\Test\TestMCURoutine\native/code.c:70
+IL_003e: var7=stack_0_i4; //IL_003e: stloc.s V_7: s_1, pop1, push0
+  40:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:154
+IL_00e6: if (!(stack_0_u1)) goto IL_0108; //IL_00e6: brfalse.s IL_0108: s_1, pop1, push0
+  44:	00666530 	rsbeq	r6, r6, r0, lsr r5
+  48:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:164
+IL_00f3: stack_0_ptr=(( ((i1*)stack_0_ptr)+(stack_1_i4<<stack_0_ptr_arr_stride_lb) )); //IL_00f3: ldelema System.Byte: s_2, pop2, push1
+  4c:	00303630 	eorseq	r3, r0, r0, lsr r6
+D:\src\M2\Test\TestMCURoutine\native/code.c:166
+IL_00f9: stack_1_u1=(*(unsigned char*)(stack_1_ptr)); //IL_00f9: ldind.u1: s_2, pop1, push1
+  50:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:177
+IL_0106: *(char*)(stack_0_ptr)=(stack_1_u1); //IL_0106: stind.i1: s_2, pop2, push0
+  54:	00313630 	eorseq	r3, r1, r0, lsr r6
+D:\src\M2\Test\TestMCURoutine\native/code.c:189
+IL_0118: if (stack_0_u1) goto IL_0045; //IL_0118: brtrue IL_0045: s_1, pop1, push0
+  58:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:78
+IL_004c: stack_2_r4=(stack_2_i4); //IL_004c: conv.r8: s_3, pop1, push1
+  5c:	00323630 	eorseq	r3, r2, r0, lsr r6
+  60:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:100
+IL_0079: var11=stack_0_r4; //IL_0079: stloc.s V_11: s_1, pop1, push0
+  64:	00333630 	eorseq	r3, r3, r0, lsr r6
+D:\src\M2\Test\TestMCURoutine\native/code.c:79
+IL_004d: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_004d: mul: s_3, pop2, push1
+  68:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+  6c:	00313231 	eorseq	r3, r1, r1, lsr r2
+  70:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:102
+IL_007c: var12=stack_0_i4; //IL_007c: stloc.s V_12: s_1, pop1, push0
+  74:	00353630 	eorseq	r3, r5, r0, lsr r6
+D:\src\M2\Test\TestMCURoutine\native/code.c:98
+IL_006e: var10=stack_0_r4; //IL_006e: stloc.s V_10: s_1, pop1, push0
+  78:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:134
+IL_00bb: stack_0_r4=((stack_0_r4)*(stack_1_r4)); //IL_00bb: mul: s_2, pop2, push1
+  7c:	00323231 	eorseq	r3, r2, r1, lsr r2
+D:\src\M2\Test\TestMCURoutine\native/code.c:137
+IL_00c0: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_00c0: mul: s_3, pop2, push1
+  80:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:138
+IL_00c1: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00c1: add: s_2, pop2, push1
+  84:	00626330 	rsbeq	r6, r2, r0, lsr r3
+D:\src\M2\Test\TestMCURoutine\native/code.c:140
+IL_00cb: if ((unsigned char)(stack_0_r4)>=(unsigned char)(stack_1_r4)) goto IL_00d5; //IL_00cb: bge.un.s IL_00d5: s_2, pop2, push0
+  88:	305f4c49 	subscc	r4, pc, r9, asr #24
+  8c:	00646330 	rsbeq	r6, r4, r0, lsr r3
+  90:	305f4c49 	subscc	r4, pc, r9, asr #24
+  94:	00666330 	rsbeq	r6, r6, r0, lsr r3
+D:\src\M2\Test\TestMCURoutine\native/code.c:148
+IL_00da: if (stack_0_u1) goto IL_0087; //IL_00da: brtrue.s IL_0087: s_1, pop1, push0
+  98:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:119
+IL_00a3: stack_0_r4=((stack_0_r4)*(stack_1_r4)); //IL_00a3: mul: s_2, pop2, push1
+  9c:	00313031 	eorseq	r3, r1, r1, lsr r0
+D:\src\M2\Test\TestMCURoutine\native/code.c:113
+IL_0092: stack_0_r4=((stack_0_r4)-(stack_1_r4)); //IL_0092: sub: s_2, pop2, push1
+  a0:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:123
+IL_00a9: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00a9: add: s_2, pop2, push1
+  a4:	00323031 	eorseq	r3, r2, r1, lsr r0
+  a8:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:129
+IL_00b3: stack_0_i4=((stack_0_i4)+(stack_1_i4)); //IL_00b3: add: s_2, pop2, push1
+  ac:	00333031 	eorseq	r3, r3, r1, lsr r0
+D:\src\M2\Test\TestMCURoutine\native/code.c:126
+IL_00ae: var10=stack_0_r4; //IL_00ae: stloc.s V_10: s_1, pop1, push0
+  b0:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:123
+IL_00a9: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_00a9: add: s_2, pop2, push1
+  b4:	00343031 	eorseq	r3, r4, r1, lsr r0
+D:\src\M2\Test\TestMCURoutine\native/code.c:193
+IL_0121: stack_0_i4=((stack_0_i4)+(stack_1_i4)); //IL_0121: add: s_2, pop2, push1
+  b8:	305f4c49 	subscc	r4, pc, r9, asr #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:200
+IL_012d: if (stack_0_u1) goto IL_003c; //IL_012d: brtrue IL_003c: s_1, pop1, push0
+  bc:	00353031 	eorseq	r3, r5, r1, lsr r0
+D:\src\M2\Test\TestMCURoutine\native/code.c:206
+}
+  c0:	305f4c49 	subscc	r4, pc, r9, asr #24
+  c4:	00363031 	eorseq	r3, r6, r1, lsr r0
+  c8:	305f4c49 	subscc	r4, pc, r9, asr #24
+  cc:	00373031 	eorseq	r3, r7, r1, lsr r0
+  d0:	305f4c49 	subscc	r4, pc, r9, asr #24
+  d4:	00383031 	eorseq	r3, r8, r1, lsr r0
+  d8:	305f4c49 	subscc	r4, pc, r9, asr #24
+  dc:	00393031 	eorseq	r3, r9, r1, lsr r0
+  e0:	305f4c49 	subscc	r4, pc, r9, asr #24
+  e4:	00316430 	eorseq	r6, r1, r0, lsr r4
+  e8:	63617473 	cmnvs	r1, #1929379840	@ 0x73000000
+  ec:	5f325f6b 	svcpl	0x00325f6b
+  f0:	49003175 	stmdbmi	r0, {r0, r2, r4, r5, r6, r8, ip, sp}
+  f4:	30305f4c 	eorscc	r5, r0, ip, asr #30
+  f8:	49003564 	stmdbmi	r0, {r2, r5, r6, r8, sl, ip, sp}
+  fc:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 100:	49003664 	stmdbmi	r0, {r2, r5, r6, r9, sl, ip, sp}
+ 104:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 108:	49003864 	stmdbmi	r0, {r2, r5, r6, fp, ip, sp}
+ 10c:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 110:	6c006536 	cfstr32vs	mvfx6, [r0], {54}	@ 0x36
+ 114:	20676e6f 	rsbcs	r6, r7, pc, ror #28
+ 118:	676e6f6c 	strbvs	r6, [lr, -ip, ror #30]!
+ 11c:	736e7520 	cmnvc	lr, #32, 10	@ 0x8000000
+ 120:	656e6769 	strbvs	r6, [lr, #-1897]!	@ 0xfffff897
+ 124:	6e692064 	cdpvs	0, 6, cr2, cr9, cr4, {3}
+ 128:	61760074 	cmnvs	r6, r4, ror r0
+ 12c:	00303172 	eorseq	r3, r0, r2, ror r1
+ 130:	31726176 	cmncc	r2, r6, ror r1
+ 134:	61760031 	cmnvs	r6, r1, lsr r0
+ 138:	00323172 	eorseq	r3, r2, r2, ror r1
+ 13c:	31726176 	cmncc	r2, r6, ror r1
+ 140:	61760033 	cmnvs	r6, r3, lsr r0
+ 144:	00343172 	eorseq	r3, r4, r2, ror r1
+ 148:	31726176 	cmncc	r2, r6, ror r1
+ 14c:	61760035 	cmnvs	r6, r5, lsr r0
+ 150:	00363172 	eorseq	r3, r6, r2, ror r1
+ 154:	31726176 	cmncc	r2, r6, ror r1
+ 158:	61760037 	cmnvs	r6, r7, lsr r0
+ 15c:	00383172 	eorseq	r3, r8, r2, ror r1
+ 160:	31726176 	cmncc	r2, r6, ror r1
+ 164:	4c490039 	mcrrmi	0, 3, r0, r9, cr9
+ 168:	3031305f 	eorscc	r3, r1, pc, asr r0
+ 16c:	4c490066 	mcrrmi	0, 6, r0, r9, cr6
+ 170:	3030305f 	eorscc	r3, r0, pc, asr r0
+ 174:	4c490061 	mcrrmi	0, 6, r0, r9, cr1
+ 178:	3231305f 	eorscc	r3, r1, #95	@ 0x5f
+ 17c:	4c490030 	mcrrmi	0, 3, r0, r9, cr0
+ 180:	3730305f 			@ <UNDEFINED> instruction: 0x3730305f
+ 184:	4c490039 	mcrrmi	0, 3, r0, r9, cr9
+ 188:	6430305f 	ldrtvs	r3, [r0], #-95	@ 0xffffffa1
+ 18c:	4c490061 	mcrrmi	0, 6, r0, r9, cr1
+ 190:	6430305f 	ldrtvs	r3, [r0], #-95	@ 0xffffffa1
+ 194:	4c490063 	mcrrmi	0, 6, r0, r9, cr3
+ 198:	6430305f 	ldrtvs	r3, [r0], #-95	@ 0xffffffa1
+ 19c:	4c490065 	mcrrmi	0, 6, r0, r9, cr5
+ 1a0:	3231305f 	eorscc	r3, r1, #95	@ 0x5f
+ 1a4:	4c490034 	mcrrmi	0, 3, r0, r9, cr4
+ 1a8:	6230305f 	eorsvs	r3, r0, #95	@ 0x5f
+ 1ac:	4c490037 	mcrrmi	0, 3, r0, r9, cr7
+ 1b0:	3131305f 	teqcc	r1, pc, asr r0
+ 1b4:	74730034 	ldrbtvc	r0, [r3], #-52	@ 0xffffffcc
+ 1b8:	5f6b6361 	svcpl	0x006b6361
+ 1bc:	31755f31 	cmncc	r5, r1, lsr pc
+ 1c0:	5f4c4900 	svcpl	0x004c4900
+ 1c4:	36313130 			@ <UNDEFINED> instruction: 0x36313130
+ 1c8:	5f4c4900 	svcpl	0x004c4900
+ 1cc:	37323130 			@ <UNDEFINED> instruction: 0x37323130
+ 1d0:	5f4c4900 	svcpl	0x004c4900
+ 1d4:	38313130 	ldmdacc	r1!, {r4, r5, r8, ip, sp}
+ 1d8:	5f4c4900 	svcpl	0x004c4900
+ 1dc:	30653030 	rsbcc	r3, r5, r0, lsr r0
+ 1e0:	5f4c4900 	svcpl	0x004c4900
+ 1e4:	32653030 	rsbcc	r3, r5, #48	@ 0x30
+ 1e8:	5f4c4900 	svcpl	0x004c4900
+ 1ec:	34653030 	strbtcc	r3, [r5], #-48	@ 0xffffffd0
+ 1f0:	5f4c4900 	svcpl	0x004c4900
+ 1f4:	36653030 			@ <UNDEFINED> instruction: 0x36653030
+ 1f8:	5f4c4900 	svcpl	0x004c4900
+ 1fc:	38653030 	stmdacc	r5!, {r4, r5, ip, sp}^
+ 200:	5f4c4900 	svcpl	0x004c4900
+ 204:	63343030 	teqvs	r4, #48	@ 0x30
+ 208:	5f4c4900 	svcpl	0x004c4900
+ 20c:	30303030 	eorscc	r3, r0, r0, lsr r0
+ 210:	5f4c4900 	svcpl	0x004c4900
+ 214:	31303030 	teqcc	r0, r0, lsr r0
+ 218:	61747300 	cmnvs	r4, r0, lsl #6
+ 21c:	305f6b63 	subscc	r6, pc, r3, ror #22
+ 220:	7274705f 	rsbsvc	r7, r4, #95	@ 0x5f
+ 224:	7272615f 	rsbsvc	r6, r2, #-1073741801	@ 0xc0000017
+ 228:	7274735f 	rsbsvc	r7, r4, #2080374785	@ 0x7c000001
+ 22c:	5f656469 	svcpl	0x00656469
+ 230:	4900626c 	stmdbmi	r0, {r2, r3, r5, r6, r9, sp, lr}
+ 234:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 238:	49003630 	stmdbmi	r0, {r4, r5, r9, sl, ip, sp}
+ 23c:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 240:	49003730 	stmdbmi	r0, {r4, r5, r8, r9, sl, ip, sp}
+ 244:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 248:	49003930 	stmdbmi	r0, {r4, r5, r8, fp, ip, sp}
+ 24c:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 250:	49006237 	stmdbmi	r0, {r0, r1, r2, r4, r5, r9, sp, lr}
+ 254:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 258:	49006337 	stmdbmi	r0, {r0, r1, r2, r4, r5, r8, r9, sp, lr}
+ 25c:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 260:	49006537 	stmdbmi	r0, {r0, r1, r2, r4, r5, r8, sl, sp, lr}
+ 264:	31305f4c 	teqcc	r0, ip, asr #30
+ 268:	49006431 	stmdbmi	r0, {r0, r4, r5, sl, sp, lr}
+ 26c:	31305f4c 	teqcc	r0, ip, asr #30
+ 270:	73006531 	movwvc	r6, #1329	@ 0x531
+ 274:	6b636174 	blvs	18d884c <cfun0+0x18d884c>
+ 278:	695f345f 	ldmdbvs	pc, {r0, r1, r2, r3, r4, r6, sl, ip, sp}^	@ <UNPREDICTABLE>
+ 27c:	4c490034 	mcrrmi	0, 3, r0, r9, cr4
+ 280:	3830305f 	ldmdacc	r0!, {r0, r1, r2, r3, r4, r6, ip, sp}
+ 284:	4c490033 	mcrrmi	0, 3, r0, r9, cr3
+ 288:	3830305f 	ldmdacc	r0!, {r0, r1, r2, r3, r4, r6, ip, sp}
+ 28c:	4c490035 	mcrrmi	0, 3, r0, r9, cr5
+ 290:	3830305f 	ldmdacc	r0!, {r0, r1, r2, r3, r4, r6, ip, sp}
+ 294:	4c490037 	mcrrmi	0, 3, r0, r9, cr7
+ 298:	3830305f 	ldmdacc	r0!, {r0, r1, r2, r3, r4, r6, ip, sp}
+ 29c:	74730038 	ldrbtvc	r0, [r3], #-56	@ 0xffffffc8
+ 2a0:	5f6b6361 	svcpl	0x006b6361
+ 2a4:	31755f30 	cmncc	r5, r0, lsr pc
+ 2a8:	5f4c4900 	svcpl	0x004c4900
+ 2ac:	61653030 	cmnvs	r5, r0, lsr r0
+ 2b0:	5f4c4900 	svcpl	0x004c4900
+ 2b4:	63653030 	cmnvs	r5, #48	@ 0x30
+ 2b8:	5f4c4900 	svcpl	0x004c4900
+ 2bc:	64653030 	strbtvs	r3, [r5], #-48	@ 0xffffffd0
+ 2c0:	72617600 	rsbvc	r7, r1, #0, 12
+ 2c4:	61760030 	cmnvs	r6, r0, lsr r0
+ 2c8:	76003172 			@ <UNDEFINED> instruction: 0x76003172
+ 2cc:	00327261 	eorseq	r7, r2, r1, ror #4
+ 2d0:	33726176 	cmncc	r2, #-2147483619	@ 0x8000001d
+ 2d4:	72617600 	rsbvc	r7, r1, #0, 12
+ 2d8:	61760034 	cmnvs	r6, r4, lsr r0
+ 2dc:	76003572 			@ <UNDEFINED> instruction: 0x76003572
+ 2e0:	00367261 	eorseq	r7, r6, r1, ror #4
+ 2e4:	37726176 			@ <UNDEFINED> instruction: 0x37726176
+ 2e8:	72617600 	rsbvc	r7, r1, #0, 12
+ 2ec:	61760038 	cmnvs	r6, r8, lsr r0
+ 2f0:	49003972 	stmdbmi	r0, {r1, r4, r5, r6, r8, fp, ip, sp}
+ 2f4:	31305f4c 	teqcc	r0, ip, asr #30
+ 2f8:	49003932 	stmdbmi	r0, {r1, r4, r5, r8, fp, ip, sp}
+ 2fc:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 300:	73003066 	movwvc	r3, #102	@ 0x66
+ 304:	6b636174 	blvs	18d88dc <cfun0+0x18d88dc>
+ 308:	705f315f 	subsvc	r3, pc, pc, asr r1	@ <UNPREDICTABLE>
+ 30c:	49007274 	stmdbmi	r0, {r2, r4, r5, r6, r9, ip, sp, lr}
+ 310:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 314:	49003266 	stmdbmi	r0, {r1, r2, r5, r6, r9, ip, sp}
+ 318:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 31c:	49003366 	stmdbmi	r0, {r1, r2, r5, r6, r8, r9, ip, sp}
+ 320:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 324:	49003866 	stmdbmi	r0, {r1, r2, r5, r6, fp, ip, sp}
+ 328:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 32c:	49003966 	stmdbmi	r0, {r1, r2, r5, r6, r8, fp, ip, sp}
+ 330:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 334:	49006362 	stmdbmi	r0, {r1, r5, r6, r8, r9, sp, lr}
+ 338:	31305f4c 	teqcc	r0, ip, asr #30
+ 33c:	49003231 	stmdbmi	r0, {r0, r4, r5, r9, ip, sp}
+ 340:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 344:	49003331 	stmdbmi	r0, {r0, r4, r5, r8, r9, ip, sp}
+ 348:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 34c:	49003431 	stmdbmi	r0, {r0, r4, r5, sl, ip, sp}
+ 350:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 354:	49006138 	stmdbmi	r0, {r3, r4, r5, r8, sp, lr}
+ 358:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 35c:	49006338 	stmdbmi	r0, {r3, r4, r5, r8, r9, sp, lr}
+ 360:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 364:	49006438 	stmdbmi	r0, {r3, r4, r5, sl, sp, lr}
+ 368:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 36c:	73006638 	movwvc	r6, #1592	@ 0x638
+ 370:	6b636174 	blvs	18d8948 <cfun0+0x18d8948>
+ 374:	695f335f 	ldmdbvs	pc, {r0, r1, r2, r3, r4, r6, r8, r9, ip, sp}^	@ <UNPREDICTABLE>
+ 378:	4c490034 	mcrrmi	0, 3, r0, r9, cr4
+ 37c:	3231305f 	eorscc	r3, r1, #95	@ 0x5f
+ 380:	4c490062 	mcrrmi	0, 6, r0, r9, cr2
+ 384:	3231305f 	eorscc	r3, r1, #95	@ 0x5f
+ 388:	4c490064 	mcrrmi	0, 6, r0, r9, cr4
+ 38c:	3930305f 	ldmdbcc	r0!, {r0, r1, r2, r3, r4, r6, ip, sp}
+ 390:	4c490031 	mcrrmi	0, 3, r0, r9, cr1
+ 394:	3930305f 	ldmdbcc	r0!, {r0, r1, r2, r3, r4, r6, ip, sp}
+ 398:	4c490032 	mcrrmi	0, 3, r0, r9, cr2
+ 39c:	3930305f 	ldmdbcc	r0!, {r0, r1, r2, r3, r4, r6, ip, sp}
+ 3a0:	4c490033 	mcrrmi	0, 3, r0, r9, cr3
+ 3a4:	3930305f 	ldmdbcc	r0!, {r0, r1, r2, r3, r4, r6, ip, sp}
+ 3a8:	4c490035 	mcrrmi	0, 3, r0, r9, cr5
+ 3ac:	3930305f 	ldmdbcc	r0!, {r0, r1, r2, r3, r4, r6, ip, sp}
+ 3b0:	4c490036 	mcrrmi	0, 3, r0, r9, cr6
+ 3b4:	3930305f 	ldmdbcc	r0!, {r0, r1, r2, r3, r4, r6, ip, sp}
+ 3b8:	4c490038 	mcrrmi	0, 3, r0, r9, cr8
+ 3bc:	6630305f 			@ <UNDEFINED> instruction: 0x6630305f
+ 3c0:	4c490061 	mcrrmi	0, 6, r0, r9, cr1
+ 3c4:	6630305f 			@ <UNDEFINED> instruction: 0x6630305f
+ 3c8:	4c490062 	mcrrmi	0, 6, r0, r9, cr2
+ 3cc:	6630305f 			@ <UNDEFINED> instruction: 0x6630305f
+ 3d0:	4c490064 	mcrrmi	0, 6, r0, r9, cr4
+ 3d4:	6630305f 			@ <UNDEFINED> instruction: 0x6630305f
+ 3d8:	4c490065 	mcrrmi	0, 6, r0, r9, cr5
+ 3dc:	6630305f 			@ <UNDEFINED> instruction: 0x6630305f
+ 3e0:	4c490066 	mcrrmi	0, 6, r0, r9, cr6
+ 3e4:	3331305f 	teqcc	r1, #95	@ 0x5f
+ 3e8:	4c490032 	mcrrmi	0, 3, r0, r9, cr2
+ 3ec:	3331305f 	teqcc	r1, #95	@ 0x5f
+ 3f0:	4c490033 	mcrrmi	0, 3, r0, r9, cr3
+ 3f4:	3331305f 	teqcc	r1, #95	@ 0x5f
+ 3f8:	4c490035 	mcrrmi	0, 3, r0, r9, cr5
+ 3fc:	3331305f 	teqcc	r1, #95	@ 0x5f
+ 400:	4c490037 	mcrrmi	0, 3, r0, r9, cr7
+ 404:	3331305f 	teqcc	r1, #95	@ 0x5f
+ 408:	4c490039 	mcrrmi	0, 3, r0, r9, cr9
+ 40c:	3130305f 	teqcc	r0, pc, asr r0
+ 410:	4c490064 	mcrrmi	0, 6, r0, r9, cr4
+ 414:	3130305f 	teqcc	r0, pc, asr r0
+ 418:	74730065 	ldrbtvc	r0, [r3], #-101	@ 0xffffff9b
+ 41c:	5f6b6361 	svcpl	0x006b6361
+ 420:	34695f32 	strbtcc	r5, [r9], #-3890	@ 0xfffff0ce
+ 424:	5f4c4900 	svcpl	0x004c4900
+ 428:	39323030 	ldmdbcc	r2!, {r4, r5, ip, sp}
+ 42c:	5f4c4900 	svcpl	0x004c4900
+ 430:	37323030 			@ <UNDEFINED> instruction: 0x37323030
+ 434:	6f6c6600 	svcvs	0x006c6600
+ 438:	44007461 	strmi	r7, [r0], #-1121	@ 0xfffffb9f
+ 43c:	72735c3a 	rsbsvc	r5, r3, #14848	@ 0x3a00
+ 440:	324d5c63 	subcc	r5, sp, #25344	@ 0x6300
+ 444:	7365545c 	cmnvc	r5, #92, 8	@ 0x5c000000
+ 448:	65545c74 	ldrbvs	r5, [r4, #-3188]	@ 0xfffff38c
+ 44c:	434d7473 	movtmi	r7, #54387	@ 0xd473
+ 450:	756f5255 	strbvc	r5, [pc, #-597]!	@ 203 <cfun0+0x203>
+ 454:	656e6974 	strbvs	r6, [lr, #-2420]!	@ 0xfffff68c
+ 458:	74616e5c 	strbtvc	r6, [r1], #-3676	@ 0xfffff1a4
+ 45c:	5c657669 	stclpl	6, cr7, [r5], #-420	@ 0xfffffe5c
+ 460:	65646f63 	strbvs	r6, [r4, #-3939]!	@ 0xfffff09d
+ 464:	4900632e 	stmdbmi	r0, {r1, r2, r3, r5, r8, r9, sp, lr}
+ 468:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 46c:	75003661 	strvc	r3, [r0, #-1633]	@ 0xfffff99f
+ 470:	6769736e 	strbvs	r7, [r9, -lr, ror #6]!
+ 474:	2064656e 	rsbcs	r6, r4, lr, ror #10
+ 478:	72616863 	rsbvc	r6, r1, #6488064	@ 0x630000
+ 47c:	61747300 	cmnvs	r4, r0, lsl #6
+ 480:	315f6b63 	cmpcc	pc, r3, ror #22
+ 484:	0034695f 	eorseq	r6, r4, pc, asr r9
+ 488:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 48c:	00323330 	eorseq	r3, r2, r0, lsr r3
+ 490:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 494:	00343330 	eorseq	r3, r4, r0, lsr r3
+ 498:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 49c:	00353330 	eorseq	r3, r5, r0, lsr r3
+ 4a0:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 4a4:	00373330 	eorseq	r3, r7, r0, lsr r3
+ 4a8:	20554e47 	subscs	r4, r5, r7, asr #28
+ 4ac:	20373143 	eorscs	r3, r7, r3, asr #2
+ 4b0:	332e3331 			@ <UNDEFINED> instruction: 0x332e3331
+ 4b4:	3220312e 	eorcc	r3, r0, #-2147483637	@ 0x8000000b
+ 4b8:	30343230 	eorscc	r3, r4, r0, lsr r2
+ 4bc:	20343136 	eorscs	r3, r4, r6, lsr r1
+ 4c0:	70636d2d 	rsbvc	r6, r3, sp, lsr #26
+ 4c4:	6f633d75 	svcvs	0x00633d75
+ 4c8:	78657472 	stmdavc	r5!, {r1, r4, r5, r6, sl, ip, sp, lr}^
+ 4cc:	20346d2d 	eorscs	r6, r4, sp, lsr #26
+ 4d0:	68746d2d 	ldmdavs	r4!, {r0, r2, r3, r5, r8, sl, fp, sp, lr}^
+ 4d4:	20626d75 	rsbcs	r6, r2, r5, ror sp
+ 4d8:	6c666d2d 	stclvs	13, cr6, [r6], #-180	@ 0xffffff4c
+ 4dc:	2d74616f 	ldfcse	f6, [r4, #-444]!	@ 0xfffffe44
+ 4e0:	3d696261 	sfmcc	f6, 2, [r9, #-388]!	@ 0xfffffe7c
+ 4e4:	64726168 	ldrbtvs	r6, [r2], #-360	@ 0xfffffe98
+ 4e8:	666d2d20 	strbtvs	r2, [sp], -r0, lsr #26
+ 4ec:	663d7570 			@ <UNDEFINED> instruction: 0x663d7570
+ 4f0:	2d347670 	ldccs	6, cr7, [r4, #-448]!	@ 0xfffffe40
+ 4f4:	642d7073 	strtvs	r7, [sp], #-115	@ 0xffffff8d
+ 4f8:	2d203631 	stccs	6, cr3, [r0, #-196]!	@ 0xffffff3c
+ 4fc:	6372616d 	cmnvs	r2, #1073741851	@ 0x4000001b
+ 500:	72613d68 	rsbvc	r3, r1, #104, 26	@ 0x1a00
+ 504:	6537766d 	ldrvs	r7, [r7, #-1645]!	@ 0xfffff993
+ 508:	662b6d2d 	strtvs	r6, [fp], -sp, lsr #26
+ 50c:	672d2070 			@ <UNDEFINED> instruction: 0x672d2070
+ 510:	334f2d20 	movtcc	r2, #64800	@ 0xfd20
+ 514:	734f2d20 	movtvc	r2, #64800	@ 0xfd20
+ 518:	50662d20 	rsbpl	r2, r6, r0, lsr #26
+ 51c:	2d204349 	stccs	3, cr4, [r0, #-292]!	@ 0xfffffedc
+ 520:	65726666 	ldrbvs	r6, [r2, #-1638]!	@ 0xfffff99a
+ 524:	61747365 	cmnvs	r4, r5, ror #6
+ 528:	6e69646e 	cdpvs	4, 6, cr6, cr9, cr14, {3}
+ 52c:	4c490067 	mcrrmi	0, 6, r0, r9, cr7
+ 530:	6130305f 	teqvs	r0, pc, asr r0
+ 534:	4c490031 	mcrrmi	0, 3, r0, r9, cr1
+ 538:	6130305f 	teqvs	r0, pc, asr r0
+ 53c:	4c490033 	mcrrmi	0, 3, r0, r9, cr3
+ 540:	6130305f 	teqvs	r0, pc, asr r0
+ 544:	74730034 	ldrbtvc	r0, [r3], #-52	@ 0xffffffcc
+ 548:	5f6b6361 	svcpl	0x006b6361
+ 54c:	34725f32 	ldrbtcc	r5, [r2], #-3890	@ 0xfffff0ce
+ 550:	5f4c4900 	svcpl	0x004c4900
+ 554:	37613030 			@ <UNDEFINED> instruction: 0x37613030
+ 558:	5f4c4900 	svcpl	0x004c4900
+ 55c:	33643030 	cmncc	r4, #48	@ 0x30
+ 560:	5f4c4900 	svcpl	0x004c4900
+ 564:	39613030 	stmdbcc	r1!, {r4, r5, ip, sp}^
+ 568:	61747300 	cmnvs	r4, r0, lsl #6
+ 56c:	305f6b63 	subscc	r6, pc, r3, ror #22
+ 570:	7274705f 	rsbsvc	r7, r4, #95	@ 0x5f
+ 574:	5f4c4900 	svcpl	0x004c4900
+ 578:	63333030 	teqvs	r3, #48	@ 0x30
+ 57c:	61747300 	cmnvs	r4, r0, lsl #6
+ 580:	305f6b63 	subscc	r6, pc, r3, ror #22
+ 584:	0034695f 	eorseq	r6, r4, pc, asr r9
+ 588:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 58c:	00653330 	rsbeq	r3, r5, r0, lsr r3
+ 590:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 594:	00303430 	eorseq	r3, r0, r0, lsr r4
+ 598:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 59c:	00353430 	eorseq	r3, r5, r0, lsr r4
+ 5a0:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 5a4:	00363430 	eorseq	r3, r6, r0, lsr r4
+ 5a8:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 5ac:	00373430 	eorseq	r3, r7, r0, lsr r4
+ 5b0:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 5b4:	00383430 	eorseq	r3, r8, r0, lsr r4
+ 5b8:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 5bc:	00393430 	eorseq	r3, r9, r0, lsr r4
+ 5c0:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 5c4:	00616130 	rsbeq	r6, r1, r0, lsr r1
+ 5c8:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 5cc:	00636130 	rsbeq	r6, r3, r0, lsr r1
+ 5d0:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 5d4:	00656130 	rsbeq	r6, r5, r0, lsr r1
+ 5d8:	30677261 	rsbcc	r7, r7, r1, ror #4
+ 5dc:	61747300 	cmnvs	r4, r0, lsl #6
+ 5e0:	315f6b63 	cmpcc	pc, r3, ror #22
+ 5e4:	0034725f 	eorseq	r7, r4, pc, asr r2
+ 5e8:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 5ec:	00306230 	eorseq	r6, r0, r0, lsr r2
+ 5f0:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 5f4:	00303730 	eorseq	r3, r0, r0, lsr r7
+ 5f8:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 5fc:	00326230 	eorseq	r6, r2, r0, lsr r2
+ 600:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 604:	00336230 	eorseq	r6, r3, r0, lsr r2
+ 608:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 60c:	00346230 	eorseq	r6, r4, r0, lsr r2
+ 610:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 614:	00366230 	eorseq	r6, r6, r0, lsr r2
+ 618:	6e756663 	cdpvs	6, 7, cr6, cr5, cr3, {3}
+ 61c:	4c490030 	mcrrmi	0, 3, r0, r9, cr0
+ 620:	6230305f 	eorsvs	r3, r0, #95	@ 0x5f
+ 624:	4c490039 	mcrrmi	0, 3, r0, r9, cr9
+ 628:	3031305f 	eorscc	r3, r1, pc, asr r0
+ 62c:	4c490062 	mcrrmi	0, 6, r0, r9, cr2
+ 630:	3031305f 	eorscc	r3, r1, pc, asr r0
+ 634:	4c490063 	mcrrmi	0, 6, r0, r9, cr3
+ 638:	3031305f 	eorscc	r3, r1, pc, asr r0
+ 63c:	4c490064 	mcrrmi	0, 6, r0, r9, cr4
+ 640:	3430305f 	ldrtcc	r3, [r0], #-95	@ 0xffffffa1
+ 644:	72610061 	rsbvc	r0, r1, #97	@ 0x61
+ 648:	49004e67 	stmdbmi	r0, {r0, r1, r2, r5, r6, r9, sl, fp, lr}
+ 64c:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 650:	49006434 	stmdbmi	r0, {r2, r4, r5, sl, sp, lr}
+ 654:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 658:	49006534 	stmdbmi	r0, {r2, r4, r5, r8, sl, sp, lr}
+ 65c:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 660:	49006634 	stmdbmi	r0, {r2, r4, r5, r9, sl, sp, lr}
+ 664:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 668:	49003035 	stmdbmi	r0, {r0, r2, r4, r5, ip, sp}
+ 66c:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 670:	49003135 	stmdbmi	r0, {r0, r2, r4, r5, r8, ip, sp}
+ 674:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 678:	49003235 	stmdbmi	r0, {r0, r2, r4, r5, r9, ip, sp}
+ 67c:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 680:	49003435 	stmdbmi	r0, {r0, r2, r4, r5, sl, ip, sp}
+ 684:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 688:	49003635 	stmdbmi	r0, {r0, r2, r4, r5, r9, sl, ip, sp}
+ 68c:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 690:	49003835 	stmdbmi	r0, {r0, r2, r4, r5, fp, ip, sp}
+ 694:	31305f4c 	teqcc	r0, ip, asr #30
+ 698:	49003131 	stmdbmi	r0, {r0, r4, r5, r8, ip, sp}
+ 69c:	30305f4c 	eorscc	r5, r0, ip, asr #30
+ 6a0:	73006262 	movwvc	r6, #610	@ 0x262
+ 6a4:	6b636174 	blvs	18d8c7c <cfun0+0x18d8c7c>
+ 6a8:	725f305f 	subsvc	r3, pc, #95	@ 0x5f
+ 6ac:	4c490034 	mcrrmi	0, 3, r0, r9, cr4
+ 6b0:	6230305f 	eorsvs	r3, r0, #95	@ 0x5f
+ 6b4:	3a440065 	bcc	1100850 <cfun0+0x1100850>
+ 6b8:	6372735c 	cmnvs	r2, #92, 6	@ 0x70000001
+ 6bc:	5c324d5c 	ldcpl	13, cr4, [r2], #-368	@ 0xfffffe90
+ 6c0:	6966664f 	stmdbvs	r6!, {r0, r1, r2, r3, r6, r9, sl, sp, lr}^
+ 6c4:	6c616963 			@ <UNDEFINED> instruction: 0x6c616963
+ 6c8:	67756c50 			@ <UNDEFINED> instruction: 0x67756c50
+ 6cc:	5c736e69 	ldclpl	14, cr6, [r3], #-420	@ 0xfffffe5c
+ 6d0:	45564944 	ldrbmi	r4, [r6, #-2372]	@ 0xfffff6bc
+ 6d4:	69445c52 	stmdbvs	r4, {r1, r4, r6, sl, fp, ip, lr}^
+ 6d8:	43726576 	cmnmi	r2, #494927872	@ 0x1d800000
+ 6dc:	69706d6f 	ldmdbvs	r0!, {r0, r1, r2, r3, r5, r6, r8, sl, fp, sp, lr}^
+ 6e0:	5c72656c 	cfldr64pl	mvdx6, [r2], #-432	@ 0xfffffe50
+ 6e4:	6974616e 	ldmdbvs	r4!, {r1, r2, r3, r5, r6, r8, sp, lr}^
+ 6e8:	49006576 	stmdbmi	r0, {r1, r2, r4, r5, r6, r8, sl, sp, lr}
+ 6ec:	31305f4c 	teqcc	r0, ip, asr #30
+ 6f0:	61003632 	tstvs	r0, r2, lsr r6
+ 6f4:	00736772 	rsbseq	r6, r3, r2, ror r7
+ 6f8:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 6fc:	00306330 	eorseq	r6, r0, r0, lsr r3
+ 700:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 704:	00316330 	eorseq	r6, r1, r0, lsr r3
+ 708:	305f4c49 	subscc	r4, pc, r9, asr #24
+ 70c:	00326330 	eorseq	r6, r2, r0, lsr r3
+
+Disassembly of section .comment:
+
+00000000 <.comment>:
+D:\src\M2\Test\TestMCURoutine\native/code.c:12
+void* cfun0(u1* args){
+   0:	3a434347 	bcc	10d0d24 <cfun0+0x10d0d24>
+D:\src\M2\Test\TestMCURoutine\native/code.c:16
+int stack_0_ptr_arr_stride_lb = *(int*)&args[(argN++)*4];
+   4:	72412820 	subvc	r2, r1, #32, 16	@ 0x200000
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+   8:	4e47206d 	cdpmi	0, 4, cr2, cr7, cr13, {3}
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+   c:	6f542055 	svcvs	0x00542055
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  10:	68636c6f 	stmdavs	r3!, {r0, r1, r2, r3, r5, r6, sl, fp, sp, lr}^
+D:\src\M2\Test\TestMCURoutine\native/code.c:173
+IL_0102: stack_2_i4=((stack_2_i4)<<(stack_3_i4)); //IL_0102: shl: s_4, pop2, push1
+  14:	206e6961 	rsbcs	r6, lr, r1, ror #18
+D:\src\M2\Test\TestMCURoutine\native/code.c:79
+IL_004d: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_004d: mul: s_3, pop2, push1
+  18:	332e3331 			@ <UNDEFINED> instruction: 0x332e3331
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+  1c:	6c65522e 	sfmvs	f5, 2, [r5], #-184	@ 0xffffff48
+D:\src\M2\Test\TestMCURoutine\native/code.c:90
+IL_005d: stack_2_r4=(stack_2_i4); //IL_005d: conv.r8: s_3, pop1, push1
+  20:	42282031 	eormi	r2, r8, #49	@ 0x31
+  24:	646c6975 	strbtvs	r6, [ip], #-2421	@ 0xfffff68b
+D:\src\M2\Test\TestMCURoutine\native/code.c:170
+IL_00fe: stack_3_i4=((stack_3_i4)%(stack_4_i4)); //IL_00fe: rem: s_5, pop2, push1
+  28:	6d726120 	ldfvse	f6, [r2, #-128]!	@ 0xffffff80
+D:\src\M2\Test\TestMCURoutine\native/code.c:91
+IL_005e: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_005e: mul: s_3, pop2, push1
+  2c:	2e33312d 	rsfcssp	f3, f3, #5.0
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  30:	29293432 	stmdbcs	r9!, {r1, r4, r5, sl, ip, sp}
+D:\src\M2\Test\TestMCURoutine\native/code.c:173
+IL_0102: stack_2_i4=((stack_2_i4)<<(stack_3_i4)); //IL_0102: shl: s_4, pop2, push1
+  34:	2e333120 	rsfcssp	f3, f3, f0
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  38:	20312e33 	eorscs	r2, r1, r3, lsr lr
+D:\src\M2\Test\TestMCURoutine\native/code.c:161
+IL_00ef: stack_1_i4=((stack_1_i4)*(stack_2_i4)); //IL_00ef: mul: s_3, pop2, push1
+  3c:	34323032 	ldrtcc	r3, [r2], #-50	@ 0xffffffce
+D:\src\M2\Test\TestMCURoutine\native/code.c:70
+IL_003e: var7=stack_0_i4; //IL_003e: stloc.s V_7: s_1, pop1, push0
+  40:	34313630 	ldrtcc	r3, [r1], #-1584	@ 0xfffff9d0
+	...
+
+Disassembly of section .ARM.attributes:
+
+00000000 <.ARM.attributes>:
+D:\src\M2\Test\TestMCURoutine\native/code.c:12
+void* cfun0(u1* args){
+   0:	00003341 	andeq	r3, r0, r1, asr #6
+D:\src\M2\Test\TestMCURoutine\native/code.c:16
+int stack_0_ptr_arr_stride_lb = *(int*)&args[(argN++)*4];
+   4:	61656100 	cmnvs	r5, r0, lsl #2
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+   8:	01006962 	tsteq	r0, r2, ror #18
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+   c:	00000029 	andeq	r0, r0, r9, lsr #32
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  10:	2d453705 	stclcs	7, cr3, [r5, #-20]	@ 0xffffffec
+D:\src\M2\Test\TestMCURoutine\native/code.c:173
+IL_0102: stack_2_i4=((stack_2_i4)<<(stack_3_i4)); //IL_0102: shl: s_4, pop2, push1
+  14:	0d06004d 	stceq	0, cr0, [r6, #-308]	@ 0xfffffecc
+D:\src\M2\Test\TestMCURoutine\native/code.c:79
+IL_004d: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_004d: mul: s_3, pop2, push1
+  18:	02094d07 	andeq	r4, r9, #448	@ 0x1c0
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+  1c:	0412060a 	ldreq	r0, [r2], #-1546	@ 0xfffff9f6
+D:\src\M2\Test\TestMCURoutine\native/code.c:90
+IL_005d: stack_2_r4=(stack_2_i4); //IL_005d: conv.r8: s_3, pop1, push1
+  20:	01150114 	tsteq	r5, r4, lsl r1
+  24:	01180317 	tsteq	r8, r7, lsl r3
+D:\src\M2\Test\TestMCURoutine\native/code.c:170
+IL_00fe: stack_3_i4=((stack_3_i4)%(stack_4_i4)); //IL_00fe: rem: s_5, pop2, push1
+  28:	011a0119 	tsteq	sl, r9, lsl r1
+D:\src\M2\Test\TestMCURoutine\native/code.c:91
+IL_005e: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_005e: mul: s_3, pop2, push1
+  2c:	011c011b 	tsteq	ip, fp, lsl r1
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  30:	0122041e 			@ <UNDEFINED> instruction: 0x0122041e
+
+Disassembly of section .debug_frame:
+
+00000000 <.debug_frame>:
+D:\src\M2\Test\TestMCURoutine\native/code.c:12
+void* cfun0(u1* args){
+   0:	0000000c 	andeq	r0, r0, ip
+D:\src\M2\Test\TestMCURoutine\native/code.c:16
+int stack_0_ptr_arr_stride_lb = *(int*)&args[(argN++)*4];
+   4:	ffffffff 			@ <UNDEFINED> instruction: 0xffffffff
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+   8:	7c020001 	stcvc	0, cr0, [r2], {1}
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+   c:	000d0c0e 	andeq	r0, sp, lr, lsl #24
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  10:	00000020 	andeq	r0, r0, r0, lsr #32
+	...
+D:\src\M2\Test\TestMCURoutine\native/code.c:83
+IL_0051: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0051: add: s_2, pop2, push1
+  1c:	000000d0 	ldrdeq	r0, [r0], -r0	@ <UNPREDICTABLE>
+D:\src\M2\Test\TestMCURoutine\native/code.c:90
+IL_005d: stack_2_r4=(stack_2_i4); //IL_005d: conv.r8: s_3, pop1, push1
+  20:	84200e41 	strthi	r0, [r0], #-3649	@ 0xfffff1bf
+  24:	86048505 	strhi	r8, [r4], -r5, lsl #10
+D:\src\M2\Test\TestMCURoutine\native/code.c:170
+IL_00fe: stack_3_i4=((stack_3_i4)%(stack_4_i4)); //IL_00fe: rem: s_5, pop2, push1
+  28:	8e028703 	cdphi	7, 0, cr8, cr2, cr3, {0}
+D:\src\M2\Test\TestMCURoutine\native/code.c:91
+IL_005e: stack_1_r4=((stack_1_r4)*(stack_2_r4)); //IL_005e: mul: s_3, pop2, push1
+  2c:	0e5f0201 	cdpeq	2, 5, cr0, cr15, cr1, {0}
+D:\src\M2\Test\TestMCURoutine\native/code.c:95
+IL_0062: stack_0_r4=((stack_0_r4)+(stack_1_r4)); //IL_0062: add: s_2, pop2, push1
+  30:	00000014 	andeq	r0, r0, r4, lsl r0
