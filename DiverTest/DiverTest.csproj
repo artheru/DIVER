@@ -6,8 +6,6 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>disable</Nullable>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-
-		<VCToolsBatchFile>"C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"</VCToolsBatchFile>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -20,17 +18,7 @@
 	  <None Remove="DiverCompiler.exe" />
 	  <None Remove="ExtraMethods.dll" />
 	  <None Remove="extra_methods.txt" />
-	  <None Remove="mcuruntime.dll" />
-	  <None Remove="mcuruntime.exp" />
-	  <None Remove="mcuruntime.ilk" />
-	  <None Remove="mcuruntime.lib" />
-	  <None Remove="mcuruntime.pdb" />
-	  <None Remove="mcu_runtime.dll" />
-	  <None Remove="mcu_runtime.exp" />
-	  <None Remove="mcu_runtime.ilk" />
-	  <None Remove="mcu_runtime.lib" />
 	  <None Remove="mcu_runtime.obj" />
-	  <None Remove="mcu_runtime.pdb" />
 	  <None Remove="vc140.pdb" />
 	</ItemGroup>
 

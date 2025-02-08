@@ -130,7 +130,6 @@
     <ClCompile Include="mcu_runtime.c" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="-additional_builtins.h" />
     <ClInclude Include="mcu_runtime.h" />
   </ItemGroup>
   <ItemGroup>

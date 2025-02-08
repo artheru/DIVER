@@ -19,9 +19,6 @@
     <ClInclude Include="mcu_runtime.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="-additional_builtins.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="todo.md" />
