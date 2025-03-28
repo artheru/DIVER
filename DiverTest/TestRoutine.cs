@@ -20,10 +20,10 @@ namespace DiverTest
     {
         public override void Operation(int iteration)
         {
-            Console.WriteLine("Iteration = " + iteration.ToString());
+            Console.WriteLine("Iteration = " + iteration);
             cart.read_from_mcu = (cart.write_to_mcu << 2) + TESTCls.TestFunc(iteration);
-            Console.WriteLine("Read(Lower) is " + cart.read_from_mcu.ToString());
-            Console.WriteLine("Write(Upper) is " + cart.write_to_mcu.ToString());
+            Console.WriteLine("Read(Lower) is " + cart.read_from_mcu);
+            Console.WriteLine("Write(Upper) is " + cart.write_to_mcu);
         }
     }
 }
