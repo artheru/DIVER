@@ -1,6 +1,7 @@
 ﻿using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using DiverTest;
 using Newtonsoft.Json;
 
 namespace CartActivator
@@ -180,13 +181,78 @@ namespace CartActivator
 
     public abstract class LocalDIVERVehicle:DIVERVehicle
     {
+        private SerialAdaptor _serial;
+
+        private string _mcu_device_url;
+        public void OnReceivedLowerIO(byte[] bytes)
+        {
+            NotifyLowerData(_mcu_device_url, bytes);
+        }
+
+        public void OnReceivedLogs(byte[] bytes)
+        {
+            NotifyLog(_mcu_device_url, Encoding.UTF8.GetString(bytes));
+        }
 
         public override void SetMCUProgram(string mcu_device_url, byte[] program)
         {
-            //todo: replace the following with your implementation.
+            // todo: replace the following with your implementation.
+            // ------------ Implent serial communication from here ------------
+            // ------------ Copy from Yu's code ------------
+
+            _mcu_device_url = mcu_device_url;
+
+            const int baudrate = 2000000;
+            Console.WriteLine($"Interface: Opening MCU from serial {mcu_device_url}, rate = {baudrate}!");
+            _serial = new SerialAdaptor(mcu_device_url, baudrate, OnReceivedLowerIO, OnReceivedLogs);
+            if (!_serial.isOpen)
+            {
+                Console.WriteLine("ERROR: Can not open port!");
+                return;
+            }
+
+            Console.WriteLine($"Interface: Resetting MCU {mcu_device_url}!");
+            _serial.SendMessage(new DiverTest.ControlPack(0x81).GetPack()); // Reset 
+            Thread.Sleep(500);
+
+            Console.WriteLine($"Interface: Sending Binary Codes to MCU {mcu_device_url}!");
+            // MCU can not receive too much bytes once, need split
+            static List<byte[]> SplitArrayIntoChunks(byte[] array, int chunkSize)
+            {
+                List<byte[]> chunks = new List<byte[]>();
+
+                for (int i = 0; i < array.Length; i += chunkSize)
+                {
+                    int currentChunkSize = Math.Min(chunkSize, array.Length - i);
+                    byte[] chunk = new byte[currentChunkSize];
+                    Array.Copy(array, i, chunk, 0, currentChunkSize);
+                    chunks.Add(chunk);
+                }
+                return chunks;
+            }
+            var codeList = SplitArrayIntoChunks(program, 1024);
+            int i = 0;
+            foreach (var codePack in codeList)
+            {
+                var downloadCode =
+                    new DiverTest.DownloadCodePack(program.Length, 1024 * i, codePack.Length, codePack).GetPack();
+                i++;
+                _serial.SendMessage(downloadCode);
+                Thread.Sleep(50);
+                //while (true)
+                //{
+                //    var receive = cart.Embedded.GetMessage();
+                //    if (receive == null) continue;
+                //    if (receive[5] == 0x90 && (receive[6] == 0x05 || receive[6]==0x06)) break;
+                //}
+            }
+
+            Console.WriteLine($"Interface: Call MCU Start!");
+            _serial.SendMessage(new DiverTest.ControlPack(0x01).GetPack()); // Start 
+
             MCUTestRunner.DebugSetMCUProgram(program, (bs) =>
             {
-                NotifyLowerData("default", bs);
+                NotifyLowerData(mcu_device_url, bs);
                 // debug output all fields of cart object.
                 foreach (var field in GetType().GetFields())
                 {
@@ -200,14 +266,16 @@ namespace CartActivator
         public override void SendUpperData(string mcu_device_url, byte[] data)
         {
             //todo: this is for VM data exchange, contains upperIO/lowerIO modifications.
-            MCUTestRunner.DebugSendUpper(data);
+            // For Debug use
+            // MCUTestRunner.DebugSendUpper(data);
+            if (_serial.isOpen) 
+                _serial.SendMessage(new UpperIOPack(data, data.Length).GetPack());
         }
 
         public override void NotifyLog(string mcu_device_url, string message) 
         {
-            Console.WriteLine($"{mcu_device_url}:{message}");
+            Console.WriteLine($"MCU Log from{mcu_device_url}\n:{message}");
         }
-
 
         unsafe class MCUTestRunner
         {

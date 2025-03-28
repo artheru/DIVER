@@ -4,7 +4,7 @@ namespace CartActivator
 {
     public class LogicRunOnMCUAttribute : Attribute
     {
-        public string mcu_url = "default";
+        public string mcu_url = "COM3";
         public int scanInterval = 50;
     }
 

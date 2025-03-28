@@ -15,13 +15,15 @@ namespace DiverTest
         [AsUpperIO] public int write_to_mcu;
     }
 
-    [LogicRunOnMCU(scanInterval = 50)]
+    [LogicRunOnMCU(scanInterval = 100)]
     public class TestMCURoutine: LadderLogic<TestVehicle>
     {
         public override void Operation(int iteration)
         {
-            Console.WriteLine("Hello world iter=" + iteration);
+            Console.WriteLine("Iteration = " + iteration.ToString());
             cart.read_from_mcu = (cart.write_to_mcu << 2) + TESTCls.TestFunc(iteration);
+            Console.WriteLine("Read(Lower) is " + cart.read_from_mcu.ToString());
+            Console.WriteLine("Write(Upper) is " + cart.write_to_mcu.ToString());
         }
     }
 }
