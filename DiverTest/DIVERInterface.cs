@@ -1,7 +1,7 @@
 ﻿using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
-using DiverTest;
+using DIVERSerial;
 using Newtonsoft.Json;
 
 namespace CartActivator
@@ -181,41 +181,50 @@ namespace CartActivator
 
     public abstract class LocalDIVERVehicle:DIVERVehicle
     {
-        private SerialAdaptor _serial;
+        private DIVERSerial.DIVERSerial _serial;
 
-        private string _mcu_device_url;
+        private const byte _DefaultSlaveAddress = 0x01;
+        private const int _CodeChunkSplitSize = 512; // MCU can not receive too much bytes once, need split
+        private const int _DefaultSerialBaudrate = 2000000;
+
+        private string _mcuDeviceUrl;
         public void OnReceivedLowerIO(byte[] bytes)
         {
-            NotifyLowerData(_mcu_device_url, bytes);
+            NotifyLowerData(_mcuDeviceUrl, bytes);
         }
 
         public void OnReceivedLogs(byte[] bytes)
         {
-            NotifyLog(_mcu_device_url, Encoding.UTF8.GetString(bytes));
+            NotifyLog(_mcuDeviceUrl, Encoding.UTF8.GetString(bytes));
         }
 
-        public override void SetMCUProgram(string mcu_device_url, byte[] program)
+        public override void SetMCUProgram(string mcuDeviceUrl, byte[] program)
         {
             // todo: replace the following with your implementation.
             // ------------ Implent serial communication from here ------------
             // ------------ Copy from Yu's code ------------
 
-            _mcu_device_url = mcu_device_url;
+            _mcuDeviceUrl = mcuDeviceUrl;
 
-            const int baudrate = 2000000;
-            Console.WriteLine($"Interface: Opening MCU from serial {mcu_device_url}, rate = {baudrate}!");
-            _serial = new SerialAdaptor(mcu_device_url, baudrate, OnReceivedLowerIO, OnReceivedLogs);
+            Console.WriteLine($"Interface: Opening MCU from serial {_mcuDeviceUrl}, rate = {_DefaultSerialBaudrate}!");
+            _serial = new DIVERSerial.DIVERSerial(_mcuDeviceUrl, _DefaultSerialBaudrate, OnReceivedLowerIO, OnReceivedLogs);
             if (!_serial.isOpen)
             {
                 Console.WriteLine("ERROR: Can not open port!");
                 return;
             }
 
-            Console.WriteLine($"Interface: Resetting MCU {mcu_device_url}!");
-            _serial.SendMessage(new DiverTest.ControlPack(0x81).GetPack()); // Reset 
+            Console.WriteLine($"Interface: Resetting MCU {_mcuDeviceUrl}!");
+            _serial.SendMessage(DIVERSerialPackage.CreateControlPackage(_DefaultSlaveAddress, ControlCodeEnum.Reset).Serialize());
+            // TODO: Check MCU status
+            Thread.Sleep(1000);
+
+            Console.WriteLine($"Interface: Configurating MCU {_mcuDeviceUrl}!");
+            //_serial.SendMessage(DIVERSerialPackage.CreateConfigurationWritePackage(_DefaultSlaveAddress, configuration, ConfigurationActionEnum.Write).Serialize());
+            // TODO: Check MCU status
             Thread.Sleep(500);
 
-            Console.WriteLine($"Interface: Sending Binary Codes to MCU {mcu_device_url}!");
+            Console.WriteLine($"Interface: Sending Binary Codes to MCU {_mcuDeviceUrl}!");
             // MCU can not receive too much bytes once, need split
             static List<byte[]> SplitArrayIntoChunks(byte[] array, int chunkSize)
             {
@@ -230,15 +239,17 @@ namespace CartActivator
                 }
                 return chunks;
             }
-            var codeList = SplitArrayIntoChunks(program, 1024);
+            var codeList = SplitArrayIntoChunks(program, _CodeChunkSplitSize);
             int i = 0;
             foreach (var codePack in codeList)
             {
-                var downloadCode =
-                    new DiverTest.DownloadCodePack(program.Length, 1024 * i, codePack.Length, codePack).GetPack();
+                var downloadCodePackage = DIVERSerialPackage.CreateBinaryCodeSectionPackage(
+                    _DefaultSlaveAddress, (uint)program.Length, (uint)(_CodeChunkSplitSize * i), (ushort)(codePack.Length), codePack);
+                _serial.SendMessage(downloadCodePackage.Serialize());
                 i++;
-                _serial.SendMessage(downloadCode);
-                Thread.Sleep(50);
+
+                // TODO: Check MCU status
+                Thread.Sleep(200);
                 //while (true)
                 //{
                 //    var receive = cart.Embedded.GetMessage();
@@ -248,11 +259,11 @@ namespace CartActivator
             }
 
             Console.WriteLine($"Interface: Call MCU Start!");
-            _serial.SendMessage(new DiverTest.ControlPack(0x01).GetPack()); // Start 
+            _serial.SendMessage(DIVERSerialPackage.CreateControlPackage(_DefaultSlaveAddress, ControlCodeEnum.Start).Serialize()); // Start
 
             MCUTestRunner.DebugSetMCUProgram(program, (bs) =>
             {
-                NotifyLowerData(mcu_device_url, bs);
+                NotifyLowerData(mcuDeviceUrl, bs);
                 // debug output all fields of cart object.
                 foreach (var field in GetType().GetFields())
                 {
@@ -269,7 +280,7 @@ namespace CartActivator
             // For Debug use
             // MCUTestRunner.DebugSendUpper(data);
             if (_serial.isOpen) 
-                _serial.SendMessage(new UpperIOPack(data, data.Length).GetPack());
+                _serial.SendMessage(DIVERSerialPackage.CreateMemoryExchangeRequestPackage(_DefaultSlaveAddress, (uint)(data.Length), data).Serialize());
         }
 
         public override void NotifyLog(string mcu_device_url, string message) 
