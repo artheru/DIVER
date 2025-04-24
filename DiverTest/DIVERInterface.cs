@@ -239,6 +239,8 @@ namespace CartActivator
                 }
                 return chunks;
             }
+
+            Console.WriteLine($"Interface: program = {BitConverter.ToString(program.ToArray())}.");
             var codeList = SplitArrayIntoChunks(program, _CodeChunkSplitSize);
             int i = 0;
             foreach (var codePack in codeList)

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO.Ports;
 using System.Linq;
 using System.Text;
@@ -12,21 +13,24 @@ namespace DIVERSerial
 
     public class DIVERSerial
     {
-        private byte[] _receiveBytes;
+        private const int ReceiveSleepTimeMs = 5; // Sleep time in milliseconds for receiving data
+        private const int ReponseBufferSize = 4096; // Size of the response buffer
+
         private SerialPort _port;
-        private int _state = 0;
-        private List<byte> _receiveList = new List<byte>();
-        private int _length = 0;
+        public bool isOpen { get; set; }
+
+        private ResponseStateEnum _responseState = ResponseStateEnum.Initialized;
+        private List<byte> _responseBuffer = new List<byte>();
+        private uint _packageLength = 0;
+
         private FunctionReceiveBytes _onReceivedLowerIO;
         private FunctionReceiveBytes _onReceivedLogs;
 
-        public bool isOpen;
-
         public DIVERSerial(
-            string name,
-            int baudRate,
-            FunctionReceiveBytes onReceivedLowerIO,
-            FunctionReceiveBytes onReceivedLogs
+            string name, // Name of the serial port (e.g., "COM3")
+            int baudRate, // Baud rate for the serial communication
+            FunctionReceiveBytes onReceivedLowerIO, // Callback for receiving lower IO data
+            FunctionReceiveBytes onReceivedLogs // Callback for receiving log data
         )
         {
             isOpen = false;
@@ -42,54 +46,40 @@ namespace DIVERSerial
                 _port.Open();
             }
             catch (Exception exception) {
-                return;
+                throw new Exception($"Failed to open serial port {name}: {exception.Message}");
             }
             isOpen = true;
 
             _onReceivedLowerIO = onReceivedLowerIO;
             _onReceivedLogs = onReceivedLogs;
 
-            new Thread(() =>
+            new Thread(OnDataReceived).Start();
+        }
+
+        private void OnDataReceived()
+        {
+            Thread.Sleep(ReceiveSleepTimeMs);
+            try
             {
                 while (true)
                 {
-                    Thread.Sleep(10);
-                    try
+                    int bytesToRead = _port.BytesToRead;
+                    if (bytesToRead > 0)
                     {
-                        int bytesToRead = _port.BytesToRead;
-                        if (bytesToRead > 0)
+                        if (bytesToRead > ReponseBufferSize)
+                        {
+                            _port.DiscardInBuffer();
+                            Console.WriteLine($"SerialAdaptor: Too many bytes in buffer, discarding {bytesToRead} bytes.");
+                            _responseBuffer.Clear();
+                            _responseState = ResponseStateEnum.Initialized;
+                        }
+                        else
                         {
                             var readBuffer = new byte[bytesToRead];
-                            //var start = DateTime.Now;
                             _port.Read(readBuffer, 0, bytesToRead);
-                            //var time1 = DateTime.Now - start;
                             ProcessBuffer(readBuffer);
-                            //var time2 = DateTime.Now - start;
-                            //Hedingben.ToastText($"total time:{time2.TotalMilliseconds},read time:{time1},read count:{bytesToRead}", "timeDebug");
                         }
                     }
-                    catch (Exception exception)
-                    {
-                        Console.WriteLine(exception);
-                    }
-                }
-            }).Start();
-        }
-
-        private void OnDataReceived(object sender, SerialDataReceivedEventArgs e)
-        {
-            try
-            {
-                int bytesToRead = _port.BytesToRead;
-                if (bytesToRead > 0)
-                {
-                    var readBuffer = new byte[bytesToRead];
-                    //var start = DateTime.Now;
-                    _port.Read(readBuffer, 0, bytesToRead);
-                    //var time1 = DateTime.Now - start;
-                    ProcessBuffer(readBuffer);
-                    //var time2 = DateTime.Now - start;
-                    //Hedingben.ToastText($"total time:{time2.TotalMilliseconds},read time:{time1},read count:{bytesToRead}", "timeDebug");
                 }
             }
             catch (Exception exception)
@@ -100,67 +90,91 @@ namespace DIVERSerial
 
         private void ProcessBuffer(byte[] buffer)
         {
-            for (int i = 0; i < buffer.Length; i++)
-            {
+            int i = 0;
+            while (i < buffer.Length) {
                 var newByte = buffer[i];
-                switch (_state)
+                switch (_responseState)
                 {
-                    case 0:
-                        _receiveList.Clear();
-                        if (newByte == 0xBB)
+                    case ResponseStateEnum.Initialized:
+                        if (newByte == DIVERSerialPackage.FrameHeader[0])
                         {
-                            _receiveList.Add(newByte);
-                            _state = 1;
+                            _responseBuffer.Add(newByte);
+                            _responseState = ResponseStateEnum.PrefixReceived;
                         }
+                        i++;
                         break;
-                    case 1:
-                        if (newByte == 0xAA)
+
+                    case ResponseStateEnum.PrefixReceived:
+                        if (newByte == DIVERSerialPackage.FrameHeader[1])
                         {
-                            _receiveList.Add(newByte);
-                            _state = 2;
+                            _responseBuffer.Add(newByte);
+                            _responseState = ResponseStateEnum.LengthReceiving;
                         }
                         else
                         {
-                            _state = 0;
+                            _responseBuffer.Clear();
+                            _responseState = ResponseStateEnum.Initialized;
                         }
+                        i++;
                         break;
-                    case 2:
-                        _receiveList.Add(newByte);
-                        if (_receiveList.Count >= 4)
-                        {
-                            _length = BitConverter.ToUInt16(_receiveList.ToArray(), 2);
-                        }
 
-                        if (_receiveList.Count == _length + 7)
+                    case ResponseStateEnum.LengthReceiving:
+                        _responseBuffer.Add(newByte);
+                        if (_responseBuffer.Count == 4)
                         {
-                            _state = 0;
-                            if (_receiveList[_receiveList.Count - 1] == 0xEE)
+                            _packageLength = BitConverter.ToUInt16(_responseBuffer.ToArray(), 2);
+                            if (_packageLength > ReponseBufferSize - 7 || _packageLength < 2)
                             {
-                                _receiveBytes = _receiveList.ToArray();
-                                Console.WriteLine($"SerialAdaptor: Receive from mcu: {BitConverter.ToString(_receiveBytes)}");
-                                if (_receiveBytes[5] == 0xA0)
-                                {
-                                    var upperIODataSize = BitConverter.ToUInt32(_receiveBytes, 6);
-                                    var upperIOData = new byte[upperIODataSize];
-                                    Array.Copy(_receiveBytes, 14, upperIOData, 0, upperIODataSize);
-                                    _onReceivedLowerIO(upperIOData);
-                                    var logDataSize = BitConverter.ToUInt32(_receiveBytes, 10);
-                                    if (logDataSize > 0)
-                                    {
-                                        byte[] logData = new byte[logDataSize];
-                                        Array.Copy(_receiveBytes, 14 + upperIODataSize, logData, 0, logData.Length);
-                                        _onReceivedLogs(logData);
-                                    }
-                                }
+                                Console.WriteLine($"SerialAdaptor: Invalid package length {_packageLength}, discarding buffer.");
+                                _responseBuffer.Clear();
+                                _responseState = ResponseStateEnum.Initialized;
                             }
                             else
                             {
-                                _state = 0;
-                                Console.WriteLine($"SerialAdaptor: ERROR, mcu packet error, should end with 0xEE , actual {_receiveList[_receiveList.Count - 1]}");
+                                _responseState = ResponseStateEnum.DataReceiving;
                             }
                         }
+                        i++;
                         break;
-                    default: break;
+
+                    case ResponseStateEnum.DataReceiving:
+                        int remainingBytes = (int)_packageLength + 3;
+                        int bytesToRead = Math.Min(remainingBytes, buffer.Length - i);
+                        _responseBuffer.AddRange(buffer.Skip(i).Take(bytesToRead));
+                        i += bytesToRead;
+
+                        if (_responseBuffer.Count == _packageLength + 7)
+                        {
+                            try
+                            {
+                                Console.WriteLine($"SerialAdaptor: Received package: {BitConverter.ToString(_responseBuffer.ToArray())}.");
+                                var package = DIVERSerialPackage.Parse(_responseBuffer.ToArray());
+                                if (package != null)
+                                {
+                                    if (package.FunctionCode == FunctionCodeEnum.MemoryExchangeResponse)
+                                    {
+                                        var cmd = package.GetMemoryExchangeResponseCommand();
+                                        Console.WriteLine($"SerialAdaptor: MemoryExchangeResponseCommand: {BitConverter.ToString(cmd.MemoryExchangeData)}.");
+                                        if (cmd != null)
+                                        {
+                                            _onReceivedLowerIO?.Invoke(cmd.MemoryExchangeData);
+                                            _onReceivedLogs?.Invoke(cmd.LogData);
+                                        }
+                                    }
+                                }
+                            }
+                            catch (ArgumentException exception)
+                            {
+                                Console.WriteLine($"SerialAdaptor: Failed to parse package: {exception.Message}");
+                            }
+
+                            _responseBuffer.Clear();
+                            _responseState = ResponseStateEnum.Initialized;
+                        }
+                        break;
+
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(_responseState), "Invalid response state.");
                 }
             }
         }
@@ -174,13 +188,9 @@ namespace DIVERSerial
             }
             catch (Exception exception)
             {
+                Console.WriteLine($"SerialAdaptor: Failed to send data: {exception.Message}");
                 return;
             }
-        }
-
-        public byte[] GetMessage()
-        {
-            return _receiveBytes;
         }
     }
 
@@ -191,8 +201,9 @@ namespace DIVERSerial
     public class DIVERSerialPackage
     {
         // Constants defining the frame structure
-        private static readonly byte[] FrameHeader = { 0xBB, 0xAA };
-        private const byte FrameFooter = 0xEE;
+        public static readonly byte[] FrameHeader = { 0xBB, 0xAA };
+        public const byte FrameFooter = 0xEE;
+
         private const int HeaderLength = 2; // Frame header size
         private const int LengthFieldSize = 2; // Data segment length field size
         private const int ChecksumSize = 2; // CRC-16 checksum size
@@ -263,20 +274,39 @@ namespace DIVERSerial
         {
             if (configuration == null) throw new ArgumentNullException(nameof(configuration));
             if (action == ConfigurationActionEnum.Read) throw new ArgumentException("Use CreateConfigurationReadRequestPackage for read requests.", nameof(action));
-            if (configuration.PortCount > 16) throw new ArgumentException("Port count exceeds maximum of 16.", nameof(configuration));
-            if (configuration.Ports == null || configuration.Ports.Length < configuration.PortCount)
+            if (configuration.Ports.Length > 16) throw new ArgumentException("Port count exceeds maximum of 16.", nameof(configuration));
+            if (configuration.Ports == null)
                 throw new ArgumentException("Ports array length must match PortCount.", nameof(configuration));
 
             var data = new List<byte> { (byte)action };
-            data.AddRange(BitConverter.GetBytes(configuration.UpperMemorySize));
-            data.AddRange(BitConverter.GetBytes(configuration.LowerMemorySize));
-            data.AddRange(BitConverter.GetBytes(configuration.PortCount));
-            for (int i = 0; i < configuration.PortCount; i++)
+            data.Add(configuration.TerminalCount.UFP);
+            data.Add(configuration.TerminalCount.Internal);
+            data.Add(configuration.TerminalCount.Resource);
+            data.Add(configuration.TerminalCount.DFP);
+            data.AddRange(BitConverter.GetBytes(configuration.RelayCount.Exchange));
+            data.AddRange(BitConverter.GetBytes(configuration.RelayCount.Connection));
+            data.AddRange(BitConverter.GetBytes(configuration.Ports.Length));
+            for (int i = 0; i < configuration.Ports.Length; i++)
             {
                 var port = configuration.Ports[i];
                 data.Add((byte)port.Type);
                 data.AddRange(BitConverter.GetBytes(port.BaudRate));
                 data.AddRange(BitConverter.GetBytes(port.BufferSize));
+            }
+            for (int i = 0; i < configuration.Terminals.Length; i++)
+            {
+                var terminal = configuration.Terminals[i];
+                data.Add(terminal.MaxCurrentAmpere);
+                data.Add((byte)(0));
+            }
+            for (int i = 0; i < configuration.Relays.Length; i++)
+            {
+                var relay = configuration.Relays[i];
+                data.Add(relay.MaxCurrentAmpere);
+                var byteRelayType = (byte)((byte)(relay.RelayType) & 0x0F) + ((relay.IsOn) ? (byte)0xF0 : (byte)0x00);
+                data.Add((byte)byteRelayType);
+                data.Add(relay.TerminalIndex0);
+                data.Add(relay.TerminalIndex1);
             }
             return new DIVERSerialPackage(slaveAddress, FunctionCodeEnum.Configuration, data.ToArray());
         }
@@ -373,18 +403,16 @@ namespace DIVERSerial
         /// <returns>The computed CRC-16 value.</returns>
         private static ushort CalculateCRC16(byte[] data)
         {
-            const ushort polynomial = 0xA001; // CRC-16-IBM polynomial
-            ushort crc = 0xFFFF; // Initial value
-
-            foreach (byte b in data)
+            const ushort polynomial = 0xA001;
+            ushort crc = 0xFFFF;
+            for (int i = 0; i < data.Length; i++)
             {
-                crc ^= b;
-                for (int i = 0; i < 8; i++)
+                crc ^= data[i];
+                for (int j = 0; j < 8; j++)
                 {
                     if ((crc & 0x0001) != 0)
                     {
-                        crc >>= 1;
-                        crc ^= polynomial;
+                        crc = (ushort)((crc >> 1) ^ polynomial);
                     }
                     else
                     {
@@ -418,8 +446,9 @@ namespace DIVERSerial
 
             // Validate length
             ushort declaredLength = BitConverter.ToUInt16(receivedData, HeaderLength);
-            if (declaredLength != receivedData.Length - HeaderLength - ChecksumSize - FooterSize)
-                throw new ArgumentException("Declared length does not match actual data length.");
+            ushort actualLength = (ushort)(receivedData.Length - HeaderLength - 2 - ChecksumSize - FooterSize);
+            if (declaredLength != actualLength)
+                throw new ArgumentException($"Declared length { declaredLength } does not match actual data length {actualLength}.");
 
             // Validate CRC
             var crcData = new byte[declaredLength + LengthFieldSize];
@@ -427,7 +456,7 @@ namespace DIVERSerial
             ushort receivedCrc = BitConverter.ToUInt16(receivedData, receivedData.Length - FooterSize - ChecksumSize);
             ushort calculatedCrc = CalculateCRC16(crcData);
             if (receivedCrc != calculatedCrc)
-                throw new ArgumentException("CRC checksum mismatch.");
+                throw new ArgumentException($"CRC mismatch: received {receivedCrc:X4}, calculated {calculatedCrc:X4}.");
 
             // Extract fields
             byte slaveAddress = receivedData[HeaderLength + LengthFieldSize];
@@ -471,24 +500,65 @@ namespace DIVERSerial
 
             var config = new Configuration
             {
-                UpperMemorySize = BitConverter.ToUInt32(DataSegment, 1),
-                LowerMemorySize = BitConverter.ToUInt32(DataSegment, 5),
-                PortCount = BitConverter.ToUInt16(DataSegment, 9)
+                TerminalCount = new ConfigurationTerminalCount
+                {
+                    UFP = DataSegment[1],
+                    Internal = DataSegment[2],
+                    Resource = DataSegment[3],
+                    DFP = DataSegment[4]
+                },
+                RelayCount = new ConfigurationRelayCount
+                {
+                    Exchange = BitConverter.ToInt16(DataSegment, 5),
+                    Connection = BitConverter.ToInt16(DataSegment, 7)
+                },
+
             };
 
-            int expectedLength = 11 + config.PortCount * 7; // action + sizes + port_count + ports
+            int totalPortCount = BitConverter.ToInt16(DataSegment, 9);
+            int totalTerminalCount = config.TerminalCount.UFP + config.TerminalCount.Internal + config.TerminalCount.Resource + config.TerminalCount.DFP;
+            int totalRelayCount = config.RelayCount.Exchange + config.RelayCount.Connection;
+            int expectedLength = 11 +
+                totalPortCount * 7 +
+                totalTerminalCount * 2 +
+                totalRelayCount * 4;
+
             if (DataSegment.Length != expectedLength) return null;
 
-            config.Ports = new ConfigurationPort[config.PortCount];
-            for (int i = 0; i < config.PortCount; i++)
+            config.Ports = new ConfigurationPort[totalPortCount];
+            config.Terminals = new CongigurationTerminal[totalTerminalCount];
+            config.Relays = new ConfigurationRelay[totalRelayCount];
+
+            int offset = 11;
+            for (int i = 0; i < totalPortCount; i++)
             {
-                int offset = 11 + i * 7;
                 config.Ports[i] = new ConfigurationPort
                 {
                     Type = (ConfigurationPortTypeEnum)DataSegment[offset],
-                    BaudRate = BitConverter.ToUInt32(DataSegment, offset + 1),
-                    BufferSize = BitConverter.ToUInt16(DataSegment, offset + 5)
+                    BaudRate = BitConverter.ToInt32(DataSegment, offset + 1),
+                    BufferSize = BitConverter.ToInt16(DataSegment, offset + 5)
                 };
+                offset += 7;
+            }
+            for (int i = 0; i < totalTerminalCount; i++)
+            {
+                config.Terminals[i] = new CongigurationTerminal
+                {
+                    MaxCurrentAmpere = DataSegment[offset]
+                };
+                offset += 2;
+            }
+            for (int i = 0; i < totalRelayCount; i++)
+            {
+                config.Relays[i] = new ConfigurationRelay
+                {
+                    MaxCurrentAmpere = DataSegment[offset],
+                    RelayType = (ConfigurationRelayTypeEnum)(DataSegment[offset + 1] & 0x0F),
+                    IsOn = (DataSegment[offset + 1] & 0xF0) != 0,
+                    TerminalIndex0 = DataSegment[offset + 2],
+                    TerminalIndex1 = DataSegment[offset + 3]
+                };
+                offset += 4;
             }
             return config;
         }
@@ -505,8 +575,8 @@ namespace DIVERSerial
                 {
                     State = (StateEnum)DataSegment[0],
                     ErrorCode = (ErrorCodeEnum)BitConverter.ToUInt16(DataSegment, 1),
-                    SectionAddress = BitConverter.ToUInt32(DataSegment, 3),
-                    SectionLength = BitConverter.ToUInt16(DataSegment, 7)
+                    SectionAddress = BitConverter.ToInt32(DataSegment, 3),
+                    SectionLength = BitConverter.ToInt16(DataSegment, 7)
                 };
             }
             return null;
@@ -520,17 +590,22 @@ namespace DIVERSerial
         {
             if (FunctionCode == FunctionCodeEnum.MemoryExchangeResponse && DataSegment.Length >= 8)
             {
-                uint memorySize = BitConverter.ToUInt32(DataSegment, 0);
-                uint logSize = BitConverter.ToUInt32(DataSegment, 4);
+                int memorySize = BitConverter.ToInt32(DataSegment, 0);
+                int logSize = BitConverter.ToInt32(DataSegment, 4);
+
+                if (memorySize < 0 || logSize < 0) return null; // Invalid sizes
                 if (DataSegment.Length != 8 + memorySize + logSize) return null;
 
                 var cmd = new MemoryExchangeResponseCommand
                 {
                     MemorySize = memorySize,
                     LogSize = logSize,
-                    Data = new byte[memorySize + logSize]
+                    MemoryExchangeData = new byte[memorySize],
+                    LogData = new byte[logSize],
                 };
-                Array.Copy(DataSegment, 8, cmd.Data, 0, cmd.Data.Length);
+
+                Array.Copy(DataSegment, 8, cmd.MemoryExchangeData, 0, memorySize);
+                Array.Copy(DataSegment, 8 + memorySize, cmd.LogData, 0, logSize);
                 return cmd;
             }
             return null;
@@ -538,6 +613,14 @@ namespace DIVERSerial
     }
 
     // --- Enums and Data Structures ---
+
+    public enum ResponseStateEnum : byte
+    {
+        Initialized = 0x00,
+        PrefixReceived = 0x01,
+        LengthReceiving = 0x02,
+        DataReceiving = 0x03,
+    }
 
     public enum FunctionCodeEnum : byte
     {
@@ -549,7 +632,6 @@ namespace DIVERSerial
         MemoryExchangeRequest = 0x20,
         MemoryExchangeResponse = 0xA0,
         HeartBeatAck = 0xF0,
-        LogAck = 0xB0,
         CoreDumpAck = 0xB1
     }
 
@@ -611,19 +693,60 @@ namespace DIVERSerial
         ExecutionLowerMemoryOverSize = 0x0603
     }
 
+    public enum ConfigurationRelayTypeEnum : byte
+    {
+        DPDT_FixedConnection = 0x00,
+        DPDT_MagneticLatch = 0x01,
+        DPDT_MotorThermalSolder = 0x02,
+        DPDT_VaporThermalSolder = 0x03,
+        SPST_FixedConnection = 0x08,
+        SPST_MagneticLatch = 0x09,
+        SPST_MotorThermalSolder = 0x0A,
+        SPST_VaporThermalSolder = 0x0B
+    }
+
     public class ConfigurationPort
     {
         public ConfigurationPortTypeEnum Type { get; set; }
-        public uint BaudRate { get; set; }
-        public ushort BufferSize { get; set; }
+        public int BaudRate { get; set; }
+        public short BufferSize { get; set; }
+    }
+
+    public class ConfigurationTerminalCount
+    {
+        public byte UFP { get; set; }
+        public byte Internal { get; set; }
+        public byte Resource { get; set; }
+        public byte DFP { get; set; }
+    }
+
+    public class ConfigurationRelayCount
+    {
+        public short Exchange { get; set; }
+        public short Connection { get; set; }
+    }
+
+    public class CongigurationTerminal
+    {
+        public byte MaxCurrentAmpere { get; set; }
+    }
+
+    public class ConfigurationRelay
+    {
+        public byte MaxCurrentAmpere { get; set; }
+        public ConfigurationRelayTypeEnum RelayType { get; set; }
+        public bool IsOn { get; set; }
+        public byte TerminalIndex0 { get; set; }
+        public byte TerminalIndex1 { get; set; }
     }
 
     public class Configuration
     {
-        public uint UpperMemorySize { get; set; }
-        public uint LowerMemorySize { get; set; }
-        public ushort PortCount { get; set; }
+        public ConfigurationTerminalCount TerminalCount { get; set; }
+        public ConfigurationRelayCount RelayCount { get; set; }
         public ConfigurationPort[] Ports { get; set; }
+        public CongigurationTerminal[] Terminals { get; set; }
+        public ConfigurationRelay[] Relays { get; set; }
     }
 
     public class HeartBeatCommand
@@ -636,14 +759,15 @@ namespace DIVERSerial
     {
         public StateEnum State { get; set; }
         public ErrorCodeEnum ErrorCode { get; set; }
-        public uint SectionAddress { get; set; }
-        public ushort SectionLength { get; set; }
+        public int SectionAddress { get; set; }
+        public short SectionLength { get; set; }
     }
 
     public class MemoryExchangeResponseCommand
     {
-        public uint MemorySize { get; set; }
-        public uint LogSize { get; set; }
-        public byte[] Data { get; set; }
+        public int MemorySize { get; set; }
+        public int LogSize { get; set; }
+        public byte[] MemoryExchangeData { get; set; }
+        public byte[] LogData { get; set; }
     }
 }
