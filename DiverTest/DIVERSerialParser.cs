@@ -9,9 +9,9 @@ using System.Threading;
 
 namespace DIVERSerial
 {
-    public delegate void FunctionReceiveBytes(byte[] bytes);
+    public delegate void FunctionOnPackageReceivedType(DIVERSerialPackage package);
 
-    public class DIVERSerial
+    public class DIVERSerialListener
     {
         private const int ReceiveSleepTimeMs = 5; // Sleep time in milliseconds for receiving data
         private const int ReponseBufferSize = 4096; // Size of the response buffer
@@ -23,35 +23,17 @@ namespace DIVERSerial
         private List<byte> _responseBuffer = new List<byte>();
         private uint _packageLength = 0;
 
-        private FunctionReceiveBytes _onReceivedLowerIO;
-        private FunctionReceiveBytes _onReceivedLogs;
+        private FunctionOnPackageReceivedType _onReceived;
 
-        public DIVERSerial(
-            string name, // Name of the serial port (e.g., "COM3")
-            int baudRate, // Baud rate for the serial communication
-            FunctionReceiveBytes onReceivedLowerIO, // Callback for receiving lower IO data
-            FunctionReceiveBytes onReceivedLogs // Callback for receiving log data
+        public DIVERSerialListener(
+            string uri, // URI for the serial port
+            FunctionOnPackageReceivedType onReceived // Callback for receiving data
         )
         {
             isOpen = false;
-
-            _port = new SerialPort();
-            _port.PortName = name;
-            _port.BaudRate = baudRate;
-            _port.Parity = Parity.None;
-            _port.DataBits = 8;
-            _port.StopBits = StopBits.One;
-            _port.Handshake = Handshake.None;
-            try {
-                _port.Open();
-            }
-            catch (Exception exception) {
-                throw new Exception($"Failed to open serial port {name}: {exception.Message}");
-            }
+            _port = SerialPortResolver.OpenUri(uri);
             isOpen = true;
-
-            _onReceivedLowerIO = onReceivedLowerIO;
-            _onReceivedLogs = onReceivedLogs;
+            _onReceived = onReceived;
 
             new Thread(OnDataReceived).Start();
         }
@@ -151,16 +133,7 @@ namespace DIVERSerial
                                 var package = DIVERSerialPackage.Parse(_responseBuffer.ToArray());
                                 if (package != null)
                                 {
-                                    if (package.FunctionCode == FunctionCodeEnum.MemoryExchangeResponse)
-                                    {
-                                        var cmd = package.GetMemoryExchangeResponseCommand();
-                                        Console.WriteLine($"SerialAdaptor: MemoryExchangeResponseCommand: {BitConverter.ToString(cmd.MemoryExchangeData)}.");
-                                        if (cmd != null)
-                                        {
-                                            _onReceivedLowerIO?.Invoke(cmd.MemoryExchangeData);
-                                            _onReceivedLogs?.Invoke(cmd.LogData);
-                                        }
-                                    }
+                                    _onReceived?.Invoke(package);
                                 }
                             }
                             catch (ArgumentException exception)
@@ -285,7 +258,7 @@ namespace DIVERSerial
             data.Add(configuration.TerminalCount.DFP);
             data.AddRange(BitConverter.GetBytes(configuration.RelayCount.Exchange));
             data.AddRange(BitConverter.GetBytes(configuration.RelayCount.Connection));
-            data.AddRange(BitConverter.GetBytes(configuration.Ports.Length));
+            data.AddRange(BitConverter.GetBytes((short)configuration.Ports.Length));
             for (int i = 0; i < configuration.Ports.Length; i++)
             {
                 var port = configuration.Ports[i];
@@ -322,9 +295,9 @@ namespace DIVERSerial
         /// <returns>A new DIVERSerialPackage instance for binary code section.</returns>
         public static DIVERSerialPackage CreateBinaryCodeSectionPackage(
             byte slaveAddress,
-            uint totalLength,
-            uint sectionAddress,
-            ushort sectionLength,
+            int totalLength,
+            int sectionAddress,
+            short sectionLength,
             byte[] data)
         {
             if (data == null) throw new ArgumentNullException(nameof(data));
@@ -347,7 +320,7 @@ namespace DIVERSerial
         /// <returns>A new DIVERSerialPackage instance for memory exchange request.</returns>
         public static DIVERSerialPackage CreateMemoryExchangeRequestPackage(
             byte slaveAddress,
-            uint memorySize,
+            int memorySize,
             byte[] data)
         {
             if (data == null) throw new ArgumentNullException(nameof(data));
@@ -710,6 +683,12 @@ namespace DIVERSerial
         public ConfigurationPortTypeEnum Type { get; set; }
         public int BaudRate { get; set; }
         public short BufferSize { get; set; }
+
+        // To String Method
+        public override string ToString()
+        {
+            return $"[ Type={Type}, BaudRate={BaudRate}, BufferSize={BufferSize} ]";
+        }
     }
 
     public class ConfigurationTerminalCount
@@ -718,17 +697,32 @@ namespace DIVERSerial
         public byte Internal { get; set; }
         public byte Resource { get; set; }
         public byte DFP { get; set; }
+
+        public override string ToString()
+        {
+            return $"[ UFP={UFP}, Internal={Internal}, Resource={Resource}, DFP={DFP} ]";
+        }
     }
 
     public class ConfigurationRelayCount
     {
         public short Exchange { get; set; }
         public short Connection { get; set; }
+
+        public override string ToString()
+        {
+            return $"[ Exchange={Exchange}, Connection={Connection} ]";
+        }
     }
 
     public class CongigurationTerminal
     {
         public byte MaxCurrentAmpere { get; set; }
+
+        public override string ToString()
+        {
+            return $"[ CongigurationTerminal: MaxCurrentAmpere={MaxCurrentAmpere} ]";
+        }
     }
 
     public class ConfigurationRelay
@@ -738,6 +732,11 @@ namespace DIVERSerial
         public bool IsOn { get; set; }
         public byte TerminalIndex0 { get; set; }
         public byte TerminalIndex1 { get; set; }
+
+        public override string ToString()
+        {
+            return $"[ MaxCurrentAmpere={MaxCurrentAmpere}, RelayType={RelayType}, IsOn={IsOn}, TerminalIndex0={TerminalIndex0}, TerminalIndex1={TerminalIndex1} ]";
+        }
     }
 
     public class Configuration
@@ -747,6 +746,31 @@ namespace DIVERSerial
         public ConfigurationPort[] Ports { get; set; }
         public CongigurationTerminal[] Terminals { get; set; }
         public ConfigurationRelay[] Relays { get; set; }
+
+        // To String Method
+        // Call child's to string method for terminal count and relay count
+        // Then print ports length
+        // then iterate 
+        // through ports and print each port's to string
+        // then iterate through terminals and print each terminal's to string
+        public override string ToString()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"Configuration: TerminalCount={TerminalCount}, RelayCount={RelayCount}, PortsCount={Ports.Length}");
+            foreach (var port in Ports)
+            {
+                sb.AppendLine(port.ToString());
+            }
+            foreach (var terminal in Terminals)
+            {
+                sb.AppendLine(terminal.ToString());
+            }
+            foreach (var relay in Relays)
+            {
+                sb.AppendLine(relay.ToString());
+            }
+            return sb.ToString();
+        }
     }
 
     public class HeartBeatCommand

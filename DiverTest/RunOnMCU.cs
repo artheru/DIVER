@@ -4,8 +4,8 @@ namespace CartActivator
 {
     public class LogicRunOnMCUAttribute : Attribute
     {
-        public string mcu_url = "COM4";
-        public int scanInterval = 500;
+        public string mcuUri = "";
+        public int scanInterval = 1000;
     }
 
     public class RequireNativeCodeAttribute : Attribute

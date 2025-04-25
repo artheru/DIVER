@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using CartActivator;
+using DIVERSerial;
 using TEST;
 
 namespace DiverTest
@@ -15,7 +16,7 @@ namespace DiverTest
         [AsUpperIO] public int write_to_mcu;
     }
 
-    [LogicRunOnMCU(scanInterval = 500)]
+    [LogicRunOnMCU(mcuUri="serial://name=COM4", scanInterval = 500)]
     public class TestMCURoutine: LadderLogic<TestVehicle>
     {
         public override void Operation(int iteration)
@@ -24,6 +25,21 @@ namespace DiverTest
             cart.read_from_mcu = (cart.write_to_mcu << 2) + TESTCls.TestFunc(iteration);
             Console.WriteLine("Lower " + cart.read_from_mcu);
             Console.WriteLine("Upper " + cart.write_to_mcu);
+            Console.WriteLine("Time = " + RunOnMCU.GetMillisFromStart());
+            byte[] dummyPayload = new byte[4] { 0x01, 0x02, 0x03, 0x04};
+            RunOnMCU.WriteStream(dummyPayload, (int)PortIndex.Serial1);
+            byte[] readPayload = RunOnMCU.ReadStream((int)PortIndex.Serial2);
+            if (readPayload != null)
+            {
+                Console.WriteLine("Port Serial2 received: " +  readPayload.Length);
+            }
         }
+    }
+
+    public enum PortIndex: int
+    {
+        CAN1 = 0, CAN2 = 1,
+        Modbus1 = 2, Modbus2 = 3,
+        Serial1 = 4, Serial2 = 5,
     }
 }
