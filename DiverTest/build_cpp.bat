@@ -1,3 +1,4 @@
+echo Build MCURuntime for debug use.
 REM @echo off
 
 REM Step 1: Use vswhere to get the Visual Studio installation path

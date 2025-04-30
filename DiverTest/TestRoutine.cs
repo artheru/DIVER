@@ -4,18 +4,34 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using CartActivator;
-using DIVERSerial;
+using DiverTest.DIVER.CoralinkerAdaption;
 using TEST;
 
 namespace DiverTest
 {
     // interaction interface.
-    public class TestVehicle : LocalDIVERVehicle
+    public class TestLinking: Coralinking
+    {
+        public override void Define()
+        {
+            Console.WriteLine("Coralinker Definition");
+            var node1 = Root.Downlink(typeof(TestMCURoutine));
+            var p1= node1.ResolvedPin("battery-12V","input-1"); // denote a pin is forcefully placed.
+            var p2 = node1.UnresolvedPin("gnd");
+            node1.RequireConnect(p1, p2);
+            //.. list all connection here.
+        }
+    }
+
+    [DefineCoralinking<TestLinking>]
+    public class TestVehicle : CoralinkerDIVERVehicle
     {
         [AsLowerIO] public int read_from_mcu;
         [AsUpperIO] public int write_to_mcu;
     }
 
+    // Logic and MCU is strictly 1:1
+    [UseCoralinkerMCU<CoralinkerCL1_0_12p>]
     [LogicRunOnMCU(mcuUri="serial://name=COM4", scanInterval = 500)]
     public class TestMCURoutine: LadderLogic<TestVehicle>
     {
@@ -35,7 +51,7 @@ namespace DiverTest
             }
         }
     }
-
+    
     public enum PortIndex: int
     {
         CAN1 = 0, CAN2 = 1,
