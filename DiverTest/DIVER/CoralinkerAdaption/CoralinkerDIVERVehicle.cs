@@ -300,4 +300,11 @@ public abstract class CoralinkerDIVERVehicle : DIVERVehicle
         // update mcu program and run.
         base.RunDIVER();
     }
+
+    public enum PortIndex : int
+    {
+        CAN1 = 0, CAN2 = 1,
+        Modbus1 = 2, Modbus2 = 3,
+        Serial1 = 4, Serial2 = 5,
+    }
 }

@@ -19,6 +19,8 @@ namespace DiverTest
             var p1= node1.ResolvedPin("battery-12V","input-1"); // denote a pin is forcefully placed.
             var p2 = node1.UnresolvedPin("gnd");
             node1.RequireConnect(p1, p2);
+
+            var node2 = node1.Downlink(typeof(TestMCURoutineNode2));
             //.. list all connection here.
         }
     }
@@ -43,19 +45,23 @@ namespace DiverTest
             Console.WriteLine("Upper " + cart.write_to_mcu);
             Console.WriteLine("Time = " + RunOnMCU.GetMillisFromStart());
             byte[] dummyPayload = new byte[4] { 0x01, 0x02, 0x03, 0x04};
-            RunOnMCU.WriteStream(dummyPayload, (int)PortIndex.Serial1);
-            byte[] readPayload = RunOnMCU.ReadStream((int)PortIndex.Serial2);
+            RunOnMCU.WriteStream(dummyPayload, (int)CoralinkerDIVERVehicle.PortIndex.Serial1);
+            byte[] readPayload = RunOnMCU.ReadStream((int)CoralinkerDIVERVehicle.PortIndex.Serial2);
             if (readPayload != null)
             {
                 Console.WriteLine("Port Serial2 received: " +  readPayload.Length);
             }
         }
     }
-    
-    public enum PortIndex: int
+
+    [UseCoralinkerMCU<CoralinkerCL1_0_12p>]
+    [LogicRunOnMCU(mcuUri = "serial://name=COMxxx", scanInterval = 500)]
+    public class TestMCURoutineNode2 : LadderLogic<TestVehicle>
     {
-        CAN1 = 0, CAN2 = 1,
-        Modbus1 = 2, Modbus2 = 3,
-        Serial1 = 4, Serial2 = 5,
+        public override void Operation(int iteration)
+        {
+            Console.WriteLine("Iteration = " + iteration + "on node 2");
+        }
     }
+
 }
