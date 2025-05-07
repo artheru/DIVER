@@ -286,11 +286,9 @@ public abstract class CoralinkerDIVERVehicle : DIVERVehicle
             if (req(existingWiring)) break; // wiring is good, OK to run
 
             var solutions = clinking.Solve();
-            foreach (var ns in solutions)
-            {
-                var url = ns.url;
-                // update node @ url.
-            }
+            // break.
+            // update comparators
+            // update connections.
 
             Console.WriteLine($"layout updated for `{GetType().Name}` according to `{clinking.GetType().Name}`");
         }
