@@ -67,11 +67,24 @@ namespace DiverTest.DIVER.CoralinkerAdaption
         public CoralinkerRoot Root = new();
         public abstract void Define();
 
-        public void Solve()
+        public Func<CoralinkerDIVERVehicle.WiringLayout[], bool> GatherRequirements()
         {
+            return (_) => false; // debug: just say requirements not meet.
+        }
+
+        public struct NodeSolution
+        {
+            public string url;
+            public Dictionary<string, bool> matrix;
+        }
+        public NodeSolution[] Solve()
+        { 
+            // just reprogram all nodes.
             Console.WriteLine("Solve linking problem");
+
             // 1> group all requirement pin, dye color.
             // 2> for each node use sorting network to solve.
+            return null;
         }
     }
 

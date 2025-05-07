@@ -247,22 +247,59 @@ public abstract class CoralinkerDIVERVehicle : DIVERVehicle
         Console.WriteLine($"MCU Log from {mcuUri}:\n{message}");
     }
 
+    void OpenCoralinkers()
+    {
+        //
+    }
+
+    public class WiringLayout
+    {
+        public string[][] pin_grouping;
+        public string node_path="dddd"; // path on programmable harness topology. d=downlink, r=rightlink, l=leftlink.
+    }
+
+    WiringLayout[] GatherWirings()
+    {
+        return null;
+    }
+    
     public override void RunDIVER()
     {
-        // first solve car linking requirement, and send to MCUs, check. finally run.
+        OpenCoralinkers(); // do topology discovery.
+
+        var existingWiring = GatherWirings();
+
+        bool topologyDefined = false;
         foreach (var attr in GetType().GetCustomAttributes())
         {
-            if (attr.GetType().IsSubclassOfRawGeneric(typeof(DefineCoralinkingAttribute<>), out var gType))
-            {
-                var linker_type = gType.GenericTypeArguments[0];
-                var clinking = Activator.CreateInstance(linker_type);
-                ((Coralinking)clinking).Define();
-                ((Coralinking)clinking).Solve();
+            if (!attr.GetType().IsSubclassOfRawGeneric(typeof(DefineCoralinkingAttribute<>), out var gType)) continue;
+            topologyDefined = true;
 
+            // gType is wiring requirements.
+            var linker_type = gType.GenericTypeArguments[0];
+            var clinking = Activator.CreateInstance(linker_type) as Coralinking;
+            clinking.Define();
+            var req = clinking.GatherRequirements();
+
+            // check topology and SKU is compatible to requirements, then validate if update is required.
+            // if bad topology/SKU, throw. don't run.
+            if (req(existingWiring)) break; // wiring is good, OK to run
+
+            var solutions = clinking.Solve();
+            foreach (var ns in solutions)
+            {
+                var url = ns.url;
+                // update node @ url.
             }
+
+            Console.WriteLine($"layout updated for `{GetType().Name}` according to `{clinking.GetType().Name}`");
         }
 
-        return;
-        //base.RunDIVER();
+        if (!topologyDefined)
+            throw new Exception(
+                $"No node topology for `{GetType().Name}`, use DefineCoralinking<T> to define a linking requreiment");
+
+        // update mcu program and run.
+        base.RunDIVER();
     }
 }
