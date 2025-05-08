@@ -20,7 +20,7 @@ namespace DiverTest
             var p2 = node1.UnresolvedPin("gnd");
             node1.RequireConnect(p1, p2);
 
-            var node2 = node1.Downlink(typeof(TestMCURoutineNode2));
+            //var node2 = node1.Downlink(typeof(TestMCURoutineNode2));
             //.. list all connection here.
         }
     }
@@ -49,19 +49,18 @@ namespace DiverTest
             byte[] readPayload = RunOnMCU.ReadStream((int)CoralinkerDIVERVehicle.PortIndex.Serial2);
             if (readPayload != null)
             {
-                Console.WriteLine("Port Serial2 received: " +  readPayload.Length);
+                Console.WriteLine("Port Serial2 received: " + readPayload.Length);
             }
         }
     }
 
-    [UseCoralinkerMCU<CoralinkerCL1_0_12p>]
-    [LogicRunOnMCU(mcuUri = "serial://name=COMxxx", scanInterval = 500)]
-    public class TestMCURoutineNode2 : LadderLogic<TestVehicle>
-    {
-        public override void Operation(int iteration)
-        {
-            Console.WriteLine("Iteration = " + iteration + "on node 2");
-        }
-    }
-
+    //[UseCoralinkerMCU<CoralinkerCL1_0_12p>]
+    //[LogicRunOnMCU(mcuUri = "serial://name=COMxxx", scanInterval = 500)]
+    //public class TestMCURoutineNode2 : LadderLogic<TestVehicle>
+    //{
+    //    public override void Operation(int iteration)
+    //    {
+    //        Console.WriteLine("Iteration node 2 = " + iteration);
+    //    }
+    //}
 }

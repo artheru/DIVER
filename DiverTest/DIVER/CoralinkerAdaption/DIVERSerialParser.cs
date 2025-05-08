@@ -1,4 +1,5 @@
-﻿using System.IO.Ports;
+﻿using System;
+using System.IO.Ports;
 using System.Text;
 
 namespace DiverTest.DIVER.CoralinkerAdaption;
@@ -10,6 +11,7 @@ public class DIVERSerialListener
     private const int ReceiveSleepTimeMs = 5; // Sleep time in milliseconds for receiving data
     private const int ReponseBufferSize = 4096; // Size of the response buffer
 
+    private readonly string _uri;
     private SerialPort _port;
     public bool isOpen { get; set; }
 
@@ -24,15 +26,16 @@ public class DIVERSerialListener
         FunctionOnPackageReceivedType onReceived // Callback for receiving data
     )
     {
+        _uri = uri;
         isOpen = false;
         _port = SerialPortResolver.OpenUri(uri);
         isOpen = true;
         _onReceived = onReceived;
 
-        new Thread(OnDataReceived).Start();
+        new Thread(CheckReceivedSerialData).Start();
     }
 
-    private void OnDataReceived()
+    private void CheckReceivedSerialData()
     {
         Thread.Sleep(ReceiveSleepTimeMs);
         try
@@ -45,7 +48,7 @@ public class DIVERSerialListener
                     if (bytesToRead > ReponseBufferSize)
                     {
                         _port.DiscardInBuffer();
-                        Console.WriteLine($"SerialAdaptor: Too many bytes in buffer, discarding {bytesToRead} bytes.");
+                        Console.WriteLine($"Serial{_uri}: Too many bytes in buffer, discarding {bytesToRead} bytes.");
                         _responseBuffer.Clear();
                         _responseState = ResponseStateEnum.Initialized;
                     }
@@ -101,7 +104,7 @@ public class DIVERSerialListener
                         _packageLength = BitConverter.ToUInt16(_responseBuffer.ToArray(), 2);
                         if (_packageLength > ReponseBufferSize - 7 || _packageLength < 2)
                         {
-                            Console.WriteLine($"SerialAdaptor: Invalid package length {_packageLength}, discarding buffer.");
+                            Console.WriteLine($"Serial{_uri}: Invalid package length {_packageLength}, discarding buffer.");
                             _responseBuffer.Clear();
                             _responseState = ResponseStateEnum.Initialized;
                         }
@@ -123,7 +126,7 @@ public class DIVERSerialListener
                     {
                         try
                         {
-                            Console.WriteLine($"SerialAdaptor: Received package: {BitConverter.ToString(_responseBuffer.ToArray())}.");
+                            Console.WriteLine($"Serial{_uri}: Received package: {BitConverter.ToString(_responseBuffer.ToArray())}.");
                             var package = DIVERSerialPackage.Parse(_responseBuffer.ToArray());
                             if (package != null)
                             {
@@ -132,7 +135,7 @@ public class DIVERSerialListener
                         }
                         catch (ArgumentException exception)
                         {
-                            Console.WriteLine($"SerialAdaptor: Failed to parse package: {exception.Message}");
+                            Console.WriteLine($"Serial{_uri}: Failed to parse package: {exception.Message}");
                         }
 
                         _responseBuffer.Clear();
@@ -148,14 +151,14 @@ public class DIVERSerialListener
 
     public void SendMessage(byte[] data)
     {
-        Console.WriteLine($"SerialAdaptor: Send packet to mcu :{BitConverter.ToString(data)}");
+        Console.WriteLine($"Serial{_uri}: Send packet to mcu :{BitConverter.ToString(data)}");
         try
         {
             _port.Write(data, 0, data.Length);
         }
         catch (Exception exception)
         {
-            Console.WriteLine($"SerialAdaptor: Failed to send data: {exception.Message}");
+            Console.WriteLine($"Serial{_uri}: Failed to send data: {exception.Message}");
             return;
         }
     }
