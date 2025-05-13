@@ -34,7 +34,7 @@ namespace DiverTest
 
     // Logic and MCU is strictly 1:1
     [UseCoralinkerMCU<CoralinkerCL1_0_12p>]
-    [LogicRunOnMCU(mcuUri="serial://name=COM4", scanInterval = 500)]
+    [LogicRunOnMCU(mcuUri="serial://name=COM11", scanInterval = 500)]
     public class TestMCURoutine: LadderLogic<TestVehicle>
     {
         public override void Operation(int iteration)

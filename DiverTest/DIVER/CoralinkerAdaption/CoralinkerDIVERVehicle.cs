@@ -41,7 +41,8 @@ internal class CoralinkerLowerNodeHandle
 
     public volatile StateEnum mcuState = StateEnum.Uninitialized;
     private volatile bool _isMCUStarted = false;
-    public Configuration mcuConfiguration = null;
+    public volatile Configuration mcuConfiguration = null;
+    public volatile Configuration newConfiguration = null;
 
     // constructor
     public CoralinkerLowerNodeHandle(string uri, byte[] asm, DIVERVehicle root)
@@ -101,6 +102,9 @@ internal class CoralinkerLowerNodeHandle
                     Console.WriteLine("MCU ConfigurationAck as follows");
                     Console.WriteLine(configPackage.ToString());
                     mcuConfiguration = configPackage;
+                } else
+                {
+                    Console.WriteLine("Error: MCU Configuration Ack is error!");
                 }
                 break;
             case FunctionCodeEnum.BinaryCodeSectionAck:
@@ -210,7 +214,7 @@ internal class CoralinkerLowerNodeHandle
         );
     }
 
-    public bool PushConfiguration()
+    public bool ModifyRelays()
     {
         if (_serial == null || !_serial.isOpen)
         {
@@ -224,23 +228,61 @@ internal class CoralinkerLowerNodeHandle
             return false;
         }
 
-        if (mcuState != StateEnum.Initialized && mcuState != StateEnum.Configurated)
+        if (mcuState != StateEnum.Initialized && mcuState != StateEnum.Configurated && mcuState != StateEnum.Configurating)
         {
             Console.WriteLine("Coralinker: Error, MCU is not initialized or configurated!");
             return false;
         }
 
-        Console.WriteLine("Coralinker: PushConfiguration: " + _uri);
+        Console.WriteLine("Coralinker: ModifyRelays: " + _uri);
+        _serial.SendMessage(DIVERSerialPackage.CreateConfigurationWritePackage(
+            _DefaultSlaveAddress, newConfiguration, ConfigurationActionEnum.WriteRelays).Serialize());
+        Thread.Sleep(_WaitInterval * 10);
+        return WaitConditionOfMCU(
+            () => {
+                // TODO this is not elegant but works
+                var isEqual = newConfiguration.ToString() == mcuConfiguration.ToString(); return isEqual; },
+            () => { return false; },
+            () =>
+            {
+                _serial.SendMessage(DIVERSerialPackage.CreateConfigurationWritePackage(
+                    _DefaultSlaveAddress, newConfiguration, ConfigurationActionEnum.WriteRelays).Serialize());
+                return true;
+            }
+        );
+    }
+
+    public bool WritePortsConfiguration()
+    {
+        if (_serial == null || !_serial.isOpen)
+        {
+            Console.WriteLine("Coralinker: Error, serial port is not open!");
+            return false;
+        }
+
+        if (mcuConfiguration == null)
+        {
+            Console.WriteLine("Coralinker: Error, configuration is null!");
+            return false;
+        }
+
+        if (mcuState != StateEnum.Initialized && mcuState != StateEnum.Configurating)
+        {
+            Console.WriteLine("Coralinker: Error, MCU is not initialized or configurating!");
+            return false;
+        }
+
+        Console.WriteLine("Coralinker: WritePortsConfiguration: " + _uri);
 
         _serial.SendMessage(DIVERSerialPackage.CreateConfigurationWritePackage(
-            _DefaultSlaveAddress, mcuConfiguration, ConfigurationActionEnum.Write).Serialize());
+            _DefaultSlaveAddress, mcuConfiguration, ConfigurationActionEnum.WritePorts).Serialize());
         return WaitConditionOfMCU(
             () => { return mcuState == StateEnum.Configurated; },
             () => { return false; },
             () =>
             {
                 _serial.SendMessage(DIVERSerialPackage.CreateConfigurationWritePackage(
-                    _DefaultSlaveAddress, mcuConfiguration, ConfigurationActionEnum.Write).Serialize());
+                    _DefaultSlaveAddress, mcuConfiguration, ConfigurationActionEnum.WritePorts).Serialize());
                 return true;
             }
         );
@@ -438,27 +480,60 @@ public abstract class CoralinkerDIVERVehicle : DIVERVehicle
             throw new Exception(
                 $"No node topology for `{GetType().Name}`, use DefineCoralinking<T> to define a linking requreiment");
 
-        // TODO: This should be included by SKU Def
-        // for each node set configuration
+        //// TODO: This should be included by SKU Def
+        //// for each node set configuration
+        //foreach (var nodeHandle in _nodeMap)
+        //{
+        //    nodeHandle.Value.mcuConfiguration.Ports = new ConfigurationPort[] {
+        //        new ConfigurationPort { Type = ConfigurationPortTypeEnum.CAN, BaudRate = 1000000, BufferSize = 32},
+        //        new ConfigurationPort { Type = ConfigurationPortTypeEnum.CAN, BaudRate = 1000000, BufferSize = 32},
+        //        new ConfigurationPort { Type = ConfigurationPortTypeEnum.Modbus, BaudRate = 9600, BufferSize = 256},
+        //        new ConfigurationPort { Type = ConfigurationPortTypeEnum.Modbus, BaudRate = 9600, BufferSize = 256},
+        //        new ConfigurationPort { Type = ConfigurationPortTypeEnum.DualDirectionSerial, BaudRate = 9600, BufferSize = 1024},
+        //        new ConfigurationPort { Type = ConfigurationPortTypeEnum.DualDirectionSerial, BaudRate = 9600, BufferSize = 1024},
+        //    };
+        //}
+
+        // Disconnect all connections
         foreach (var nodeHandle in _nodeMap)
         {
-            nodeHandle.Value.mcuConfiguration.Ports = new ConfigurationPort[] {
-                new ConfigurationPort { Type = ConfigurationPortTypeEnum.CAN, BaudRate = 1000000, BufferSize = 32},
-                new ConfigurationPort { Type = ConfigurationPortTypeEnum.CAN, BaudRate = 1000000, BufferSize = 32},
-                new ConfigurationPort { Type = ConfigurationPortTypeEnum.Modbus, BaudRate = 9600, BufferSize = 256},
-                new ConfigurationPort { Type = ConfigurationPortTypeEnum.Modbus, BaudRate = 9600, BufferSize = 256},
-                new ConfigurationPort { Type = ConfigurationPortTypeEnum.DualDirectionSerial, BaudRate = 9600, BufferSize = 1024},
-                new ConfigurationPort { Type = ConfigurationPortTypeEnum.DualDirectionSerial, BaudRate = 9600, BufferSize = 1024},
-            };
+            nodeHandle.Value.newConfiguration = nodeHandle.Value.mcuConfiguration;
+            // relays index from 25 to 25 + 11, set off
+            for (int i = 0; i < 11; i++)
+            {
+                nodeHandle.Value.newConfiguration.Relays[25 + i].IsOn = ConfigurationRelayIsOnEnum.Off;
+            }
+
+            nodeHandle.Value.ModifyRelays();
         }
 
-        if (!PushNodesConfiguration())
+        Thread.Sleep(1000);
+
+        // Connect all connections
+        foreach (var nodeHandle in _nodeMap)
         {
-            return;
+            nodeHandle.Value.newConfiguration = nodeHandle.Value.mcuConfiguration;
+            // relays index from 25 to 25 + 11, set off
+            for (int i = 0; i < 11; i++)
+            {
+                nodeHandle.Value.newConfiguration.Relays[25 + i].IsOn = ConfigurationRelayIsOnEnum.On;
+            }
+
+            nodeHandle.Value.ModifyRelays();
         }
 
+        // Write Ports to nodes
+        foreach (var nodeHandle in _nodeMap)
+        {
+            if (!nodeHandle.Value.WritePortsConfiguration())
+            {
+                Console.WriteLine($"Coralinker: Error, node {nodeHandle.Key} write ports configuration failed!");
+                return;
+            }
+        }
+
+        // Start all nodes
         StartNodes();
-        
     }
 
     bool OpenNodes()
@@ -482,19 +557,6 @@ public abstract class CoralinkerDIVERVehicle : DIVERVehicle
             if (!nodeHandle.Value.FetchConfiguration())
             {
                 Console.WriteLine($"Coralinker: Error, node {nodeHandle.Key} fetch configuration failed!");
-                return false;
-            }
-        }
-        return true;
-    }
-
-    bool PushNodesConfiguration()
-    {
-        foreach (var nodeHandle in _nodeMap)
-        {
-            if (!nodeHandle.Value.PushConfiguration())
-            {
-                Console.WriteLine($"Coralinker: Error, node {nodeHandle.Key} push configuration failed!");
                 return false;
             }
         }
@@ -527,9 +589,9 @@ public abstract class CoralinkerDIVERVehicle : DIVERVehicle
 
     public enum PortIndex : int
     {
-        CAN1 = 0, CAN2 = 1,
-        Modbus1 = 2, Modbus2 = 3,
-        Serial1 = 4, Serial2 = 5,
+        Serial1 = 0, Serial2 = 1,
+        Modbus1 = 2, Modbus2 = 3, Modbus3 = 4,
+        CAN1 = 5, CAN2 = 6,
     }
     public class WiringLayout
     {
