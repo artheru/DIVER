@@ -509,16 +509,24 @@ public abstract class CoralinkerDIVERVehicle : DIVERVehicle
 
         Thread.Sleep(1000);
 
-        // Connect all connections
+        // Connect DPDT
         foreach (var nodeHandle in _nodeMap)
         {
-            nodeHandle.Value.newConfiguration = nodeHandle.Value.mcuConfiguration;
-            // relays index from 25 to 25 + 11, set off
-            for (int i = 0; i < 11; i++)
+            for (int i = 0; i < 25; i++)
             {
-                nodeHandle.Value.newConfiguration.Relays[25 + i].IsOn = ConfigurationRelayIsOnEnum.On;
+                nodeHandle.Value.newConfiguration.Relays[i].IsOn = ConfigurationRelayIsOnEnum.Off;
             }
 
+            nodeHandle.Value.newConfiguration.Relays[8].IsOn = ConfigurationRelayIsOnEnum.On;
+            nodeHandle.Value.ModifyRelays();
+        }
+
+        Thread.Sleep(1000);
+
+        // Connect SPST
+        foreach (var nodeHandle in _nodeMap)
+        {
+            nodeHandle.Value.newConfiguration.Relays[25 + 1].IsOn = ConfigurationRelayIsOnEnum.On;
             nodeHandle.Value.ModifyRelays();
         }
 

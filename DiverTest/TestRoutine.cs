@@ -18,8 +18,10 @@ namespace DiverTest
             var node1 = Root.Downlink(typeof(TestMCURoutine));
             var p1= node1.ResolvedPin("battery-12V","input-1"); // denote a pin is forcefully placed.
             var p2 = node1.UnresolvedPin("gnd");
-            node1.RequireConnect(p1, p2);
+            node1.RequireConnect(p1, p2); // todo vargs
+            // .. multi
 
+           
             //var node2 = node1.Downlink(typeof(TestMCURoutineNode2));
             //.. list all connection here.
         }
