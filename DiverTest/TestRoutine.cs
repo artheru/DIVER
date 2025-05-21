@@ -148,7 +148,7 @@ namespace DiverTest
 
     // Logic and MCU is strictly 1:1
     [UseCoralinkerMCU<CoralinkerCL1_0_12p>]
-    [LogicRunOnMCU(mcuUri = "serial://name=COM11", scanInterval = 1000)]
+    [LogicRunOnMCU(mcuUri = "serial://name=COM5", scanInterval = 50)]
     public class TestMCURoutine : LadderLogic<TestVehicle>
     {
         bool variableInitialized = false;
@@ -241,7 +241,7 @@ namespace DiverTest
                     // 发送Start命令
                     byte[] coMsgStart = new byte[2] { (byte)NMTCommand.StartNode, (byte)motorID[i] };
                     RunOnMCU.WriteEvent(coMsgStart, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.NMT);
-                    motorStage[i] = (int)MotorBootupStage.StartSent;
+                    motorStage[i] = (int)MotorBootupStage.StartReceived;
                     motorRetryCount[i] = 0;
                     Console.WriteLine("Motor Start Sent");
                     return false;
@@ -323,8 +323,8 @@ namespace DiverTest
 
             if (isAllMotorBooted)
             {
-                motorTargetSpeed[0] = 10000;
-                motorTargetSpeed[1] = 10000;
+                motorTargetSpeed[0] = 0;
+                motorTargetSpeed[1] = 100000 * (iteration % 100) ;
                 for (int i = 0; i < motorStage.Length; i++)
                 {
                     byte[] TPDO1 = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.TPDO1 + (int)motorID[i]);
@@ -334,7 +334,9 @@ namespace DiverTest
                         motorFeedback[0] = fb;
                     }
 
-                    byte[] RPDO1 = Motor.GenerateRPDO1((int)Motor.ControlWord.Start3, (int)CANID.RPDO1 + (int)motorID[i]);
+                    byte[] RPDO1 = Motor.GenerateRPDO1((int)Motor.ControlWord.Start3, motorTargetSpeed[i]);
+                    RunOnMCU.WriteEvent(
+                        RPDO1, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[i]);
                 }
             }
             else
