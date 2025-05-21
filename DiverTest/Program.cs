@@ -12,7 +12,7 @@ namespace DiverTest
     {
         static void Main(string[] args)
         {
-            new TestVehicle(){write_to_mcu = 114514}.RunDIVER();
+            new TestVehicle(){ motor_actual_velocity_A = 10000, motor_actual_velocity_B = 10000}.RunDIVER();
         }
     }
 }
