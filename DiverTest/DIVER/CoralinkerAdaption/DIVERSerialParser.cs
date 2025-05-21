@@ -1,4 +1,5 @@
-﻿using System.IO.Ports;
+﻿using System;
+using System.IO.Ports;
 using System.Text;
 
 namespace DiverTest.DIVER.CoralinkerAdaption;
@@ -10,6 +11,7 @@ public class DIVERSerialListener
     private const int ReceiveSleepTimeMs = 5; // Sleep time in milliseconds for receiving data
     private const int ReponseBufferSize = 4096; // Size of the response buffer
 
+    private readonly string _uri;
     private SerialPort _port;
     public bool isOpen { get; set; }
 
@@ -24,15 +26,16 @@ public class DIVERSerialListener
         FunctionOnPackageReceivedType onReceived // Callback for receiving data
     )
     {
+        _uri = uri;
         isOpen = false;
         _port = SerialPortResolver.OpenUri(uri);
         isOpen = true;
         _onReceived = onReceived;
 
-        new Thread(OnDataReceived).Start();
+        new Thread(CheckReceivedSerialData).Start();
     }
 
-    private void OnDataReceived()
+    private void CheckReceivedSerialData()
     {
         Thread.Sleep(ReceiveSleepTimeMs);
         try
@@ -45,7 +48,7 @@ public class DIVERSerialListener
                     if (bytesToRead > ReponseBufferSize)
                     {
                         _port.DiscardInBuffer();
-                        Console.WriteLine($"SerialAdaptor: Too many bytes in buffer, discarding {bytesToRead} bytes.");
+                        Console.WriteLine($"Serial{_uri}: Too many bytes in buffer, discarding {bytesToRead} bytes.");
                         _responseBuffer.Clear();
                         _responseState = ResponseStateEnum.Initialized;
                     }
@@ -101,7 +104,7 @@ public class DIVERSerialListener
                         _packageLength = BitConverter.ToUInt16(_responseBuffer.ToArray(), 2);
                         if (_packageLength > ReponseBufferSize - 7 || _packageLength < 2)
                         {
-                            Console.WriteLine($"SerialAdaptor: Invalid package length {_packageLength}, discarding buffer.");
+                            Console.WriteLine($"Serial{_uri}: Invalid package length {_packageLength}, discarding buffer.");
                             _responseBuffer.Clear();
                             _responseState = ResponseStateEnum.Initialized;
                         }
@@ -123,7 +126,7 @@ public class DIVERSerialListener
                     {
                         try
                         {
-                            Console.WriteLine($"SerialAdaptor: Received package: {BitConverter.ToString(_responseBuffer.ToArray())}.");
+                            Console.WriteLine($"Serial{_uri}: Received package: {BitConverter.ToString(_responseBuffer.ToArray())}.");
                             var package = DIVERSerialPackage.Parse(_responseBuffer.ToArray());
                             if (package != null)
                             {
@@ -132,7 +135,7 @@ public class DIVERSerialListener
                         }
                         catch (ArgumentException exception)
                         {
-                            Console.WriteLine($"SerialAdaptor: Failed to parse package: {exception.Message}");
+                            Console.WriteLine($"Serial{_uri}: Failed to parse package: {exception.Message}");
                         }
 
                         _responseBuffer.Clear();
@@ -148,14 +151,14 @@ public class DIVERSerialListener
 
     public void SendMessage(byte[] data)
     {
-        Console.WriteLine($"SerialAdaptor: Send packet to mcu :{BitConverter.ToString(data)}");
+        Console.WriteLine($"Serial{_uri}: Send packet to mcu :{BitConverter.ToString(data)}");
         try
         {
             _port.Write(data, 0, data.Length);
         }
         catch (Exception exception)
         {
-            Console.WriteLine($"SerialAdaptor: Failed to send data: {exception.Message}");
+            Console.WriteLine($"Serial{_uri}: Failed to send data: {exception.Message}");
             return;
         }
     }
@@ -264,13 +267,12 @@ public class DIVERSerialPackage
         {
             var terminal = configuration.Terminals[i];
             data.Add(terminal.MaxCurrentAmpere);
-            data.Add((byte)(0));
         }
         for (int i = 0; i < configuration.Relays.Length; i++)
         {
             var relay = configuration.Relays[i];
             data.Add(relay.MaxCurrentAmpere);
-            var byteRelayType = (byte)((byte)(relay.RelayType) & 0x0F) + ((relay.IsOn) ? (byte)0xF0 : (byte)0x00);
+            var byteRelayType = (byte)((byte)(relay.RelayType) & 0x0F) + ((byte)(relay.IsOn) << 4);
             data.Add((byte)byteRelayType);
             data.Add(relay.TerminalIndex0);
             data.Add(relay.TerminalIndex1);
@@ -479,7 +481,6 @@ public class DIVERSerialPackage
                 Exchange = BitConverter.ToInt16(DataSegment, 5),
                 Connection = BitConverter.ToInt16(DataSegment, 7)
             },
-
         };
 
         int totalPortCount = BitConverter.ToInt16(DataSegment, 9);
@@ -487,8 +488,10 @@ public class DIVERSerialPackage
         int totalRelayCount = config.RelayCount.Exchange + config.RelayCount.Connection;
         int expectedLength = 11 +
                              totalPortCount * 7 +
-                             totalTerminalCount * 2 +
+                             totalTerminalCount * 1 +
                              totalRelayCount * 4;
+
+        Console.WriteLine($"DIVERSerialPackage: Expected length = {expectedLength}, Actual length = {DataSegment.Length}");
 
         if (DataSegment.Length != expectedLength) return null;
 
@@ -513,7 +516,7 @@ public class DIVERSerialPackage
             {
                 MaxCurrentAmpere = DataSegment[offset]
             };
-            offset += 2;
+            offset += 1;
         }
         for (int i = 0; i < totalRelayCount; i++)
         {
@@ -521,7 +524,7 @@ public class DIVERSerialPackage
             {
                 MaxCurrentAmpere = DataSegment[offset],
                 RelayType = (ConfigurationRelayTypeEnum)(DataSegment[offset + 1] & 0x0F),
-                IsOn = (DataSegment[offset + 1] & 0xF0) != 0,
+                IsOn = (ConfigurationRelayIsOnEnum)(byte)(DataSegment[offset + 1] >> 4),
                 TerminalIndex0 = DataSegment[offset + 2],
                 TerminalIndex1 = DataSegment[offset + 3]
             };
@@ -611,8 +614,10 @@ public enum ControlCodeEnum : byte
 public enum ConfigurationActionEnum : byte
 {
     Read = 0x00,
-    Write = 0x01,
-    WriteAndSave = 0x02
+    WritePorts = 0x01,
+    WriteAndSavePorts = 0x02,
+    WriteRelays = 0x03,
+    WriteAndSaveRelays = 0x04
 }
 
 public enum ConfigurationPortTypeEnum : byte
@@ -672,6 +677,13 @@ public enum ConfigurationRelayTypeEnum : byte
     SPST_VaporThermalSolder = 0x0B
 }
 
+public enum ConfigurationRelayIsOnEnum : byte
+{
+    Unknown = 0x00,
+    On = 0x01,
+    Off = 0x02
+}
+
 public class ConfigurationPort
 {
     public ConfigurationPortTypeEnum Type { get; set; }
@@ -723,7 +735,7 @@ public class ConfigurationRelay
 {
     public byte MaxCurrentAmpere { get; set; }
     public ConfigurationRelayTypeEnum RelayType { get; set; }
-    public bool IsOn { get; set; }
+    public ConfigurationRelayIsOnEnum IsOn { get; set; }
     public byte TerminalIndex0 { get; set; }
     public byte TerminalIndex1 { get; set; }
 
@@ -750,19 +762,30 @@ public class Configuration
     public override string ToString()
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"Configuration: TerminalCount={TerminalCount}, RelayCount={RelayCount}, PortsCount={Ports.Length}");
-        foreach (var port in Ports)
+        sb.AppendLine($"Configuration: TerminalCount={TerminalCount}, RelayCount={RelayCount}, PortsCount={Ports?.Length}");
+        if (Ports!= null)
         {
-            sb.AppendLine(port.ToString());
+            foreach (var port in Ports)
+            {
+                sb.AppendLine(port.ToString());
+            }
         }
-        foreach (var terminal in Terminals)
+        if (Terminals != null)
         {
-            sb.AppendLine(terminal.ToString());
+            foreach (var terminal in Terminals)
+            {
+                sb.AppendLine(terminal.ToString());
+            }
         }
-        foreach (var relay in Relays)
+        
+        if (Relays != null)
         {
-            sb.AppendLine(relay.ToString());
+            foreach (var relay in Relays)
+            {
+                sb.AppendLine(relay.ToString());
+            }
         }
+      
         return sb.ToString();
     }
 }
