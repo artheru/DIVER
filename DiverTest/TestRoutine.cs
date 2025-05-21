@@ -10,6 +10,66 @@ using TEST;
 namespace DiverTest
 {
     // interaction interface.
+    public static class CommonConstants
+    {
+        public const int CommunicationLostProtectionTime = 10;
+    }
+
+    public enum MotorID
+    {
+        MotorID1 = 1,
+        MotorID2 = 2,
+        MotorID3 = 3,
+        MotorID4 = 4
+    }   
+
+    public enum MotorMode : byte
+    {
+        SpeedMode = 0x03,
+        PositionMode = 0x01
+    }
+
+    public enum MotorControlWord: byte
+    {
+        Stop = 0x05,
+        Start = 0x06,
+        Start2 = 0x07,
+        Start3 = 0x0F
+    }
+
+    public enum CANID : int
+    {
+        RPDO1 = 0x200,
+        TPDO1 = 0x180,
+        HEARTBEAT = 0x700,
+        NMT = 0x000
+    }
+
+    public enum NMTCommand : byte
+    {
+        StartNode = 0x01,
+        StopNode = 0x02,
+        EnterPreOp = 0x80,
+        ResetNode = 0x81,
+        ResetComm = 0x82
+    }
+
+    public enum HEARTBEAT : byte
+    {
+        Bootup = 0x00,
+        Operational = 0x05,
+        Stopped = 0x04
+    }
+
+    public enum MotorBootupStage
+    {
+        Unknown = 0,
+        ResetSent = 1,
+        BootupReceived = 2,
+        StartSent = 3,
+        StartReceived = 4,
+    }
+
     public class TestLinking: Coralinking
     {
         public override void Define()
@@ -36,72 +96,158 @@ namespace DiverTest
 
     // Logic and MCU is strictly 1:1
     [UseCoralinkerMCU<CoralinkerCL1_0_12p>]
-    [LogicRunOnMCU(mcuUri="serial://name=COM5", scanInterval = 200)]
-    public class TestMCURoutine: LadderLogic<TestVehicle>
+    [LogicRunOnMCU(mcuUri = "serial://name=COM5", scanInterval = 50)]
+    public class TestMCURoutine : LadderLogic<TestVehicle>
     {
         static int lastIteration = -1;
+        static int communicationLostTime = 0;
+        static bool ProtectionFlag = false;
+
+        static int[] bootupStages = new[] { (int)MotorBootupStage.Unknown, (int)MotorBootupStage.Unknown };
+        static readonly int[] MyMotorID = new int[2] { (int)MotorID.MotorID3, (int)MotorID.MotorID4 };
+        static int[] bootupRetryCount = new int[2] { 0, 0 };
+        const int BootupRetryLimit = 3;
+
         public override void Operation(int iteration)
         {
-            if (iteration <= lastIteration)
+            if (iteration <= lastIteration || ProtectionFlag)
             {
+                if (communicationLostTime < CommonConstants.CommunicationLostProtectionTime)
+                {
+                    communicationLostTime += 1;
+                }
+                else
+                {
+                    byte[] RPDO1FailSafe = new byte[7] { 0x03, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00 };
+                    RunOnMCU.WriteEvent(RPDO1FailSafe, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)MotorID.MotorID3);
+                    RunOnMCU.WriteEvent(RPDO1FailSafe, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)MotorID.MotorID4);
+                    ProtectionFlag = true;
+                    Console.WriteLine("Error, Protected\n");
+                }
                 return;
             }
-            Console.WriteLine("Iteration = " + iteration);
-            //cart.read_from_mcu = (cart.write_to_mcu << 2) + TESTCls.TestFunc(iteration);
-            //Console.WriteLine("Lower " + cart.read_from_mcu);
-            //Console.WriteLine("Upper " + cart.write_to_mcu);
-            //Console.WriteLine("Time = " + RunOnMCU.GetMillisFromStart());
-            //byte[] dummyPayload = new byte[4] { 0x01, 0x02, 0x03, 0x04};
-            //RunOnMCU.WriteStream(dummyPayload, (int)CoralinkerDIVERVehicle.PortIndex.Serial1);
-            //byte[] readPayload = RunOnMCU.ReadStream((int)CoralinkerDIVERVehicle.PortIndex.Serial2);
-            if (iteration < 5)
+            else
             {
-                byte[] coMsgStartMotor = new byte[2] { 0x01, 0x04 };
-                RunOnMCU.WriteEvent(coMsgStartMotor, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, 0x00);
+                lastIteration = iteration;
+                communicationLostTime = 0;
+                ProtectionFlag = false;
             }
 
-            byte ctlWord = 0x05;
-            byte speed = 0x0;
-            if (iteration <= 10)
+            bool isAllMotorBootupOK = true;
+            for (int i = 0; i < bootupStages.Length; i++)
             {
-                ctlWord = 0x06;
-            } else if (iteration <= 20) {
-                ctlWord = 0x07;
-            } else if (iteration <= 30){
-                ctlWord = 0x0F;
-            } else
-            {
-                ctlWord = 0x0F;
-                speed = 0x20;
+                switch (bootupStages[i])
+                {
+                    case (int)MotorBootupStage.Unknown:
+                        isAllMotorBootupOK = false;
+                        {
+                            // 发送 Reset 命令
+                            byte[] coMsgReset = new byte[2] { (byte)NMTCommand.ResetNode, (byte)MyMotorID[i] };
+                            RunOnMCU.WriteEvent(coMsgReset, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.NMT);
+                            bootupStages[i] = (int)MotorBootupStage.ResetSent;
+                            bootupRetryCount[i] = 0;
+                            Console.WriteLine("Motor Reset Sent");
+                            break;
+                        }
+                    case (int)MotorBootupStage.ResetSent:
+                        isAllMotorBootupOK = false;
+                        {
+                            // 检查是否收到Bootup
+                            byte[] bootupMsg = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.HEARTBEAT + (int)MyMotorID[i]);
+                            if (bootupMsg != null && bootupMsg.Length == 2 && bootupMsg[0] == (byte)HEARTBEAT.Bootup && bootupMsg[1] == (byte)MyMotorID[i])
+                            {
+                                bootupStages[i] = (int)MotorBootupStage.BootupReceived;
+                                bootupRetryCount[i] = 0;
+                                Console.WriteLine("Motor Bootup Received");
+                            }
+                            else
+                            {
+                                bootupRetryCount[i]++;
+                                if (bootupRetryCount[i] > BootupRetryLimit)
+                                {
+                                    // 重发Reset
+                                    bootupStages[i] = (int)MotorBootupStage.Unknown;
+                                }
+                            }
+                            break;
+                        }
+                    case (int)MotorBootupStage.BootupReceived:
+                        isAllMotorBootupOK = false;
+                        {
+                            // 发送Start命令
+                            byte[] coMsgStart = new byte[2] { (byte)NMTCommand.StartNode, (byte)MyMotorID[i] };
+                            RunOnMCU.WriteEvent(coMsgStart, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.NMT);
+                            bootupStages[i] = (int)MotorBootupStage.StartSent;
+                            Console.WriteLine("Motor Start Sent");
+                            break;
+                        }
+                    case (int)MotorBootupStage.StartSent:
+                        isAllMotorBootupOK = false;
+                        {
+                            // 检查是否收到Start后的心跳
+                            byte[] heartbeatMsg = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.HEARTBEAT + (int)MyMotorID[i]);
+                            if (heartbeatMsg != null && heartbeatMsg.Length > 2 && heartbeatMsg[0] == (byte)HEARTBEAT.Operational && heartbeatMsg[1] == (byte)MyMotorID[i])
+                            {
+                                bootupStages[i] = (int)MotorBootupStage.StartReceived;
+                                bootupRetryCount[i] = 0;
+                                Console.WriteLine("Motor Start Received");
+                            }
+                            else
+                            {
+                                bootupRetryCount[i]++;
+                                if (bootupRetryCount[i] > BootupRetryLimit)
+                                {
+                                    // 重发Start
+                                    bootupStages[i] = (int)MotorBootupStage.BootupReceived;
+                                }
+                            }
+                            break;
+                        }
+                    case (int)MotorBootupStage.StartReceived:
+                    default:
+                        // 已启动，无需处理
+                        break;
+                }
             }
 
-            if (iteration >= 5)
+            if (isAllMotorBootupOK)
             {
-                byte[] coTPDO1 = new byte[7] { 0x03, 0x00, 0x00, speed, 0x00, ctlWord, 0x00 };
-                RunOnMCU.WriteEvent(coTPDO1, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, 0x204);
-                Console.WriteLine("CAN SPEED" + (int)speed);
-                Console.WriteLine("CAN CTLWORD" + (int)ctlWord);
+                Console.WriteLine($"All Motor is started");
             }
-            //RunOnMCU.WriteEvent(sendDummyCAN, (int)CoralinkerDIVERVehicle.PortIndex.CAN2, 0x184);
-            //byte[] readCAN = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, 0x184);
-            //if (readCAN != null)
+
+            //if (iteration < 5)
             //{
-            //    Console.WriteLine("CAN received: " + readCAN.Length);
+            //    byte[] coMsgStartMotor = new byte[2] { 0x01, 0x04 };
+            //    RunOnMCU.WriteEvent(coMsgStartMotor, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, 0x00);
             //}
-            //if (readPayload != null)
+
+            //byte ctlWord = 0x05;
+            //byte speed = 0x0;
+            //if (iteration <= 10)
             //{
-            //    Console.WriteLine("Port Serial2 received: " + readPayload.Length);
+            //    ctlWord = 0x06;
+            //}
+            //else if (iteration <= 20)
+            //{
+            //    ctlWord = 0x07;
+            //}
+            //else if (iteration <= 30)
+            //{
+            //    ctlWord = 0x0F;
+            //}
+            //else
+            //{
+            //    ctlWord = 0x0F;
+            //    speed = 0x20;
+            //}
+
+            //if (iteration >= 5)
+            //{
+            //    byte[] coTPDO1 = new byte[7] { 0x03, 0x00, 0x00, speed, 0x00, ctlWord, 0x00 };
+            //    RunOnMCU.WriteEvent(coTPDO1, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, 0x204);
+            //    Console.WriteLine("CAN SPEED" + (int)speed);
+            //    Console.WriteLine("CAN CTLWORD" + (int)ctlWord);
             //}
         }
     }
-
-    //[UseCoralinkerMCU<CoralinkerCL1_0_12p>]
-    //[LogicRunOnMCU(mcuUri = "serial://name=COMxxx", scanInterval = 500)]
-    //public class TestMCURoutineNode2 : LadderLogic<TestVehicle>
-    //{
-    //    public override void Operation(int iteration)
-    //    {
-    //        Console.WriteLine("Iteration node 2 = " + iteration);
-    //    }
-    //}
 }
