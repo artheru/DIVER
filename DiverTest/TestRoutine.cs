@@ -100,17 +100,19 @@ namespace DiverTest
     [LogicRunOnMCU(mcuUri = "serial://name=COM5", scanInterval = 50)]
     public class TestMCURoutine : LadderLogic<TestVehicle>
     {
-        static int lastIteration = -1;
-        static int communicationLostTime = 0;
-        static bool ProtectionFlag = false;
+        int lastIteration = -1;
+        int communicationLostTime = 0;
+        bool ProtectionFlag = false;
 
-        static int[] bootupStages = new[] { (int)MotorBootupStage.Unknown, (int)MotorBootupStage.Unknown };
-        static readonly int[] MyMotorID = new int[2] { (int)MotorID.MotorID3, (int)MotorID.MotorID4 };
-        static int[] bootupRetryCount = new int[2] { 0, 0 };
-        const int BootupRetryLimit = 3;
-
+        int motorStageA = (int)MotorBootupStage.Unknown;
+        int motorRetryCountA = 0;
+        int motorStageB = (int)MotorBootupStage.Unknown;
+        int motorRetryCountB = 0;
+        const int BootupRetryLimit = 20;
+        
         public override void Operation(int iteration)
         {
+            Console.WriteLine("ITR = " + iteration.ToString());
             if (iteration <= lastIteration || ProtectionFlag)
             {
                 if (communicationLostTime < CommonConstants.CommunicationLostProtectionTime)
@@ -135,86 +137,75 @@ namespace DiverTest
             }
 
             bool isAllMotorBootupOK = true;
-            for (int i = 0; i < bootupStages.Length; i++)
+            Console.WriteLine("STAGEA = " + motorStageA.ToString());
+
+            switch (motorStageA)
             {
-                switch (bootupStages[i])
-                {
-                    case (int)MotorBootupStage.Unknown:
-                        isAllMotorBootupOK = false;
+                case (int)MotorBootupStage.Unknown:
+                    // 发送 Reset 命令
+                    byte[] coMsgReset = new byte[2] { (byte)NMTCommand.ResetNode, (byte)MotorID.MotorID3 };
+                    RunOnMCU.WriteEvent(coMsgReset, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.NMT);
+                    motorStageA = (int)MotorBootupStage.ResetSent;
+                    motorRetryCountA = 0;
+                    Console.WriteLine("MotorA Reset Sent");
+                    break;
+                case (int)MotorBootupStage.ResetSent:
+                    // 检查是否收到Bootup
+                    byte[] bootupMsg = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.HEARTBEAT + (int)MotorID.MotorID3);
+                    if (bootupMsg != null && bootupMsg.Length == 1 && bootupMsg[0] == (byte)HEARTBEAT.Bootup)
+                    {
+                        motorStageA = (int)MotorBootupStage.BootupReceived;
+                        motorRetryCountA = 0;
+                        Console.WriteLine("MotorA Bootup Received");
+                    }
+                    else
+                    {
+                        motorRetryCountA++;
+                        if (motorRetryCountA > BootupRetryLimit)
                         {
-                            // 发送 Reset 命令
-                            byte[] coMsgReset = new byte[2] { (byte)NMTCommand.ResetNode, (byte)MyMotorID[i] };
-                            RunOnMCU.WriteEvent(coMsgReset, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.NMT);
-                            bootupStages[i] = (int)MotorBootupStage.ResetSent;
-                            bootupRetryCount[i] = 0;
-                            Console.WriteLine("Motor Reset Sent");
-                            break;
+                            // 重发Reset
+                            motorStageA = (int)MotorBootupStage.Unknown;
                         }
-                    case (int)MotorBootupStage.ResetSent:
-                        isAllMotorBootupOK = false;
+                    }
+                    break;
+                case (int)MotorBootupStage.BootupReceived:
+                    //isAllMotorBootupOK = false;
+                    // 发送Start命令
+                    byte[] coMsgStart = new byte[2] { (byte)NMTCommand.StartNode, (byte)MotorID.MotorID3 };
+                    RunOnMCU.WriteEvent(coMsgStart, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.NMT);
+                    motorStageA = (int)MotorBootupStage.StartSent;
+                    Console.WriteLine("Motor Start Sent");
+                    break;
+                case (int)MotorBootupStage.StartSent:
+                    //isAllMotorBootupOK = false;
+                    // 检查是否收到Start后的心跳
+                    byte[] heartbeatMsg = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.HEARTBEAT + (int)MotorID.MotorID3);
+                    if (heartbeatMsg != null && heartbeatMsg.Length > 1 && heartbeatMsg[0] == (byte)HEARTBEAT.Operational)
+                    {
+                        motorStageA = (int)MotorBootupStage.StartReceived;
+                        motorRetryCountA = 0;
+                        Console.WriteLine("Motor Start Received");
+                    }
+                    else
+                    {
+                        motorRetryCountA++;
+                        if (motorRetryCountA > BootupRetryLimit)
                         {
-                            // 检查是否收到Bootup
-                            byte[] bootupMsg = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.HEARTBEAT + (int)MyMotorID[i]);
-                            if (bootupMsg != null && bootupMsg.Length == 2 && bootupMsg[0] == (byte)HEARTBEAT.Bootup && bootupMsg[1] == (byte)MyMotorID[i])
-                            {
-                                bootupStages[i] = (int)MotorBootupStage.BootupReceived;
-                                bootupRetryCount[i] = 0;
-                                Console.WriteLine("Motor Bootup Received");
-                            }
-                            else
-                            {
-                                bootupRetryCount[i]++;
-                                if (bootupRetryCount[i] > BootupRetryLimit)
-                                {
-                                    // 重发Reset
-                                    bootupStages[i] = (int)MotorBootupStage.Unknown;
-                                }
-                            }
-                            break;
+                            // 重发Start
+                            motorStageA = (int)MotorBootupStage.BootupReceived;
                         }
-                    case (int)MotorBootupStage.BootupReceived:
-                        isAllMotorBootupOK = false;
-                        {
-                            // 发送Start命令
-                            byte[] coMsgStart = new byte[2] { (byte)NMTCommand.StartNode, (byte)MyMotorID[i] };
-                            RunOnMCU.WriteEvent(coMsgStart, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.NMT);
-                            bootupStages[i] = (int)MotorBootupStage.StartSent;
-                            Console.WriteLine("Motor Start Sent");
-                            break;
-                        }
-                    case (int)MotorBootupStage.StartSent:
-                        isAllMotorBootupOK = false;
-                        {
-                            // 检查是否收到Start后的心跳
-                            byte[] heartbeatMsg = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.HEARTBEAT + (int)MyMotorID[i]);
-                            if (heartbeatMsg != null && heartbeatMsg.Length > 2 && heartbeatMsg[0] == (byte)HEARTBEAT.Operational && heartbeatMsg[1] == (byte)MyMotorID[i])
-                            {
-                                bootupStages[i] = (int)MotorBootupStage.StartReceived;
-                                bootupRetryCount[i] = 0;
-                                Console.WriteLine("Motor Start Received");
-                            }
-                            else
-                            {
-                                bootupRetryCount[i]++;
-                                if (bootupRetryCount[i] > BootupRetryLimit)
-                                {
-                                    // 重发Start
-                                    bootupStages[i] = (int)MotorBootupStage.BootupReceived;
-                                }
-                            }
-                            break;
-                        }
-                    case (int)MotorBootupStage.StartReceived:
-                    default:
-                        // 已启动，无需处理
-                        break;
-                }
+                    }
+                    break;
+                case (int)MotorBootupStage.StartReceived:
+                default:
+                    // 已启动，无需处理
+                    break;
             }
 
-            if (isAllMotorBootupOK)
-            {
-                Console.WriteLine($"All Motor is started");
-            }
+            //if (isAllMotorBootupOK)
+            //{
+            //    Console.WriteLine("All Motor is started");
+            //}
 
             //if (iteration < 5)
             //{

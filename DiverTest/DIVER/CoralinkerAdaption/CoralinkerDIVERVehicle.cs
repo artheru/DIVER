@@ -482,17 +482,18 @@ public abstract class CoralinkerDIVERVehicle : DIVERVehicle
 
         //// TODO: This should be included by SKU Def
         //// for each node set configuration
-        //foreach (var nodeHandle in _nodeMap)
-        //{
-        //    nodeHandle.Value.mcuConfiguration.Ports = new ConfigurationPort[] {
-        //        new ConfigurationPort { Type = ConfigurationPortTypeEnum.CAN, BaudRate = 1000000, BufferSize = 32},
-        //        new ConfigurationPort { Type = ConfigurationPortTypeEnum.CAN, BaudRate = 1000000, BufferSize = 32},
-        //        new ConfigurationPort { Type = ConfigurationPortTypeEnum.Modbus, BaudRate = 9600, BufferSize = 256},
-        //        new ConfigurationPort { Type = ConfigurationPortTypeEnum.Modbus, BaudRate = 9600, BufferSize = 256},
-        //        new ConfigurationPort { Type = ConfigurationPortTypeEnum.DualDirectionSerial, BaudRate = 9600, BufferSize = 1024},
-        //        new ConfigurationPort { Type = ConfigurationPortTypeEnum.DualDirectionSerial, BaudRate = 9600, BufferSize = 1024},
-        //    };
-        //}
+        foreach (var nodeHandle in _nodeMap)
+        {
+            nodeHandle.Value.mcuConfiguration.Ports = new ConfigurationPort[] {
+                new ConfigurationPort { Type = ConfigurationPortTypeEnum.DualDirectionSerial, BaudRate = 9600, BufferSize = 1024},
+                new ConfigurationPort { Type = ConfigurationPortTypeEnum.DualDirectionSerial, BaudRate = 9600, BufferSize = 1024},
+                new ConfigurationPort { Type = ConfigurationPortTypeEnum.Modbus, BaudRate = 9600, BufferSize = 256},
+                new ConfigurationPort { Type = ConfigurationPortTypeEnum.Modbus, BaudRate = 9600, BufferSize = 256},
+                new ConfigurationPort { Type = ConfigurationPortTypeEnum.Modbus, BaudRate = 9600, BufferSize = 256},
+                new ConfigurationPort { Type = ConfigurationPortTypeEnum.CAN, BaudRate = 500000, BufferSize = 32},
+                new ConfigurationPort { Type = ConfigurationPortTypeEnum.CAN, BaudRate = 500000, BufferSize = 32},
+            };
+        }
 
         //// Disconnect all connections
         //foreach (var nodeHandle in _nodeMap)
@@ -521,26 +522,26 @@ public abstract class CoralinkerDIVERVehicle : DIVERVehicle
         //    nodeHandle.Value.ModifyRelays();
         //}
 
-        // Connect DPDT
-        foreach (var nodeHandle in _nodeMap)
-        {
-            for (int i = 0; i < 25; i++)
-            {
-                nodeHandle.Value.newConfiguration.Relays[i].IsOn = ConfigurationRelayIsOnEnum.Off;
-            }
+        //// Connect DPDT
+        //foreach (var nodeHandle in _nodeMap)
+        //{
+        //    for (int i = 0; i < 25; i++)
+        //    {
+        //        nodeHandle.Value.newConfiguration.Relays[i].IsOn = ConfigurationRelayIsOnEnum.Off;
+        //    }
 
-            nodeHandle.Value.newConfiguration.Relays[8].IsOn = ConfigurationRelayIsOnEnum.On;
-            nodeHandle.Value.ModifyRelays();
-        }
+        //    nodeHandle.Value.newConfiguration.Relays[8].IsOn = ConfigurationRelayIsOnEnum.On;
+        //    nodeHandle.Value.ModifyRelays();
+        //}
 
-        Thread.Sleep(1000);
+        //Thread.Sleep(1000);
 
-        // Connect SPST
-        foreach (var nodeHandle in _nodeMap)
-        {
-            nodeHandle.Value.newConfiguration.Relays[25 + 1].IsOn = ConfigurationRelayIsOnEnum.On;
-            nodeHandle.Value.ModifyRelays();
-        }
+        //// Connect SPST
+        //foreach (var nodeHandle in _nodeMap)
+        //{
+        //    nodeHandle.Value.newConfiguration.Relays[25 + 1].IsOn = ConfigurationRelayIsOnEnum.On;
+        //    nodeHandle.Value.ModifyRelays();
+        //}
 
         // Write Ports to nodes
         foreach (var nodeHandle in _nodeMap)
