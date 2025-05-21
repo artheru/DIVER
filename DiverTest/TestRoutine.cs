@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using CartActivator;
 using DiverTest.DIVER.CoralinkerAdaption;
+using DiverTest.DIVER.CoralinkerAdaption.SKUs;
 using Microsoft.VisualBasic;
 using TEST;
 
@@ -22,7 +23,7 @@ namespace DiverTest
         MotorID2 = 2,
         MotorID3 = 3,
         MotorID4 = 4
-    }   
+    }
 
     public enum CANID : int
     {
@@ -64,6 +65,7 @@ namespace DiverTest
             SpeedMode = 0x03,
             PositionMode = 0x01
         }
+
         public enum ControlWord : byte
         {
             Stop = 0x05,
@@ -98,12 +100,14 @@ namespace DiverTest
         // 60400010, ControlWord
         // Parse RPDO1 and return
 
-        public struct Feedback {
+        public struct Feedback
+        {
             public bool valid;
             public int controlWord;
             public int speed;
             public int statusWord;
         }
+
         public static Feedback ParseTPDO1(byte[] TPDO1)
         {
             Feedback feedback = new Feedback();
@@ -120,37 +124,37 @@ namespace DiverTest
         }
     }
 
-    public class TestLinking: Coralinking
+    public class TestLinking : Coralinking
     {
         public override void Define()
         {
             Console.WriteLine("Coralinker Definition");
             var node1 = Root.Downlink(typeof(TestMCURoutine));
-            var p1= node1.ResolvedPin("battery-12V","input-1"); // denote a pin is forcefully placed.
-            var p2 = node1.UnresolvedPin("gnd");
-            node1.RequireConnect(p1, p2);
+            var p1 = node1.ResolvedPin<A10Pin>("battery-12V", "input-1"); // denote a pin is forcefully placed.
+            var p2 = node1.ArbitaryPin<A10Pin>("gnd");
+            RequireConnect(p1, p2);
 
-            var node2 = node1.Downlink(typeof(TestMCURoutineNode2));
-            //.. list all connection here.
-
-            RequireConnect(p1, p3);
-            RequireConnect(p2, p4);
-
-    
-            var node3 = node2.Downlink(typeof(TestMCURoutineNode3));
-            var p5 = node3.ArbitaryPin<A10Pin>("motor-24V");
-            var p6 = node3.ArbitaryPin<A10Pin>("motor-gnd");
-
-            var node4 = node3.Downlink(typeof(TestMCURoutineNode4));
-            var p7 = node4.ArbitaryPin<A10Pin>("DC-12V-to-24V converter in 12V");
-            var p8 = node4.ArbitaryPin<A10Pin>("DC-12V-to-24V converter in gnd");
-            var p9 = node4.ArbitaryPin<A10Pin>("DC-12V-to-24V converter out 24V");
-            var p10 = node4.ArbitaryPin<A10Pin>("DC-12V-to-24V converter out gnd");
-
-            RequireConnect(p5, p9);
-            RequireConnect(p6, p10);
-            RequireConnect(p1, p7);
-            RequireConnect(p2, p8);
+            // var node2 = node1.Downlink(typeof(TestMCURoutineNode2));
+            // //.. list all connection here.
+            //
+            // RequireConnect(p1, p3);
+            // RequireConnect(p2, p4);
+            //
+            //
+            // var node3 = node2.Downlink(typeof(TestMCURoutineNode3));
+            // var p5 = node3.ArbitaryPin<A10Pin>("motor-24V");
+            // var p6 = node3.ArbitaryPin<A10Pin>("motor-gnd");
+            //
+            // var node4 = node3.Downlink(typeof(TestMCURoutineNode4));
+            // var p7 = node4.ArbitaryPin<A10Pin>("DC-12V-to-24V converter in 12V");
+            // var p8 = node4.ArbitaryPin<A10Pin>("DC-12V-to-24V converter in gnd");
+            // var p9 = node4.ArbitaryPin<A10Pin>("DC-12V-to-24V converter out 24V");
+            // var p10 = node4.ArbitaryPin<A10Pin>("DC-12V-to-24V converter out gnd");
+            //
+            // RequireConnect(p5, p9);
+            // RequireConnect(p6, p10);
+            // RequireConnect(p1, p7);
+            // RequireConnect(p2, p8);
         }
     }
 
@@ -215,8 +219,10 @@ namespace DiverTest
         {
             // Set motor to fail-safe mode (Stop Mode and Speed 0)
             byte[] RPDO1FailSafe = Motor.GenerateRPDO1();
-            RunOnMCU.WriteEvent(RPDO1FailSafe, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[0]);
-            RunOnMCU.WriteEvent(RPDO1FailSafe, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[1]);
+            RunOnMCU.WriteEvent(RPDO1FailSafe, (int)CoralinkerDIVERVehicle.PortIndex.CAN1,
+                (int)CANID.RPDO1 + (int)motorID[0]);
+            RunOnMCU.WriteEvent(RPDO1FailSafe, (int)CoralinkerDIVERVehicle.PortIndex.CAN1,
+                (int)CANID.RPDO1 + (int)motorID[1]);
         }
 
         public bool MotorBootupHelper(int i)
@@ -233,25 +239,25 @@ namespace DiverTest
                     return false;
                 case (int)MotorBootupStage.ResetSent:
                     // 检查是否收到Bootup
+                {
+                    byte[] heartbeatMsg = RunOnMCU.ReadEvent(
+                        (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.HEARTBEAT + motorID[i]);
+                    if (heartbeatMsg != null && heartbeatMsg.Length == 1 && heartbeatMsg[0] == (byte)HEARTBEAT.Bootup)
                     {
-                        byte[] heartbeatMsg = RunOnMCU.ReadEvent(
-                            (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.HEARTBEAT + motorID[i]);
-                        if (heartbeatMsg != null && heartbeatMsg.Length == 1 && heartbeatMsg[0] == (byte)HEARTBEAT.Bootup)
+                        motorStage[i] = (int)MotorBootupStage.BootupReceived;
+                        motorRetryCount[i] = 0;
+                        Console.WriteLine("Motor Bootup Received");
+                    }
+                    else
+                    {
+                        motorRetryCount[i]++;
+                        if (motorRetryCount[i] > BootupRetryLimit)
                         {
-                            motorStage[i] = (int)MotorBootupStage.BootupReceived;
-                            motorRetryCount[i] = 0;
-                            Console.WriteLine("Motor Bootup Received");
-                        }
-                        else
-                        {
-                            motorRetryCount[i]++;
-                            if (motorRetryCount[i] > BootupRetryLimit)
-                            {
-                                // 重发Reset
-                                motorStage[i] = (int)MotorBootupStage.Unknown;
-                            }
+                            // 重发Reset
+                            motorStage[i] = (int)MotorBootupStage.Unknown;
                         }
                     }
+                }
                     return false;
                 case (int)MotorBootupStage.BootupReceived:
                     //isAllMotorBootupOK = false;
@@ -265,25 +271,26 @@ namespace DiverTest
                 case (int)MotorBootupStage.StartSent:
                     //isAllMotorBootupOK = false;
                     // 检查是否收到Start后的心跳
+                {
+                    byte[] heartbeatMsg = RunOnMCU.ReadEvent(
+                        (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.HEARTBEAT + (int)motorID[i]);
+                    if (heartbeatMsg != null && heartbeatMsg.Length == 1 &&
+                        heartbeatMsg[0] == (byte)HEARTBEAT.Operational)
                     {
-                        byte[] heartbeatMsg = RunOnMCU.ReadEvent(
-                            (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.HEARTBEAT + (int)motorID[i]);
-                        if (heartbeatMsg != null && heartbeatMsg.Length == 1 && heartbeatMsg[0] == (byte)HEARTBEAT.Operational)
+                        motorStage[i] = (int)MotorBootupStage.StartReceived;
+                        motorRetryCount[i] = 0;
+                        Console.WriteLine("Motor Start Received");
+                    }
+                    else
+                    {
+                        motorRetryCount[i]++;
+                        if (motorRetryCount[i] > BootupRetryLimit)
                         {
-                            motorStage[i] = (int)MotorBootupStage.StartReceived;
-                            motorRetryCount[i] = 0;
-                            Console.WriteLine("Motor Start Received");
-                        }
-                        else
-                        {
-                            motorRetryCount[i]++;
-                            if (motorRetryCount[i] > BootupRetryLimit)
-                            {
-                                // 重发Start
-                                motorStage[i] = (int)MotorBootupStage.BootupReceived;
-                            }
+                            // 重发Start
+                            motorStage[i] = (int)MotorBootupStage.BootupReceived;
                         }
                     }
+                }
                     return false;
                 case (int)MotorBootupStage.StartReceived:
                     return true;
@@ -315,6 +322,7 @@ namespace DiverTest
                     failProtectionFlag = true;
                     Console.WriteLine("Error, Protected\n");
                 }
+
                 return;
             }
             else
@@ -329,7 +337,8 @@ namespace DiverTest
             {
                 isAllMotorBooted &= MotorBootupHelper(i);
 
-                byte[] TPDO1 = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.TPDO1 + (int)motorID[i]);
+                byte[] TPDO1 = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1,
+                    (int)CANID.TPDO1 + (int)motorID[i]);
                 Motor.Feedback fb = Motor.ParseTPDO1(TPDO1);
                 if (fb.valid)
                 {
@@ -341,10 +350,11 @@ namespace DiverTest
             if (isAllMotorBooted)
             {
                 motorTargetSpeed[0] = 0;
-                motorTargetSpeed[1] = 100000 * (iteration % 100) ;
+                motorTargetSpeed[1] = 100000 * (iteration % 100);
                 for (int i = 0; i < motorStage.Length; i++)
                 {
-                    byte[] TPDO1 = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.TPDO1 + (int)motorID[i]);
+                    byte[] TPDO1 = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1,
+                        (int)CANID.TPDO1 + (int)motorID[i]);
                     Motor.Feedback fb = Motor.ParseTPDO1(TPDO1);
                     if (fb.valid)
                     {
@@ -363,8 +373,11 @@ namespace DiverTest
                 motorTargetSpeed[1] = 0;
                 // Set motor to wait mode
                 byte[] RPDO1Wait = Motor.GenerateRPDO1((int)Motor.ControlWord.Start);
-                RunOnMCU.WriteEvent(RPDO1Wait, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[0]);
-                RunOnMCU.WriteEvent(RPDO1Wait, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[1]);
+                RunOnMCU.WriteEvent(RPDO1Wait, (int)CoralinkerDIVERVehicle.PortIndex.CAN1,
+                    (int)CANID.RPDO1 + (int)motorID[0]);
+                RunOnMCU.WriteEvent(RPDO1Wait, (int)CoralinkerDIVERVehicle.PortIndex.CAN1,
+                    (int)CANID.RPDO1 + (int)motorID[1]);
             }
-
+        }
+    }
 }

@@ -11,7 +11,7 @@ public class TestVehicle2 : LocalDebugDIVERVehicle
 
 [LogicRunOnMCU(scanInterval = 1000)]
 public class TestStringInterpolation : LadderLogic<TestVehicle2> 
-{
+{ 
     private static int counter = 0; 
 
     enum ee
