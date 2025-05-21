@@ -36,23 +36,62 @@ namespace DiverTest
 
     // Logic and MCU is strictly 1:1
     [UseCoralinkerMCU<CoralinkerCL1_0_12p>]
-    [LogicRunOnMCU(mcuUri="serial://name=COM11", scanInterval = 500)]
+    [LogicRunOnMCU(mcuUri="serial://name=COM5", scanInterval = 200)]
     public class TestMCURoutine: LadderLogic<TestVehicle>
     {
+        static int lastIteration = -1;
         public override void Operation(int iteration)
         {
-            Console.WriteLine("Iteration = " + iteration);
-            cart.read_from_mcu = (cart.write_to_mcu << 2) + TESTCls.TestFunc(iteration);
-            Console.WriteLine("Lower " + cart.read_from_mcu);
-            Console.WriteLine("Upper " + cart.write_to_mcu);
-            Console.WriteLine("Time = " + RunOnMCU.GetMillisFromStart());
-            byte[] dummyPayload = new byte[4] { 0x01, 0x02, 0x03, 0x04};
-            RunOnMCU.WriteStream(dummyPayload, (int)CoralinkerDIVERVehicle.PortIndex.Serial1);
-            byte[] readPayload = RunOnMCU.ReadStream((int)CoralinkerDIVERVehicle.PortIndex.Serial2);
-            if (readPayload != null)
+            if (iteration <= lastIteration)
             {
-                Console.WriteLine("Port Serial2 received: " + readPayload.Length);
+                return;
             }
+            Console.WriteLine("Iteration = " + iteration);
+            //cart.read_from_mcu = (cart.write_to_mcu << 2) + TESTCls.TestFunc(iteration);
+            //Console.WriteLine("Lower " + cart.read_from_mcu);
+            //Console.WriteLine("Upper " + cart.write_to_mcu);
+            //Console.WriteLine("Time = " + RunOnMCU.GetMillisFromStart());
+            //byte[] dummyPayload = new byte[4] { 0x01, 0x02, 0x03, 0x04};
+            //RunOnMCU.WriteStream(dummyPayload, (int)CoralinkerDIVERVehicle.PortIndex.Serial1);
+            //byte[] readPayload = RunOnMCU.ReadStream((int)CoralinkerDIVERVehicle.PortIndex.Serial2);
+            if (iteration < 5)
+            {
+                byte[] coMsgStartMotor = new byte[2] { 0x01, 0x04 };
+                RunOnMCU.WriteEvent(coMsgStartMotor, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, 0x00);
+            }
+
+            byte ctlWord = 0x05;
+            byte speed = 0x0;
+            if (iteration <= 10)
+            {
+                ctlWord = 0x06;
+            } else if (iteration <= 20) {
+                ctlWord = 0x07;
+            } else if (iteration <= 30){
+                ctlWord = 0x0F;
+            } else
+            {
+                ctlWord = 0x0F;
+                speed = 0x20;
+            }
+
+            if (iteration >= 5)
+            {
+                byte[] coTPDO1 = new byte[7] { 0x03, 0x00, 0x00, speed, 0x00, ctlWord, 0x00 };
+                RunOnMCU.WriteEvent(coTPDO1, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, 0x204);
+                Console.WriteLine("CAN SPEED" + (int)speed);
+                Console.WriteLine("CAN CTLWORD" + (int)ctlWord);
+            }
+            //RunOnMCU.WriteEvent(sendDummyCAN, (int)CoralinkerDIVERVehicle.PortIndex.CAN2, 0x184);
+            //byte[] readCAN = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, 0x184);
+            //if (readCAN != null)
+            //{
+            //    Console.WriteLine("CAN received: " + readCAN.Length);
+            //}
+            //if (readPayload != null)
+            //{
+            //    Console.WriteLine("Port Serial2 received: " + readPayload.Length);
+            //}
         }
     }
 

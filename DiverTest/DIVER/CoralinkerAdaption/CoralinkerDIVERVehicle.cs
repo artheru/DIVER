@@ -494,20 +494,32 @@ public abstract class CoralinkerDIVERVehicle : DIVERVehicle
         //    };
         //}
 
-        // Disconnect all connections
-        foreach (var nodeHandle in _nodeMap)
-        {
-            nodeHandle.Value.newConfiguration = nodeHandle.Value.mcuConfiguration;
-            // relays index from 25 to 25 + 11, set off
-            for (int i = 0; i < 11; i++)
-            {
-                nodeHandle.Value.newConfiguration.Relays[25 + i].IsOn = ConfigurationRelayIsOnEnum.Off;
-            }
+        //// Disconnect all connections
+        //foreach (var nodeHandle in _nodeMap)
+        //{
+        //    nodeHandle.Value.newConfiguration = nodeHandle.Value.mcuConfiguration;
+        //    // relays index from 25 to 25 + 11, set off
+        //    for (int i = 0; i < 11; i++)
+        //    {
+        //        nodeHandle.Value.newConfiguration.Relays[25 + i].IsOn = ConfigurationRelayIsOnEnum.Off;
+        //    }
 
-            nodeHandle.Value.ModifyRelays();
-        }
+        //    nodeHandle.Value.ModifyRelays();
+        //}
 
-        Thread.Sleep(1000);
+        //Thread.Sleep(1000);
+
+        //// Connect DPDT
+        //foreach (var nodeHandle in _nodeMap)
+        //{
+        //    for (int i = 0; i < 25; i++)
+        //    {
+        //        nodeHandle.Value.newConfiguration.Relays[i].IsOn = ConfigurationRelayIsOnEnum.Off;
+        //    }
+
+        //    nodeHandle.Value.newConfiguration.Relays[8].IsOn = ConfigurationRelayIsOnEnum.On;
+        //    nodeHandle.Value.ModifyRelays();
+        //}
 
         // Connect DPDT
         foreach (var nodeHandle in _nodeMap)
