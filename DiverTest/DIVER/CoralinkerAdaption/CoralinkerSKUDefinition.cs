@@ -48,19 +48,14 @@ namespace DiverTest.DIVER.CoralinkerAdaption
                 return GetFromLadderLogicType(ladderlogicCls);
             }
 
-            public pin UnresolvedPin(string name)
+            public Pin ArbitaryPin<T>(string name) where T: Pin, new()
             {
-                return new();
+                return new T() { name = name };
             }
 
-            public pin ResolvedPin(string name, string placement)
+            public Pin ResolvedPin<T>(string name, string placement) where T: Pin, new()
             {
-                return new();
-            }
-
-            public void RequireConnect(pin A, pin B)
-            {
-
+                return new T() { name = name };
             }
         }
 
@@ -77,6 +72,12 @@ namespace DiverTest.DIVER.CoralinkerAdaption
             public string url;
             public Dictionary<string, bool> matrix;
         }
+
+        public void RequireConnect(Pin A, Pin B)
+        {
+
+        }
+
         public NodeSolution[] Solve()
         { 
             // just reprogram all nodes.
@@ -88,10 +89,20 @@ namespace DiverTest.DIVER.CoralinkerAdaption
         }
     }
 
-    public class pin
+    public abstract class Pin
     {
         internal string name;
         private string grouping = "/";
+
+        public abstract bool CanFlowTo(Pin what);
+    }
+
+    public class A10Pin : Pin
+    {
+        public override bool CanFlowTo(Pin what)
+        {
+            throw new NotImplementedException();
+        }
     }
 
 
@@ -103,30 +114,30 @@ namespace DiverTest.DIVER.CoralinkerAdaption
         {
             public abstract Dictionary<string, bool> Solve();
         }
-        public class SortingNetworkAllConnecting:FunctionModule
+        public class SortingNetworkAllConnecting<T>:FunctionModule where T : Pin, new()
         {
-            private pin[] enteringPins;
-            private List<pin> intermediatePins = [];
-            internal SortingNetworkAllConnecting(pin[] pins)
+            private T[] enteringTs;
+            private List<T> intermediateTs = [];
+            internal SortingNetworkAllConnecting(T[] Ts)
             {
-                enteringPins = pins;
+                enteringTs = Ts;
             }
 
 
-            private List<(pin A, pin B, pin X, pin Y, string name)> comparators = [];
-            private List<(pin A, pin B, string name)> relays = [];
+            private List<(T A, T B, T X, T Y, string name)> comparators = [];
+            private List<(T A, T B, string name)> relays = [];
 
-            internal (pin compared1, pin compared2) declareComparator(pin cmp1, pin cmp2, string comparatorName)
+            internal (T compared1, T compared2) declareComparator(T cmp1, T cmp2, string comparatorName)
             {
-                var p1 = new pin() { name = comparatorName + "_p1" };
-                var p2 = new pin() { name = comparatorName + "_p2" };
+                var p1 = new T() { name = comparatorName + "_p1" };
+                var p2 = new T() { name = comparatorName + "_p2" };
                 comparators.Add((cmp1, cmp2, p1, p2, comparatorName));
                 return (p1, p2);
             }
 
-            internal void declareRelay(pin pin1, pin pin2, string relayName)
+            internal void declareRelay(T T1, T T2, string relayName)
             {
-                relays.Add((pin1, pin2, relayName));
+                relays.Add((T1, T2, relayName));
             }
 
             // actually we cannot determine if a network is a sorting network, co-NP
@@ -137,24 +148,40 @@ namespace DiverTest.DIVER.CoralinkerAdaption
             }
         }
 
-        public enum ExtPinGroup
+        public enum ExtPinType
         {
-            Uplink, Downlink, Resource, Input
+            MainPower, Uplink, Downlink, Resource, Inbound, Left, Right
         }
 
-        internal List<pin> extPins = [];
+        internal List<Pin> extPins = [];
         internal List<FunctionModule> functionModules = [];
-        internal pin defineResourcePin(ExtPinGroup group, string name)
+
+        internal T DeclareCablePin<T>(ExtPinType type, string name) where T: Pin
         {
-            var ret = new pin() { name = name };
+            return null;
+        }
+
+        internal T DeclareResourcePin<T>(ExtPinType type, string name) where T:Pin, new()
+        {
+            var ret = new T() { name = name };
             extPins.Add(ret);
             return ret;
         }
-        
 
-        internal SortingNetworkAllConnecting allConnectable(pin[] pins)
+        internal T DeclareDomain<T>(T[] pins) where T : Pin
         {
-            var ret = new SortingNetworkAllConnecting(pins);
+            return null;
+        }
+
+        // can omit pin capacity.
+        internal void DeclareRelay(Pin T1, Pin T2, string relayName)
+        {
+
+        }
+
+        internal SortingNetworkAllConnecting<T> allConnectable<T>(T[] pins) where T:Pin, new()
+        {
+            var ret = new SortingNetworkAllConnecting<T>(pins);
             functionModules.Add(ret);
             return ret;
         }
@@ -166,37 +193,5 @@ namespace DiverTest.DIVER.CoralinkerAdaption
         {
             return "/";
         }
-    }
-
-    public class CoralinkerCL1_0_12p: CoralinkerNodeDefinition
-    {
-        public override string SKU => "cl1.0-12p";
-        internal override void define()
-        {
-            Console.WriteLine("Reading definition of Coralinker1.0-12P");
-            // todo: use 'coralinker compiler' to allow syntax like var up1=defineResourcePin(xxx), no "up1".
-            var up1 = defineResourcePin(ExtPinGroup.Uplink, "up1");
-            var up2 = defineResourcePin(ExtPinGroup.Uplink, "up2");
-            var up3 = defineResourcePin(ExtPinGroup.Uplink, "up3");
-
-            var down1 = defineResourcePin(ExtPinGroup.Uplink, "down1");
-            var down2 = defineResourcePin(ExtPinGroup.Uplink, "down2");
-            var down3 = defineResourcePin(ExtPinGroup.Uplink, "down3");
-
-            var res1 = defineResourcePin(ExtPinGroup.Uplink, "res1");
-            var res2 = defineResourcePin(ExtPinGroup.Uplink, "res2");
-
-            var input1 = defineResourcePin(ExtPinGroup.Uplink, "input1");
-            var input2 = defineResourcePin(ExtPinGroup.Uplink, "input2");
-            var input3 = defineResourcePin(ExtPinGroup.Uplink, "input3");
-
-            var sn=allConnectable([up1, up2, up3, down1, down2, down3, res1, res2, input1, input2, input3]);
-
-            // sort up2 to input2, leave up1 and input3 directly connected.
-            var (tmp1, tmp2) = sn.declareComparator(up2, up3, "comp1");
-            // ...
-            
-        }
-
     }
 }

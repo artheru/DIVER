@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using CartActivator;
 using DiverTest.DIVER.CoralinkerAdaption;
+using DiverTest.DIVER.CoralinkerAdaption.SKUs;
 using TEST;
 
 namespace DiverTest
@@ -16,12 +17,35 @@ namespace DiverTest
         {
             Console.WriteLine("Coralinker Definition");
             var node1 = Root.Downlink(typeof(TestMCURoutine));
-            var p1= node1.ResolvedPin("battery-12V","input-1"); // denote a pin is forcefully placed.
-            var p2 = node1.UnresolvedPin("gnd");
-            node1.RequireConnect(p1, p2);
+            var p1= node1.ResolvedPin<A10Pin>("battery-12V","input-1"); // denote a pin is forcefully placed.
+            var p2 = node1.ArbitaryPin<A10Pin>("gnd");
+
+            // requirements:
+            RequireConnect(p1, p2);
 
             var node2 = node1.Downlink(typeof(TestMCURoutineNode2));
+            var p3 = node2.ArbitaryPin<A10Pin>("lidar-12V");
+            var p4 = node2.ArbitaryPin<A10Pin>("lidar-gnd");
             //.. list all connection here.
+
+            RequireConnect(p1, p3);
+            RequireConnect(p2, p4);
+
+    
+            var node3 = node2.Downlink(typeof(TestMCURoutineNode3));
+            var p5 = node3.ArbitaryPin<A10Pin>("motor-24V");
+            var p6 = node3.ArbitaryPin<A10Pin>("motor-gnd");
+
+            var node4 = node3.Downlink(typeof(TestMCURoutineNode4));
+            var p7 = node4.ArbitaryPin<A10Pin>("DC-12V-to-24V converter in 12V");
+            var p8 = node4.ArbitaryPin<A10Pin>("DC-12V-to-24V converter in gnd");
+            var p9 = node4.ArbitaryPin<A10Pin>("DC-12V-to-24V converter out 24V");
+            var p10 = node4.ArbitaryPin<A10Pin>("DC-12V-to-24V converter out gnd");
+
+            RequireConnect(p5, p9);
+            RequireConnect(p6, p10);
+            RequireConnect(p1, p7);
+            RequireConnect(p2, p8);
         }
     }
 
@@ -64,4 +88,23 @@ namespace DiverTest
         }
     }
 
+    [UseCoralinkerMCU<CoralinkerCL1_0_12p>]
+    [LogicRunOnMCU(mcuUri = "serial://name=COMxxx", scanInterval = 500)]
+    public class TestMCURoutineNode3 : LadderLogic<TestVehicle>
+    {
+        public override void Operation(int iteration)
+        {
+            Console.WriteLine("Iteration = " + iteration + "on node 2");
+        }
+    }
+
+    [UseCoralinkerMCU<CoralinkerCL1_0_12p>]
+    [LogicRunOnMCU(mcuUri = "serial://name=COMxxx", scanInterval = 500)]
+    public class TestMCURoutineNode4 : LadderLogic<TestVehicle>
+    {
+        public override void Operation(int iteration)
+        {
+            Console.WriteLine("Iteration = " + iteration + "on node 2");
+        }
+    }
 }
