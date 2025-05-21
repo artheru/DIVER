@@ -31,8 +31,9 @@ public class ModuleWeaver : BaseModuleWeaver
 
         // Debugger.Launch();    
    
-
-        ModuleDefinition module = ModuleDefinition;  
+        ModuleDefinition module = ModuleDefinition;
+        
+        // Process RunOnMCU types  
         foreach (var type in module.Types) 
         {  
             if (type.CustomAttributes.Any(attr => attr.AttributeType.Name == "LogicRunOnMCUAttribute"))
@@ -52,6 +53,23 @@ public class ModuleWeaver : BaseModuleWeaver
                     WriteWarning($"Type {type.Name} is RunOnMCU but Operation(i) method is empty.");
                     continue; 
                 } 
+
+                foreach (var mm in type.Methods)
+                {
+                    if (mm.HasBody)
+                    {
+                        WriteWarning($"Processing string interpolation in `{type.Name}::{mm.Name}`");
+                        try
+                        {
+                            var stringInterpolationHandler = new StringInterpolationHandler(module, this); 
+                            stringInterpolationHandler.ProcessMethod(mm);
+                        }
+                        catch (Exception ex)
+                        {
+                            WriteWarning($"Failed to process string interpolation in {mm.FullName}: {ex.Message}");
+                        }
+                    }
+                }
 
                 var zk=type.CustomAttributes.First(attr => attr.AttributeType.Name == "LogicRunOnMCUAttribute");
                 var myinterval = 1000;
@@ -79,7 +97,7 @@ public class ModuleWeaver : BaseModuleWeaver
             }
         }  
          
-        WriteWarning($"RunOnMCU Processor v0.32 finished");
+        WriteWarning($"RunOnMCU Processor v0.34 finished");
     }
 
     public override IEnumerable<string> GetAssembliesForScanning()

@@ -156,27 +156,21 @@ namespace DiverTest.DIVER.CoralinkerAdaption
         internal List<Pin> extPins = [];
         internal List<FunctionModule> functionModules = [];
 
-        internal T DeclareCablePin<T>(ExtPinType type, string name) where T: Pin
+        internal T DeclarePin<T>(ExtPinType type, string name) where T: Pin
         {
             return null;
         }
 
-        internal T DeclareResourcePin<T>(ExtPinType type, string name) where T:Pin, new()
-        {
-            var ret = new T() { name = name };
-            extPins.Add(ret);
-            return ret;
-        }
-
+        // pins in a domain are connected.
         internal T DeclareDomain<T>(T[] pins) where T : Pin
         {
             return null;
         }
 
-        // can omit pin capacity.
+        // can omit pin capacity
         internal void DeclareRelay(Pin T1, Pin T2, string relayName)
         {
-
+            
         }
 
         internal SortingNetworkAllConnecting<T> allConnectable<T>(T[] pins) where T:Pin, new()

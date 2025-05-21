@@ -309,11 +309,19 @@ uchar get_val_sz(uchar typeid)
 
 // builtin class fields, each fields...
 uchar builtin_cls_delegate[] = { 2, ReferenceID, Int32 };
+
 uchar* builtin_cls[] = {
 	builtin_cls_delegate, //Action
 	builtin_cls_delegate, //Action1
 	builtin_cls_delegate, //Func1
 	builtin_cls_delegate, //Func2
+	builtin_cls_delegate, //Action2
+	builtin_cls_delegate, //Action3
+	builtin_cls_delegate, //Action4
+	builtin_cls_delegate, //Action5
+	builtin_cls_delegate, //Func3
+	builtin_cls_delegate, //Func4
+	builtin_cls_delegate, //Func5
 };
 
 
@@ -712,15 +720,16 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 		{
 			uchar typeid = ptr[i * 3]; // actually it's reverse order.
 			POP;
-			if (typeid == 0 && *eptr == Int32 || typeid == JumpAddress && *eptr == ReferenceID)
-			{
-				// it's ok
-				continue;
-			}
-			else if (*eptr != typeid)
-			{
-				DOOM("call method-%d, but arg-%d is given typeid %d, required=%d\n", method_id, i, *eptr, typeid);
-			}
+			// 20250522: we do type check on actual copy.
+			// if (typeid == 0 && *eptr == Int32 || typeid == JumpAddress && *eptr == ReferenceID)
+			// {
+			// 	// it's ok
+			// 	continue;
+			// }
+			// else if (*eptr != typeid)
+			// {
+			// 	DOOM("call method-%d, but arg-%d is given typeid %d, required=%d\n", method_id, i, *eptr, typeid);
+			// }
 		}
 
 		uchar* septr = eptr; // stack vals pointer.
@@ -760,20 +769,25 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				aux_init++;
 				continue;
 			}
-			if (typeid == 0 && *septr == Int32)
-			{
-				//load int as boolean.
-				sptr[0] = 0; //boolean type.
-				sptr[1] = septr[1];
-				sptr += get_val_sz(Boolean);
-				septr += STACK_STRIDE;
-			}
-			else {
-				if (typeid != *septr) DOOM("WTF?");
-				memcpy(sptr, septr, sz);
-				sptr += sz;
-				septr += STACK_STRIDE;
-			}
+
+			copy_val(sptr, septr);
+			sptr += sz;
+			septr += STACK_STRIDE;
+
+			// if (typeid == 0 && *septr == Int32)
+			// {
+			// 	//load int as boolean.
+			// 	sptr[0] = 0; //boolean type.
+			// 	sptr[1] = septr[1];
+			// 	sptr += get_val_sz(Boolean);
+			// 	septr += STACK_STRIDE;
+			// }
+			// else {
+			// 	if (typeid != *septr) DOOM("WTF?");
+			// 	memcpy(sptr, septr, sz);
+			// 	sptr += sz;
+			// 	septr += STACK_STRIDE;
+			// }
 		}
 		*reptr = eptr; //pop arguments for previous stack.
 	}
@@ -3275,6 +3289,30 @@ void builtin_String_Concat_2(uchar** reptr) {
 	PUSH_STACK_REFERENCEID(result_str_id);
 }
 
+void builtin_String_Concat_3(uchar** reptr) {
+	int str3_id = pop_reference(reptr);
+	int str2_id = pop_reference(reptr);
+	int str1_id = pop_reference(reptr);
+
+	if (str3_id == 0 || str2_id == 0 || str1_id == 0) DOOM("concat of nullpointer");
+	struct string_val* str1 = (struct string_val*)heap_obj[str1_id].pointer;
+	struct string_val* str2 = (struct string_val*)heap_obj[str2_id].pointer;
+	struct string_val* str3 = (struct string_val*)heap_obj[str3_id].pointer;
+
+	char result[256];
+
+	int total_len = str1->str_len + str2->str_len + str3->str_len;
+
+	memcpy(result, &str1->payload, str1->str_len);
+	memcpy(result + str1->str_len, &str2->payload, str2->str_len);
+	memcpy(result + str1->str_len + str2->str_len, &str3->payload, str3->str_len);
+	result[total_len] = '\0';
+
+	int result_str_id = newstr(total_len, (uchar*)result);
+
+	PUSH_STACK_REFERENCEID(result_str_id);
+}
+
 void builtin_String_Substring_2(uchar** reptr) {
 	int length = pop_int(reptr);
 	int startIndex = pop_int(reptr);
@@ -3518,6 +3556,48 @@ void builtin_Int32_ToString(uchar** reptr) {
 	PUSH_STACK_REFERENCEID(result_str_id);
 }
 
+void builtin_Int16_ToString(uchar** reptr) {
+	POP;
+	uchar typeid = **reptr;
+	DIEIF(typeid != 4 && typeid != Address) { DOOM("Bad input type, got %d", typeid) }
+
+	short value;
+	if (typeid == Address)
+	{
+		uchar* ptr = TypedAddrAsValPtr(*reptr);
+		value = *(short*)(ptr);
+	}
+	else value = *(short*)(*reptr + 1);
+
+	char str[8];
+#ifndef IS_MCU
+	itoa(value, str, 10);
+#else
+	snprintf(str, sizeof(str), "%d", value);
+#endif
+	int result_str_id = newstr(strlen(str), (uchar*)str);
+	PUSH_STACK_REFERENCEID(result_str_id);
+}
+
+void builtin_Single_ToString(uchar** reptr) {
+	POP;
+	uchar typeid = **reptr;
+	DIEIF(typeid != 8 && typeid != Address) { DOOM("Bad input type, got %d", typeid) }
+
+	float value;
+	if (typeid == Address)
+	{
+		uchar* ptr = TypedAddrAsValPtr(*reptr);
+		value = *(float*)(ptr);
+	}
+	else value = *(float*)(*reptr + 1);
+
+	char str[16];
+	snprintf(str, sizeof(str), "%g", value);
+	int result_str_id = newstr(strlen(str), (uchar*)str);
+	PUSH_STACK_REFERENCEID(result_str_id);
+}
+
 void delegate_ctor(uchar** reptr, short clsid)
 {
 	POP;
@@ -3533,7 +3613,7 @@ void delegate_ctor(uchar** reptr, short clsid)
 	// Set the fields of the Action
 	struct object_val* del = (struct object_val*)heap_obj[builtin_arg0].pointer;
 	uchar* heap = (&del->payload);
-	del->clsid = clsid; // identifier for Action1.
+	del->clsid = clsid; // identifier for Action/Func.
 	HEAP_WRITE_REFERENCEID(obj_id);
 	HEAP_WRITE_INT(mp->id);
 }
@@ -3579,6 +3659,38 @@ void builtin_Action1_Invoke(uchar** reptr) {
 	delegate_ivk(reptr, 0xf001, 1);
 }
 
+void builtin_Action2_ctor(uchar** reptr) {
+	delegate_ctor(reptr, 0xf004);
+}
+
+void builtin_Action2_Invoke(uchar** reptr) {
+	delegate_ivk(reptr, 0xf004, 2);
+}
+
+void builtin_Action3_ctor(uchar** reptr) {
+	delegate_ctor(reptr, 0xf005);
+}
+
+void builtin_Action3_Invoke(uchar** reptr) {
+	delegate_ivk(reptr, 0xf005, 3);
+}
+
+void builtin_Action4_ctor(uchar** reptr) {
+	delegate_ctor(reptr, 0xf006);
+}
+
+void builtin_Action4_Invoke(uchar** reptr) {
+	delegate_ivk(reptr, 0xf006, 4);
+}
+
+void builtin_Action5_ctor(uchar** reptr) {
+	delegate_ctor(reptr, 0xf007);
+}
+
+void builtin_Action5_Invoke(uchar** reptr) {
+	delegate_ivk(reptr, 0xf007, 5);
+}
+
 void builtin_Func1_ctor(uchar** reptr) {
 	delegate_ctor(reptr, 0xf002);
 }
@@ -3593,6 +3705,38 @@ void builtin_Func2_ctor(uchar** reptr) {
 
 void builtin_Func2_Invoke(uchar** reptr) {
 	delegate_ivk(reptr, 0xf003, 1);
+}
+
+void builtin_Func3_ctor(uchar** reptr) {
+	delegate_ctor(reptr, 0xf008);
+}
+
+void builtin_Func3_Invoke(uchar** reptr) {
+	delegate_ivk(reptr, 0xf008, 2);
+}
+
+void builtin_Func4_ctor(uchar** reptr) {
+	delegate_ctor(reptr, 0xf009);
+}
+
+void builtin_Func4_Invoke(uchar** reptr) {
+	delegate_ivk(reptr, 0xf009, 3);
+}
+
+void builtin_Func5_ctor(uchar** reptr) {
+	delegate_ctor(reptr, 0xf00a);
+}
+
+void builtin_Func5_Invoke(uchar** reptr) {
+	delegate_ivk(reptr, 0xf00a, 4);
+}
+
+void builtin_Func6_ctor(uchar** reptr) {
+	delegate_ctor(reptr, 0xf00b);
+}
+
+void builtin_Func6_Invoke(uchar** reptr) {
+	delegate_ivk(reptr, 0xf00b, 5);
 }
 
 void builtin_Console_WriteLine(uchar** reptr) {
@@ -3779,6 +3923,7 @@ void setup_builtin_methods() {
 	builtin_methods[bn++] = builtin_String_Format_3;
 	builtin_methods[bn++] = builtin_String_Format_Array;
 	builtin_methods[bn++] = builtin_String_Concat_2;
+	builtin_methods[bn++] = builtin_String_Concat_3;
 	builtin_methods[bn++] = builtin_String_Substring_2;
 	builtin_methods[bn++] = builtin_String_get_Length;
 
@@ -3801,15 +3946,33 @@ void setup_builtin_methods() {
 
 	builtin_methods[bn++] = builtin_Boolean_ToString;
 	builtin_methods[bn++] = builtin_Int32_ToString;
+	builtin_methods[bn++] = builtin_Int16_ToString;
+	builtin_methods[bn++] = builtin_Single_ToString;
 
 	builtin_methods[bn++] = builtin_Action_ctor;
 	builtin_methods[bn++] = builtin_Action_Invoke;
 	builtin_methods[bn++] = builtin_Action1_ctor;
 	builtin_methods[bn++] = builtin_Action1_Invoke;
+	builtin_methods[bn++] = builtin_Action2_ctor;
+	builtin_methods[bn++] = builtin_Action2_Invoke;
+	builtin_methods[bn++] = builtin_Action3_ctor;
+	builtin_methods[bn++] = builtin_Action3_Invoke;
+	builtin_methods[bn++] = builtin_Action4_ctor;
+	builtin_methods[bn++] = builtin_Action4_Invoke;
+	builtin_methods[bn++] = builtin_Action5_ctor;
+	builtin_methods[bn++] = builtin_Action5_Invoke;
 	builtin_methods[bn++] = builtin_Func1_ctor;
 	builtin_methods[bn++] = builtin_Func1_Invoke;
 	builtin_methods[bn++] = builtin_Func2_ctor;
 	builtin_methods[bn++] = builtin_Func2_Invoke;
+	builtin_methods[bn++] = builtin_Func3_ctor;
+	builtin_methods[bn++] = builtin_Func3_Invoke;
+	builtin_methods[bn++] = builtin_Func4_ctor;
+	builtin_methods[bn++] = builtin_Func4_Invoke;
+	builtin_methods[bn++] = builtin_Func5_ctor;
+	builtin_methods[bn++] = builtin_Func5_Invoke;
+	builtin_methods[bn++] = builtin_Func6_ctor;
+	builtin_methods[bn++] = builtin_Func6_Invoke;
 	builtin_methods[bn++] = builtin_Console_WriteLine;
 
 	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Boolean;

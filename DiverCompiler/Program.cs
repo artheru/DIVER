@@ -5,6 +5,7 @@ using System.Xml.Linq;
 using System.Text.RegularExpressions;
 using System.Collections.Generic;
 using System.Diagnostics;
+using MCURoutineCompiler;
 
 namespace DiverCompiler
 {

@@ -68,6 +68,7 @@ internal partial class Processor
         "System.String.Format(String, Object, Object, Object)",
         "System.String.Format(String, Object[])",
         "System.String.Concat(String, String)",
+        "System.String.Concat(String, String, String)",
         "System.String.Substring(Int32, Int32)",
         "System.String.get_Length()",
 
@@ -88,16 +89,35 @@ internal partial class Processor
 
         "System.Runtime.CompilerServices.RuntimeHelpers.InitializeArray(Array, RuntimeFieldHandle)",
         "System.Boolean.ToString()",
+        "System.Int16.ToString()",
         "System.Int32.ToString()",
+        "System.Single.ToString()",
 
         "System.Action..ctor(Object, IntPtr)",
         "System.Action.Invoke(T)",
         "System.Action`1..ctor(Object, IntPtr)",
         "System.Action`1.Invoke(T)",
+        "System.Action`2..ctor(Object, IntPtr)",
+        "System.Action`2.Invoke(T1, T2)",
+        "System.Action`3..ctor(Object, IntPtr)",
+        "System.Action`3.Invoke(T1, T2, T3)",
+        "System.Action`4..ctor(Object, IntPtr)",
+        "System.Action`4.Invoke(T1, T2, T3, T4)",
+        "System.Action`5..ctor(Object, IntPtr)",
+        "System.Action`5.Invoke(T1, T2, T3, T4, T5)",
+        
         "System.Func`1..ctor(Object, IntPtr)",
         "System.Func`1.Invoke()",
         "System.Func`2..ctor(Object, IntPtr)",
         "System.Func`2.Invoke(T)",
+        "System.Func`3..ctor(Object, IntPtr)",
+        "System.Func`3.Invoke(T1, T2)",
+        "System.Func`4..ctor(Object, IntPtr)",
+        "System.Func`4.Invoke(T1, T2, T3)",
+        "System.Func`5..ctor(Object, IntPtr)",
+        "System.Func`5.Invoke(T1, T2, T3, T4)",
+        "System.Func`6..ctor(Object, IntPtr)",
+        "System.Func`6.Invoke(T1, T2, T3, T4, T5)",
 
         "System.Console.WriteLine(String)",
 
