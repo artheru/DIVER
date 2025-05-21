@@ -52,7 +52,9 @@ public class ModuleWeaver : BaseModuleWeaver
                 {
                     WriteWarning($"Type {type.Name} is RunOnMCU but Operation(i) method is empty.");
                     continue; 
-                } 
+                }
+
+                WriteWarning($">>> Processing {type.Name}.`");
 
                 foreach (var mm in type.Methods)
                 {

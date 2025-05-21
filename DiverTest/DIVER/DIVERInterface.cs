@@ -2,6 +2,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using DiverTest.DIVER.CoralinkerAdaption;
 using Newtonsoft.Json;
 
 namespace CartActivator
@@ -133,6 +134,9 @@ namespace CartActivator
             foreach (var logic in logics)
             {
                 var attr = logic.GetCustomAttribute<LogicRunOnMCUAttribute>();
+                if (!logic.IsSubclassOfRawGeneric(typeof(LadderLogic<>), out var ll) ||
+                    ll.GenericTypeArguments[0] != GetType()) continue;
+
                 Console.WriteLine($"Set logic {logic.Name} to run on MCU-VM @ device {attr.mcuUri}");
 
                 byte[] ReadAllBytes(Stream stream)

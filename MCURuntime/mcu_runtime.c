@@ -27,7 +27,7 @@
 #ifdef _DEBUG
 #define INLINE static inline
 
-//#define _VERBOSE
+// #define _VERBOSE
 
 #ifdef _VERBOSE
 #define DBG printf
@@ -294,7 +294,7 @@ INLINE uchar get_type_sz(uchar typeid)
 		// case 13: return 2; // *ObjectHeader    |short clsid| ...
 
 	case 14: return 4; // *MethodPointer   |byte type|short id|dummy| // type:0 buildin, type:1 custom.
-	case 15: return 4; // &Address |actual_type|address|
+	case 15: return 5; // &Address |actual_type|address|
 	case 16: return 4; // %ReferenceID (ReferenceID)
 	case 17: return 4; // &JumpID
 	case 18: return 5; // boxed object: |actual_type|payload|
@@ -383,7 +383,7 @@ int newarr(short len, uchar type_id)
 {
 	int reference_id = heap_newobj_id;
 	uchar* tail = heap_newobj_id == 1 ? heap_tail : heap_obj[heap_newobj_id - 1].pointer;
-	int elemSz = get_type_sz(type_id); //still must have header, because of ldind.
+	int elemSz = get_type_sz(type_id); //no header.
 	int mysz = elemSz * len + ArrayHeaderSize;
 	struct array_val* my_ptr = tail - mysz;
 	if (new_stack_depth > 0 && (uchar*)my_ptr < stack_ptr[new_stack_depth - 1]->evaluation_pointer)
@@ -548,7 +548,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr);
 	switch (type){ \
 case 0:case 1:case 2: (dst)[0] = (src)[0]; break; \
 case 3:case 4:case 5: ((short*)(dst))[0] = ((short*)(src))[0]; break; \
-case 6:case 7:case 8:case 16: ((int*)(dst))[0] = ((int*)(src))[0]; break; \
+default: ((int*)(dst))[0] = ((int*)(src))[0]; break; \
 	}}
 
 void copy_val(uchar* dst, uchar* src)
@@ -656,6 +656,11 @@ void copy_val(uchar* dst, uchar* src)
 			DOOM("invalid struct ja value copy from type_%d", *src);
 		}
 		memcpy(obj_dst, obj_src, instanceable_class_layout_ptr[obj_src->clsid].tot_size + ObjectHeaderSize);
+		return;
+	case Address:
+		//just copy.
+		*(int*)(dst + 1) = *(int*)(src + 1);
+		*(dst + 5) = *(src + 5);
 		return;
 	default:
 		DOOM("invalid copy dst type_%d", *dst);
@@ -770,6 +775,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				continue;
 			}
 
+			sptr[0] = typeid;
 			copy_val(sptr, septr);
 			sptr += sz;
 			septr += STACK_STRIDE;
@@ -1382,7 +1388,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 					return;
 				}
 				DBG
-				("IL_Arithmetic float operation: %02X, %d=>%d=>%d\n", op, a, b, result);
+				("IL_Arithmetic float operation: %02X, %f=>%f=>%f\n", op, a, b, result);
 
 				PUSH_STACK_FLOAT_D(result);
 				break;
@@ -1963,14 +1969,17 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				DOOM("Stelem: Index out of range\n");
 			}
 
-			int elem_size = get_type_sz(typeid);
+			int elem_size = get_type_sz(arr->typeid);
 			uchar* elem_addr = &arr->payload + elem_size * index;
 
-			if (arr->typeid == BoxedObject)
+			if (arr->typeid == BoxedObject) {
+				elem_addr[0] = value[0];
 				copy_val(elem_addr, value);
+			}
 			else
 			{
-				CPYVAL(elem_addr, value + 1, arr->typeid);
+				DIEIF(arr->typeid != typeid) DOOM("array_%d is type %d but stelem as %d\n", arr_id, arr->typeid, typeid);
+				CPYVAL(elem_addr, value+1, arr->typeid)
 			}
 
 			DBG
@@ -3313,6 +3322,33 @@ void builtin_String_Concat_3(uchar** reptr) {
 	PUSH_STACK_REFERENCEID(result_str_id);
 }
 
+void builtin_String_Concat_4(uchar** reptr) {
+	int str4_id = pop_reference(reptr);
+	int str3_id = pop_reference(reptr);
+	int str2_id = pop_reference(reptr);
+	int str1_id = pop_reference(reptr);
+
+	if (str4_id == 0 || str3_id == 0 || str2_id == 0 || str1_id == 0) DOOM("concat of nullpointer");
+	struct string_val* str1 = (struct string_val*)heap_obj[str1_id].pointer;
+	struct string_val* str2 = (struct string_val*)heap_obj[str2_id].pointer;
+	struct string_val* str3 = (struct string_val*)heap_obj[str3_id].pointer;
+	struct string_val* str4 = (struct string_val*)heap_obj[str4_id].pointer;
+
+	char result[512];
+
+	int total_len = str1->str_len + str2->str_len + str3->str_len + str4->str_len;
+
+	memcpy(result, &str1->payload, str1->str_len);
+	memcpy(result + str1->str_len, &str2->payload, str2->str_len);
+	memcpy(result + str1->str_len + str2->str_len, &str3->payload, str3->str_len);
+	memcpy(result + str1->str_len + str2->str_len + str3->str_len, &str4->payload, str4->str_len);
+	result[total_len] = '\0';
+
+	int result_str_id = newstr(total_len, (uchar*)result);
+
+	PUSH_STACK_REFERENCEID(result_str_id);
+}
+
 void builtin_String_Substring_2(uchar** reptr) {
 	int length = pop_int(reptr);
 	int startIndex = pop_int(reptr);
@@ -3861,134 +3897,135 @@ void setup_builtin_methods() {
 	bn = 0;  // Reset counter
 
 	// Core built-ins
-	builtin_methods[bn++] = builtin_Object_ctor;
-	builtin_methods[bn++] = builtin_Math_Abs_Decimal;
-	builtin_methods[bn++] = builtin_Math_Abs_Double;
-	builtin_methods[bn++] = builtin_Math_Abs_Int16;
-	builtin_methods[bn++] = builtin_Math_Abs_Int32;
-	builtin_methods[bn++] = builtin_Math_Abs_Int64;
-	builtin_methods[bn++] = builtin_Math_Abs_SByte;
-	builtin_methods[bn++] = builtin_Math_Abs_Single;
-	builtin_methods[bn++] = builtin_Math_Acos;
-	builtin_methods[bn++] = builtin_Math_Acosh;
-	builtin_methods[bn++] = builtin_Math_Asin;
-	builtin_methods[bn++] = builtin_Math_Asinh;
-	builtin_methods[bn++] = builtin_Math_Atan;
-	builtin_methods[bn++] = builtin_Math_Atan2;
-	builtin_methods[bn++] = builtin_Math_Atanh;
-	builtin_methods[bn++] = builtin_Math_Ceiling;
-	builtin_methods[bn++] = builtin_Math_Clamp_Double;
-	builtin_methods[bn++] = builtin_Math_Clamp_Int16;
-	builtin_methods[bn++] = builtin_Math_Clamp_Int32;
-	builtin_methods[bn++] = builtin_Math_Clamp_Int64;
-	builtin_methods[bn++] = builtin_Math_Clamp_SByte;
-	builtin_methods[bn++] = builtin_Math_Clamp_Single;
-	builtin_methods[bn++] = builtin_Math_Cos;
-	builtin_methods[bn++] = builtin_Math_Cosh;
-	builtin_methods[bn++] = builtin_Math_Exp;
-	builtin_methods[bn++] = builtin_Math_Floor;
-	builtin_methods[bn++] = builtin_Math_Log;
-	builtin_methods[bn++] = builtin_Math_Log_Base;
-	builtin_methods[bn++] = builtin_Math_Log10;
-	builtin_methods[bn++] = builtin_Math_Log2;
-	builtin_methods[bn++] = builtin_Math_Max_Double;
-	builtin_methods[bn++] = builtin_Math_Max_Int16;
-	builtin_methods[bn++] = builtin_Math_Max_Int32;
-	builtin_methods[bn++] = builtin_Math_Max_Int64;
-	builtin_methods[bn++] = builtin_Math_Max_SByte;
-	builtin_methods[bn++] = builtin_Math_Max_Single;
-	builtin_methods[bn++] = builtin_Math_Min_Decimal;
-	builtin_methods[bn++] = builtin_Math_Min_Double;
-	builtin_methods[bn++] = builtin_Math_Min_Int16;
-	builtin_methods[bn++] = builtin_Math_Min_Int32;
-	builtin_methods[bn++] = builtin_Math_Min_Int64;
-	builtin_methods[bn++] = builtin_Math_Min_SByte;
-	builtin_methods[bn++] = builtin_Math_Min_Single;
-	builtin_methods[bn++] = builtin_Math_Pow;
-	builtin_methods[bn++] = builtin_Math_Round;
-	builtin_methods[bn++] = builtin_Math_Sign_Double;
-	builtin_methods[bn++] = builtin_Math_Sign_Int16;
-	builtin_methods[bn++] = builtin_Math_Sign_Int32;
-	builtin_methods[bn++] = builtin_Math_Sign_Int64;
-	builtin_methods[bn++] = builtin_Math_Sign_SByte;
-	builtin_methods[bn++] = builtin_Math_Sign_Single;
-	builtin_methods[bn++] = builtin_Math_Sin;
-	builtin_methods[bn++] = builtin_Math_Sinh;
-	builtin_methods[bn++] = builtin_Math_Sqrt;
-	builtin_methods[bn++] = builtin_Math_Tan;
-	builtin_methods[bn++] = builtin_Math_Tanh;
+	builtin_methods[bn++] = builtin_Object_ctor; //0
+	builtin_methods[bn++] = builtin_Math_Abs_Decimal; //1
+	builtin_methods[bn++] = builtin_Math_Abs_Double; //2
+	builtin_methods[bn++] = builtin_Math_Abs_Int16; //3
+	builtin_methods[bn++] = builtin_Math_Abs_Int32; //4
+	builtin_methods[bn++] = builtin_Math_Abs_Int64; //5
+	builtin_methods[bn++] = builtin_Math_Abs_SByte; //6
+	builtin_methods[bn++] = builtin_Math_Abs_Single; //7
+	builtin_methods[bn++] = builtin_Math_Acos; //8
+	builtin_methods[bn++] = builtin_Math_Acosh; //9
+	builtin_methods[bn++] = builtin_Math_Asin; //10
+	builtin_methods[bn++] = builtin_Math_Asinh; //11
+	builtin_methods[bn++] = builtin_Math_Atan; //12
+	builtin_methods[bn++] = builtin_Math_Atan2; //13
+	builtin_methods[bn++] = builtin_Math_Atanh; //14
+	builtin_methods[bn++] = builtin_Math_Ceiling; //15
+	builtin_methods[bn++] = builtin_Math_Clamp_Double; //16
+	builtin_methods[bn++] = builtin_Math_Clamp_Int16; //17
+	builtin_methods[bn++] = builtin_Math_Clamp_Int32; //18
+	builtin_methods[bn++] = builtin_Math_Clamp_Int64; //19
+	builtin_methods[bn++] = builtin_Math_Clamp_SByte; //20
+	builtin_methods[bn++] = builtin_Math_Clamp_Single; //21
+	builtin_methods[bn++] = builtin_Math_Cos; //22
+	builtin_methods[bn++] = builtin_Math_Cosh; //23
+	builtin_methods[bn++] = builtin_Math_Exp; //24
+	builtin_methods[bn++] = builtin_Math_Floor; //25
+	builtin_methods[bn++] = builtin_Math_Log; //26
+	builtin_methods[bn++] = builtin_Math_Log_Base; //27
+	builtin_methods[bn++] = builtin_Math_Log10; //28
+	builtin_methods[bn++] = builtin_Math_Log2; //29
+	builtin_methods[bn++] = builtin_Math_Max_Double; //30
+	builtin_methods[bn++] = builtin_Math_Max_Int16; //31
+	builtin_methods[bn++] = builtin_Math_Max_Int32; //32
+	builtin_methods[bn++] = builtin_Math_Max_Int64; //33
+	builtin_methods[bn++] = builtin_Math_Max_SByte; //34
+	builtin_methods[bn++] = builtin_Math_Max_Single; //35
+	builtin_methods[bn++] = builtin_Math_Min_Decimal; //36
+	builtin_methods[bn++] = builtin_Math_Min_Double; //37
+	builtin_methods[bn++] = builtin_Math_Min_Int16; //38
+	builtin_methods[bn++] = builtin_Math_Min_Int32; //39
+	builtin_methods[bn++] = builtin_Math_Min_Int64; //40
+	builtin_methods[bn++] = builtin_Math_Min_SByte; //41
+	builtin_methods[bn++] = builtin_Math_Min_Single; //42
+	builtin_methods[bn++] = builtin_Math_Pow; //43
+	builtin_methods[bn++] = builtin_Math_Round; //44
+	builtin_methods[bn++] = builtin_Math_Sign_Double; //45
+	builtin_methods[bn++] = builtin_Math_Sign_Int16; //46
+	builtin_methods[bn++] = builtin_Math_Sign_Int32; //47
+	builtin_methods[bn++] = builtin_Math_Sign_Int64; //48
+	builtin_methods[bn++] = builtin_Math_Sign_SByte; //49
+	builtin_methods[bn++] = builtin_Math_Sign_Single; //50
+	builtin_methods[bn++] = builtin_Math_Sin; //51
+	builtin_methods[bn++] = builtin_Math_Sinh; //52
+	builtin_methods[bn++] = builtin_Math_Sqrt; //53
+	builtin_methods[bn++] = builtin_Math_Tan; //54
+	builtin_methods[bn++] = builtin_Math_Tanh; //55
 
-	builtin_methods[bn++] = builtin_String_Format_1;
-	builtin_methods[bn++] = builtin_String_Format_2;
-	builtin_methods[bn++] = builtin_String_Format_3;
-	builtin_methods[bn++] = builtin_String_Format_Array;
-	builtin_methods[bn++] = builtin_String_Concat_2;
-	builtin_methods[bn++] = builtin_String_Concat_3;
-	builtin_methods[bn++] = builtin_String_Substring_2;
-	builtin_methods[bn++] = builtin_String_get_Length;
+	builtin_methods[bn++] = builtin_String_Format_1; //56
+	builtin_methods[bn++] = builtin_String_Format_2; //57
+	builtin_methods[bn++] = builtin_String_Format_3; //58
+	builtin_methods[bn++] = builtin_String_Format_Array; //59
+	builtin_methods[bn++] = builtin_String_Concat_2; //60
+	builtin_methods[bn++] = builtin_String_Concat_3; //61
+	builtin_methods[bn++] = builtin_String_Concat_4; //62
+	builtin_methods[bn++] = builtin_String_Substring_2; //63
+	builtin_methods[bn++] = builtin_String_get_Length; //64
 
-	builtin_methods[bn++] = builtin_RunOnMCU_ReadEvent;
-	builtin_methods[bn++] = builtin_RunOnMCU_ReadSnapshot;
-	builtin_methods[bn++] = builtin_RunOnMCU_ReadStream;
-	builtin_methods[bn++] = builtin_RunOnMCU_WriteEvent;
-	builtin_methods[bn++] = builtin_RunOnMCU_WriteSnapshot;
-	builtin_methods[bn++] = builtin_RunOnMCU_WriteStream;
+	builtin_methods[bn++] = builtin_RunOnMCU_ReadEvent; //65
+	builtin_methods[bn++] = builtin_RunOnMCU_ReadSnapshot; //66
+	builtin_methods[bn++] = builtin_RunOnMCU_ReadStream; //67
+	builtin_methods[bn++] = builtin_RunOnMCU_WriteEvent; //68
+	builtin_methods[bn++] = builtin_RunOnMCU_WriteSnapshot; //69
+	builtin_methods[bn++] = builtin_RunOnMCU_WriteStream; //70
 
-	builtin_methods[bn++] = builtin_RunOnMCU_GetMicrosFromStart;
-	builtin_methods[bn++] = builtin_RunOnMCU_GetMillisFromStart;
-	builtin_methods[bn++] = builtin_RunOnMCU_GetSecondsFromStart;
+	builtin_methods[bn++] = builtin_RunOnMCU_GetMicrosFromStart; //71
+	builtin_methods[bn++] = builtin_RunOnMCU_GetMillisFromStart; //72
+	builtin_methods[bn++] = builtin_RunOnMCU_GetSecondsFromStart; //73
 
-	builtin_methods[bn++] = builtin_ValueTuple2_ctor;
-	builtin_methods[bn++] = builtin_ValueTuple3_ctor;
-	builtin_methods[bn++] = builtin_ValueTuple4_ctor;
+	builtin_methods[bn++] = builtin_ValueTuple2_ctor; //74
+	builtin_methods[bn++] = builtin_ValueTuple3_ctor; //75
+	builtin_methods[bn++] = builtin_ValueTuple4_ctor; //76
 
-	builtin_methods[bn++] = builtin_RuntimeHelpers_InitializeArray;
+	builtin_methods[bn++] = builtin_RuntimeHelpers_InitializeArray; //77
 
-	builtin_methods[bn++] = builtin_Boolean_ToString;
-	builtin_methods[bn++] = builtin_Int32_ToString;
-	builtin_methods[bn++] = builtin_Int16_ToString;
-	builtin_methods[bn++] = builtin_Single_ToString;
+	builtin_methods[bn++] = builtin_Boolean_ToString; //78
+	builtin_methods[bn++] = builtin_Int32_ToString; //79
+	builtin_methods[bn++] = builtin_Int16_ToString; //80
+	builtin_methods[bn++] = builtin_Single_ToString; //81
 
-	builtin_methods[bn++] = builtin_Action_ctor;
-	builtin_methods[bn++] = builtin_Action_Invoke;
-	builtin_methods[bn++] = builtin_Action1_ctor;
-	builtin_methods[bn++] = builtin_Action1_Invoke;
-	builtin_methods[bn++] = builtin_Action2_ctor;
-	builtin_methods[bn++] = builtin_Action2_Invoke;
-	builtin_methods[bn++] = builtin_Action3_ctor;
-	builtin_methods[bn++] = builtin_Action3_Invoke;
-	builtin_methods[bn++] = builtin_Action4_ctor;
-	builtin_methods[bn++] = builtin_Action4_Invoke;
-	builtin_methods[bn++] = builtin_Action5_ctor;
-	builtin_methods[bn++] = builtin_Action5_Invoke;
-	builtin_methods[bn++] = builtin_Func1_ctor;
-	builtin_methods[bn++] = builtin_Func1_Invoke;
-	builtin_methods[bn++] = builtin_Func2_ctor;
-	builtin_methods[bn++] = builtin_Func2_Invoke;
-	builtin_methods[bn++] = builtin_Func3_ctor;
-	builtin_methods[bn++] = builtin_Func3_Invoke;
-	builtin_methods[bn++] = builtin_Func4_ctor;
-	builtin_methods[bn++] = builtin_Func4_Invoke;
-	builtin_methods[bn++] = builtin_Func5_ctor;
-	builtin_methods[bn++] = builtin_Func5_Invoke;
-	builtin_methods[bn++] = builtin_Func6_ctor;
-	builtin_methods[bn++] = builtin_Func6_Invoke;
-	builtin_methods[bn++] = builtin_Console_WriteLine;
+	builtin_methods[bn++] = builtin_Action_ctor; //82
+	builtin_methods[bn++] = builtin_Action_Invoke; //83
+	builtin_methods[bn++] = builtin_Action1_ctor; //84
+	builtin_methods[bn++] = builtin_Action1_Invoke; //85
+	builtin_methods[bn++] = builtin_Action2_ctor; //86
+	builtin_methods[bn++] = builtin_Action2_Invoke; //87
+	builtin_methods[bn++] = builtin_Action3_ctor; //88
+	builtin_methods[bn++] = builtin_Action3_Invoke; //89
+	builtin_methods[bn++] = builtin_Action4_ctor; //90
+	builtin_methods[bn++] = builtin_Action4_Invoke; //91
+	builtin_methods[bn++] = builtin_Action5_ctor; //92
+	builtin_methods[bn++] = builtin_Action5_Invoke; //93
+	builtin_methods[bn++] = builtin_Func1_ctor; //94
+	builtin_methods[bn++] = builtin_Func1_Invoke; //95
+	builtin_methods[bn++] = builtin_Func2_ctor; //96
+	builtin_methods[bn++] = builtin_Func2_Invoke; //97
+	builtin_methods[bn++] = builtin_Func3_ctor; //98
+	builtin_methods[bn++] = builtin_Func3_Invoke; //99
+	builtin_methods[bn++] = builtin_Func4_ctor; //100
+	builtin_methods[bn++] = builtin_Func4_Invoke; //101
+	builtin_methods[bn++] = builtin_Func5_ctor; //102
+	builtin_methods[bn++] = builtin_Func5_Invoke; //103
+	builtin_methods[bn++] = builtin_Func6_ctor; //104
+	builtin_methods[bn++] = builtin_Func6_Invoke; //105
+	builtin_methods[bn++] = builtin_Console_WriteLine; //106
 
-	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Boolean;
-	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Char;
-	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Int16;
-	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Int32;
-	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Single;
-	builtin_methods[bn++] = builtin_BitConverter_GetBytes_UInt16;
-	builtin_methods[bn++] = builtin_BitConverter_GetBytes_UInt32;
-	builtin_methods[bn++] = builtin_BitConverter_ToBoolean;
-	builtin_methods[bn++] = builtin_BitConverter_ToChar;
-	builtin_methods[bn++] = builtin_BitConverter_ToInt16;
-	builtin_methods[bn++] = builtin_BitConverter_ToInt32;
-	builtin_methods[bn++] = builtin_BitConverter_ToSingle;
-	builtin_methods[bn++] = builtin_BitConverter_ToUInt16;
-	builtin_methods[bn++] = builtin_BitConverter_ToUInt32;
+	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Boolean; //107
+	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Char; //108
+	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Int16; //109
+	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Int32; //110
+	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Single; //111
+	builtin_methods[bn++] = builtin_BitConverter_GetBytes_UInt16; //112
+	builtin_methods[bn++] = builtin_BitConverter_GetBytes_UInt32; //113
+	builtin_methods[bn++] = builtin_BitConverter_ToBoolean; //114
+	builtin_methods[bn++] = builtin_BitConverter_ToChar; //115
+	builtin_methods[bn++] = builtin_BitConverter_ToInt16; //116
+	builtin_methods[bn++] = builtin_BitConverter_ToInt32; //117
+	builtin_methods[bn++] = builtin_BitConverter_ToSingle; //118
+	builtin_methods[bn++] = builtin_BitConverter_ToUInt16; //119
+	builtin_methods[bn++] = builtin_BitConverter_ToUInt32; //120
 
 	INFO("System builtin methods n=%d", bn);
 	add_additional_builtins();

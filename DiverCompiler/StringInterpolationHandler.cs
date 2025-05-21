@@ -25,6 +25,8 @@ public class StringInterpolationHandler
     private bool _debug = true; // Enable debugging
 
     private BaseModuleWeaver bmw;
+    private ILProcessor processor;
+
     public StringInterpolationHandler(ModuleDefinition module, ModuleWeaver moduleWeaver)
     {
         _module = module;
@@ -73,94 +75,224 @@ public class StringInterpolationHandler
 
         bmw.WriteWarning($"Processing method: {method.FullName}");
         
+        // Dump all instructions for debugging
+        DumpMethodInstructions(method);
+
         // Get the IL processor for the method
-        var processor = method.Body.GetILProcessor();
+        processor = method.Body.GetILProcessor();
         
-        // First pass: find all DefaultInterpolatedStringHandler operations
-        var instructions = method.Body.Instructions.ToList();
-        int interpolationCount = 0;
+        // First, identify all complete string interpolation blocks
+        var interpolationBlocks = FindInterpolationBlocks(method);
+        
+        // If we didn't find any blocks using the primary method, try the alternate approach
+        if (interpolationBlocks.Count == 0)
+        {
+            bmw.WriteWarning("No interpolation blocks found with primary method, trying alternate approach");
+            interpolationBlocks = FindInterpolationBlocksAlternate(method);
+        }
+        
+        bmw.WriteWarning($"Found {interpolationBlocks.Count} complete interpolation blocks");
+        
+        // Process each block in reverse order (to avoid offset issues)
+        foreach (var block in interpolationBlocks.OrderByDescending(b => b.StartIndex))
+        {
+            bmw.WriteWarning($"Processing interpolation block: {block.StartIndex} to {block.EndIndex}");
+            ReplaceInterpolation(method, processor, method.Body.Instructions.ToList(), block.StartIndex, block.EndIndex);
+        }
+        
+        // Replace DefaultInterpolatedStringHandler variables with int variables
+        ReplaceStringHandlerVariables(method);
+        
+        bmw.WriteWarning($"Method {method.Name} processed. Replaced {interpolationBlocks.Count} interpolations");
+    }
+
+    // Replace DefaultInterpolatedStringHandler variables with int variables
+    private void ReplaceStringHandlerVariables(MethodDefinition method)
+    {
+        if (!method.HasBody || method.Body.Variables == null || method.Body.Variables.Count == 0)
+            return;
+        
+        var intType = _module.ImportReference(typeof(int));
         int replacedCount = 0;
         
+        for (int i = 0; i < method.Body.Variables.Count; i++)
+        {
+            var variable = method.Body.Variables[i];
+            if (variable?.VariableType?.FullName?.Contains("DefaultInterpolatedStringHandler") == true)
+            {
+                bmw.WriteWarning($"  Replacing DefaultInterpolatedStringHandler variable at index {i} with int");
+                // Change the type to int but keep the same variable index
+                method.Body.Variables[i] = new VariableDefinition(intType);
+                replacedCount++;
+            }
+        }
+        
+        bmw.WriteWarning($"  Replaced {replacedCount} DefaultInterpolatedStringHandler variables with int variables");
+    }
+
+    private class InterpolationBlock
+    {
+        public int StartIndex { get; set; }
+        public int EndIndex { get; set; }
+    }
+
+    private List<InterpolationBlock> FindInterpolationBlocks(MethodDefinition method)
+    {
+        var result = new List<InterpolationBlock>();
+        var instructions = method.Body.Instructions.ToList();
+        
+        // First identify all constructor calls for DefaultInterpolatedStringHandler
+        var ctorIndices = new List<int>();
         for (int i = 0; i < instructions.Count; i++)
         {
-            var instruction = instructions[i];
-            
-            // Look for calls to DefaultInterpolatedStringHandler methods
-            if (instruction.OpCode.Code == Mono.Cecil.Cil.Code.Call || 
-                instruction.OpCode.Code == Mono.Cecil.Cil.Code.Callvirt)
+            var instr = instructions[i];
+            if (instr.OpCode.Code == Mono.Cecil.Cil.Code.Call ||   
+                instr.OpCode.Code == Mono.Cecil.Cil.Code.Callvirt || 
+                instr.OpCode.Code == Mono.Cecil.Cil.Code.Newobj)
             {
-                if (instruction.Operand is MethodReference methodRef && 
-                    methodRef.DeclaringType?.FullName?.Contains("DefaultInterpolatedStringHandler") == true)
-                {
-                    interpolationCount++;
-                    bmw.WriteWarning($"Found DefaultInterpolatedStringHandler method call: {methodRef.Name} at index {i}");
+                if (instr.Operand is MethodReference methodRef)
+                { 
+                    string declaringType = methodRef.DeclaringType?.FullName ?? "";
+                    string methodName = methodRef.Name ?? "";
                     
-                    // Find the start of interpolation (constructor call) 
-                    var startIndex = FindInterpolationStart(instructions, i);
-                    bmw.WriteWarning($"  Start index: {startIndex}, instruction: {(startIndex >= 0 ? instructions[startIndex].ToString() : "not found")}");
+                    bmw.WriteWarning($"Checking instruction {i}: {instr.OpCode} {methodName} in {declaringType}");
                     
-                    // Find the end of interpolation (ToStringAndClear call)
-                    var endIndex = FindInterpolationEnd(instructions, i);
-                    bmw.WriteWarning($"  End index: {endIndex}, instruction: {(endIndex >= 0 ? instructions[endIndex].ToString() : "not found")}");
-                    
-                    if (startIndex >= 0 && endIndex > i)
+                    if ((methodRef.Name == ".ctor" || methodRef.Name == "ctor") && 
+                        declaringType.Contains("DefaultInterpolatedStringHandler"))
                     {
-                        // Replace the interpolation with String.Format
-                        bmw.WriteWarning($"  Replacing interpolation from index {startIndex} to {endIndex}");
-                        ReplaceInterpolation(method, processor, instructions, startIndex, endIndex);
-                        replacedCount++;
-                        
-                        // Reload instructions as they've changed
-                        instructions = method.Body.Instructions.ToList();
-                        
-                        // Start over from the beginning of our replacement
-                        i = startIndex;
-                        bmw.WriteWarning($"  Continuing from index {i} after replacement");
-                    }
-                    else
-                    {
-                        bmw.WriteWarning($"  SKIPPED replacement - invalid start or end index");
+                        ctorIndices.Add(i);
+                        bmw.WriteWarning($"Found DefaultInterpolatedStringHandler constructor at index {i}");
                     }
                 }
             }
         }
         
-        bmw.WriteWarning($"Method {method.Name} processed. Found {interpolationCount} interpolations, replaced {replacedCount}");
-    }
-
-    private int FindInterpolationStart(List<Instruction> instructions, int currentIndex)
-    {
-        // Look for constructor call to DefaultInterpolatedStringHandler
-        for (int i = currentIndex - 1; i >= 0; i--)
+        // Then find the corresponding ToStringAndClear calls
+        foreach (var startIndex in ctorIndices)
         {
-            var instruction = instructions[i];
-            if (instruction.OpCode.Code == Mono.Cecil.Cil.Code.Newobj && 
-                instruction.Operand is MethodReference methodRef &&
-                methodRef.DeclaringType?.FullName?.Contains("DefaultInterpolatedStringHandler") == true)
+            for (int i = startIndex + 1; i < instructions.Count; i++)
             {
-                // Found the constructor call - this is our start
-                return i;
+                var instr = instructions[i];
+                if (instr.OpCode.Code == Mono.Cecil.Cil.Code.Call && 
+                    instr.Operand is MethodReference methodRef &&
+                    methodRef.Name == "ToStringAndClear" &&
+                    methodRef.DeclaringType?.FullName?.Contains("DefaultInterpolatedStringHandler") == true)
+                {
+                    // Found a matching end
+                    // Check that there's no other constructor between start and end
+                    bool isValidBlock = true;
+                    for (int j = startIndex + 1; j < i; j++)
+                    {
+                        var jInstr = instructions[j];
+                        if (jInstr.OpCode.Code == Mono.Cecil.Cil.Code.Call || 
+                            jInstr.OpCode.Code == Mono.Cecil.Cil.Code.Callvirt || 
+                            jInstr.OpCode.Code == Mono.Cecil.Cil.Code.Newobj)
+                        {
+                            if (jInstr.Operand is MethodReference jMethodRef && 
+                                (jMethodRef.Name == ".ctor" || jMethodRef.Name == "ctor") &&
+                                jMethodRef.DeclaringType?.FullName?.Contains("DefaultInterpolatedStringHandler") == true)
+                            {
+                                isValidBlock = false;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (isValidBlock)
+                    {
+                        result.Add(new InterpolationBlock
+                        {
+                            StartIndex = startIndex,
+                            EndIndex = i
+                        });
+                        bmw.WriteWarning($"Found complete interpolation block from {startIndex} to {i}");
+                        break;
+                    }
+                }
             }
         }
-        return -1;
+        
+        return result;
     }
 
-    private int FindInterpolationEnd(List<Instruction> instructions, int currentIndex)
+    // Alternative approach to find interpolation blocks by looking for constructor patterns
+    private List<InterpolationBlock> FindInterpolationBlocksAlternate(MethodDefinition method)
     {
-        // Look for ToStringAndClear call
-        for (int i = currentIndex; i < instructions.Count; i++)
+        var result = new List<InterpolationBlock>();
+        var instructions = method.Body.Instructions.ToList();
+        
+        // Scan through the IL looking for the pattern of:
+        // 1. ldc.i4.X (literal count)
+        // 2. ldc.i4.Y (format item count)
+        // 3. call .ctor DefaultInterpolatedStringHandler
+        // Followed eventually by:
+        // N. call ToStringAndClear
+        
+        for (int i = 0; i < instructions.Count - 2; i++)
         {
-            var instruction = instructions[i];
-            if (instruction.OpCode.Code == Mono.Cecil.Cil.Code.Call && 
-                instruction.Operand is MethodReference methodRef &&
-                methodRef.Name == "ToStringAndClear" &&
-                methodRef.DeclaringType?.FullName?.Contains("DefaultInterpolatedStringHandler") == true)
+            // Look for two consecutive ldc.i4 instructions followed by a constructor call
+            if (IsLoadConstantOpCode(instructions[i].OpCode) && 
+                IsLoadConstantOpCode(instructions[i+1].OpCode) &&
+                instructions.Count > i+2 && 
+                instructions[i+2].OpCode.Code == Code.Call)
             {
-                // Found the end - this is where we get the final string
-                return i;
+                if (instructions[i+2].Operand is MethodReference methodRef)
+                {
+                    string typeName = methodRef.DeclaringType?.FullName ?? "";
+                    
+                    // Check if this is the DefaultInterpolatedStringHandler constructor
+                    if (methodRef.Name == ".ctor" && typeName.Contains("DefaultInterpolatedStringHandler"))
+                    {
+                        int startIndex = i;
+                        bmw.WriteWarning($"Found potential interpolation start at index {startIndex}");
+                        
+                        // Now find the corresponding ToStringAndClear call
+                        for (int j = startIndex + 3; j < instructions.Count; j++)
+                        {
+                            if (instructions[j].OpCode.Code == Code.Call)
+                            {
+                                var endMethodRef = instructions[j].Operand as MethodReference;
+                                if (endMethodRef != null && 
+                                    endMethodRef.Name == "ToStringAndClear" && 
+                                    endMethodRef.DeclaringType?.FullName == typeName)
+                                {
+                                    // Found a complete block
+                                    result.Add(new InterpolationBlock
+                                    {
+                                        StartIndex = startIndex,
+                                        EndIndex = j
+                                    });
+                                    bmw.WriteWarning($"Found complete interpolation block from {startIndex} to {j} (alternate method)");
+                                    
+                                    // Skip to the end of this block
+                                    i = j;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
-        return -1;
+        
+        return result;
+    }
+
+    // Helper method to check if an opcode is a load constant instruction
+    private bool IsLoadConstantOpCode(OpCode opCode)
+    {
+        return opCode.Code == Code.Ldc_I4 ||
+               opCode.Code == Code.Ldc_I4_0 ||
+               opCode.Code == Code.Ldc_I4_1 ||
+               opCode.Code == Code.Ldc_I4_2 ||
+               opCode.Code == Code.Ldc_I4_3 ||
+               opCode.Code == Code.Ldc_I4_4 ||
+               opCode.Code == Code.Ldc_I4_5 ||
+               opCode.Code == Code.Ldc_I4_6 ||
+               opCode.Code == Code.Ldc_I4_7 ||
+               opCode.Code == Code.Ldc_I4_8 ||
+               opCode.Code == Code.Ldc_I4_M1 ||
+               opCode.Code == Code.Ldc_I4_S;
     }
 
     private void ReplaceInterpolation(MethodDefinition method, ILProcessor processor, 
@@ -180,59 +312,137 @@ public class StringInterpolationHandler
             bmw.WriteWarning($"    Format item {i}: Type={interpolationInfo.FormatItems[i].Type?.FullName ?? "unknown"}, Format={interpolationInfo.FormatItems[i].FormatClause ?? "none"}");
         }
         
+        // Validate the interpolation info before proceeding
+        if (!ValidateInterpolationInfo(interpolationInfo))
+        {
+            bmw.WriteWarning("  SKIPPED replacement - invalid interpolation data");
+            return;
+        }
+        
+        // Ensure the method has a local variable of type System.Object for our temp values
+        // This is needed for handling complex types
+        EnsureObjectLocalVariable(method);
+        
+        // Find the next instruction after the ToStringAndClear call to insert our replacement
+        var nextInstruction = endIndex < instructions.Count - 1 ? instructions[endIndex + 1] : null;
+        
+        if (nextInstruction == null)
+        {
+            bmw.WriteWarning("  SKIPPED replacement - cannot find insertion point");
+            return;
+        }
+        
         if (interpolationInfo.FormatItems.Count == 0)
         {
             // If there are no format items, just replace with a simple string
             var formatString = string.Join("", interpolationInfo.Literals);
-            var firstInstruction_i = instructions[startIndex];
             
             bmw.WriteWarning($"  Replacing with literal string: '{formatString}'");
             
             try {
+                // Create the new instruction
+                var newInstruction = processor.Create(OpCodes.Ldstr, formatString);
+                
                 // Remove all the interpolation instructions
                 for (int i = endIndex; i >= startIndex; i--)
                 {
                     processor.Remove(instructions[i]);
                 }
                 
-                // Just load the literal string
-                processor.InsertBefore(firstInstruction_i, processor.Create(OpCodes.Ldstr, formatString));
+                // Insert the new instruction
+                processor.InsertBefore(nextInstruction, newInstruction);
                 bmw.WriteWarning("  Successfully replaced with literal string");
             }
             catch (Exception ex) {
-                bmw.WriteWarning($"  ERROR replacing with literal string: {ex.Message}");
+                bmw.WriteWarning($"  ERROR replacing with literal string: {ex.Message}\n{ex.StackTrace}");
             }
             return;
         }
         
-        // Otherwise, build a String.Format call
-        var firstInstruction = instructions[startIndex];
-        
         try {
-            // Remove all instructions related to interpolation
-            for (int i = endIndex; i >= startIndex; i--)
-            {
-                processor.Remove(instructions[i]);
-            }
+            // Create a new sequence of instructions
+            var newInstructions = new List<Instruction>();
             
             // Now create the String.Format call
             if (interpolationInfo.FormatItems.Count <= 3)
             {
                 // Use the specific String.Format overloads for 1, 2, or 3 arguments
                 bmw.WriteWarning($"  Building specific String.Format call with {interpolationInfo.FormatItems.Count} arguments");
-                BuildSpecificFormatCall(processor, firstInstruction, interpolationInfo);
+                BuildSpecificFormatCall(newInstructions, processor, interpolationInfo);
             }
             else
             {
                 // Use the String.Format with object[] for more than 3 arguments
                 bmw.WriteWarning($"  Building array String.Format call with {interpolationInfo.FormatItems.Count} arguments");
-                BuildArrayFormatCall(processor, firstInstruction, interpolationInfo);
+                BuildArrayFormatCall(newInstructions, processor, interpolationInfo);
             }
+            
+            // Remove all the interpolation instructions
+            for (int i = endIndex; i >= startIndex; i--)
+            {
+                processor.Remove(instructions[i]);
+            }
+            
+            // Insert all new instructions
+            foreach (var instr in newInstructions)
+            {
+                processor.InsertBefore(nextInstruction, instr);
+            }
+            
             bmw.WriteWarning("  Successfully replaced with String.Format");
         }
         catch (Exception ex) {
             bmw.WriteWarning($"  ERROR replacing with String.Format: {ex.Message}\n{ex.StackTrace}");
         }
+    }
+    
+    // Ensure the method has a local variable of type System.Object
+    private void EnsureObjectLocalVariable(MethodDefinition method)
+    {
+        var objectType = _module.ImportReference(typeof(object));
+        
+        // Check if the method already has a local of type object
+        foreach (var local in method.Body.Variables)
+        {
+            if (local.VariableType.FullName == objectType.FullName)
+            {
+                bmw.WriteWarning($"  Method already has object local at index {local.Index}");
+                return;
+            }
+        }
+        
+        // Add a new local variable of type System.Object
+        var newLocal = new VariableDefinition(objectType);
+        method.Body.Variables.Add(newLocal);
+        bmw.WriteWarning($"  Added new object local at index {newLocal.Index}");
+    }
+    
+    private bool ValidateInterpolationInfo(InterpolationInfo info)
+    {
+        // Check if we have enough data to create a valid replacement
+        if (info.Literals.Count == 0)
+        {
+            bmw.WriteWarning("  Validation failed: No literals found");
+            return false;
+        }
+        
+        if (info.FormatItems.Count > 0 && info.Literals.Count < info.FormatItems.Count + 1)
+        {
+            bmw.WriteWarning($"  Validation failed: Not enough literals ({info.Literals.Count}) for format items ({info.FormatItems.Count})");
+            return false;
+        }
+        
+        // Check format items
+        for (int i = 0; i < info.FormatItems.Count; i++)
+        {
+            if (info.FormatItems[i].ValueInstruction == null)
+            {
+                bmw.WriteWarning($"  Validation failed: Format item {i} has no value instruction");
+                return false;
+            }
+        }
+        
+        return true;
     }
     
     private class InterpolationInfo
@@ -247,6 +457,7 @@ public class StringInterpolationHandler
         public string AlignmentClause { get; set; }
         public string FormatClause { get; set; }
         public TypeReference Type { get; set; }
+        public List<Instruction> LoadInstructions { get; set; } = new List<Instruction>();
     }
     
     private InterpolationInfo AnalyzeInterpolation(List<Instruction> instructions, int startIndex, int endIndex)
@@ -254,18 +465,43 @@ public class StringInterpolationHandler
         var result = new InterpolationInfo();
         
         bmw.WriteWarning($"  Analyzing interpolation from index {startIndex} to {endIndex}");
-        // Start at the ctor call and work forward
+        
+        // First, let's print all instructions in the block to help with debugging
+        bmw.WriteWarning("  Detailed instruction dump for interpolation block:");
         for (int i = startIndex; i <= endIndex; i++)
         {
-            var instruction = instructions[i];
+            var instr = instructions[i];
+            string operandStr = "null";
+            
+            if (instr.Operand != null)
+            {
+                if (instr.Operand is MethodReference mr)
+                    operandStr = $"{mr.Name} in {mr.DeclaringType?.FullName}";
+                else if (instr.Operand is TypeReference tr)
+                    operandStr = tr.FullName;
+                else if (instr.Operand is FieldReference fr)
+                    operandStr = $"{fr.Name} in {fr.DeclaringType?.FullName}";
+                else
+                    operandStr = instr.Operand.ToString();
+            }
+            
+            bmw.WriteWarning($"    [{i}] {instr.OpCode.Code} - {operandStr}");
+        }
+        
+        try
+        {
+            // Start at the ctor call and work forward
+            for (int i = startIndex; i <= endIndex; i++)
+            {
+                var instruction = instructions[i];
             
             if (instruction.OpCode.Code == Mono.Cecil.Cil.Code.Call || 
                 instruction.OpCode.Code == Mono.Cecil.Cil.Code.Callvirt)
             {
                 if (instruction.Operand is MethodReference methodRef)
                 {
-                    bmw.WriteWarning($"    Instruction {i}: {instruction.OpCode} {methodRef.Name}");
-                    
+                        bmw.WriteWarning($"    Instruction {i}: {instruction.OpCode} {methodRef.Name}");
+                        
                     if (methodRef.Name == "AppendLiteral" && 
                         methodRef.DeclaringType?.FullName?.Contains("DefaultInterpolatedStringHandler") == true)
                     {
@@ -277,43 +513,60 @@ public class StringInterpolationHandler
                             if (literalValue != null)
                             {
                                 result.Literals.Add(literalValue);
-                                bmw.WriteWarning($"      Found literal: '{literalValue}'");
+                                    bmw.WriteWarning($"      Found literal: '{literalValue}'");
+                                }
+                                else
+                                {
+                                    bmw.WriteWarning($"      Found ldstr but operand is not a string");
+                                    // Add empty literal as a fallback
+                                    result.Literals.Add(string.Empty);
+                                }
                             }
                             else
                             {
-                                bmw.WriteWarning($"      Found ldstr but operand is not a string");
-                            }
-                        }
-                        else
-                        {
-                            bmw.WriteWarning($"      Could not find ldstr for AppendLiteral");
+                                bmw.WriteWarning($"      Could not find ldstr for AppendLiteral");
+                                // Add empty literal as a fallback
+                                result.Literals.Add(string.Empty);
                         }
                     }
                     else if (methodRef.Name.StartsWith("AppendFormatted") && 
                              methodRef.DeclaringType?.FullName?.Contains("DefaultInterpolatedStringHandler") == true)
                     {
                         // This is a formatted expression
-                        bmw.WriteWarning($"      Found AppendFormatted call");
+                            bmw.WriteWarning($"      Found AppendFormatted call");
                         var formatItem = ExtractFormatItem(instructions, i);
                         if (formatItem != null)
                         {
                             result.FormatItems.Add(formatItem);
-                            bmw.WriteWarning($"      Extracted format item: Type={formatItem.Type?.FullName ?? "unknown"}, Format={formatItem.FormatClause ?? "none"}");
-                        }
-                        else
-                        {
-                            bmw.WriteWarning($"      Failed to extract format item");
+                                bmw.WriteWarning($"      Extracted format item: Type={formatItem.Type?.FullName ?? "unknown"}, Format={formatItem.FormatClause ?? "none"}");
+                            }
+                            else
+                            {
+                                bmw.WriteWarning($"      Failed to extract format item");
+                            }
                         }
                     }
                 }
             }
+            
+            // Special case: If we have format items but no literals, make sure we have enough literals
+            if (result.FormatItems.Count > 0 && result.Literals.Count == 0)
+            {
+                // Add an empty literal at the beginning
+                result.Literals.Add(string.Empty);
+                bmw.WriteWarning($"    Added empty literal at the beginning for string with only format items");
+            }
+            
+            // Make sure we have a literal after the last format item
+            if (result.FormatItems.Count >= result.Literals.Count)
+            {
+                result.Literals.Add(string.Empty);
+                bmw.WriteWarning("    Added empty literal at the end");
+            }
         }
-        
-        // Make sure we have a literal after the last format item
-        if (result.FormatItems.Count >= result.Literals.Count)
+        catch (Exception ex)
         {
-            result.Literals.Add(string.Empty);
-            bmw.WriteWarning("    Added empty literal at the end");
+            bmw.WriteWarning($"  ERROR while analyzing interpolation: {ex.Message}\n{ex.StackTrace}");
         }
         
         return result;
@@ -339,50 +592,196 @@ public class StringInterpolationHandler
         if (methodRef == null)
             return null;
         
+        bmw.WriteWarning($"    Extracting format item from call at index {formatCallIndex} to {methodRef.Name}");
+        
         var formatItem = new FormatItem();
         
-        // Find the value to format (the last pushed value before the call)
-        int valueInstructionIndex = -1;
+        if (methodRef.IsGenericInstance)
+        {
+            var genericMethod = methodRef as GenericInstanceMethod;
+            if (genericMethod != null && genericMethod.GenericArguments.Count > 0)
+            {
+                formatItem.Type = genericMethod.GenericArguments[0];
+                bmw.WriteWarning($"      Extracted type from generic argument: {formatItem.Type.FullName}");
+            }
+        }
+        
+        // Look for the ldloca_s instruction that precedes the value loading
+        int ldlocaIndex = -1;
         for (int i = formatCallIndex - 1; i >= 0; i--)
         {
-            var instruction = instructions[i];
-            if (instruction.OpCode.Code != Mono.Cecil.Cil.Code.Nop)
+            if (instructions[i].OpCode.Code == Code.Ldloca_S || 
+                instructions[i].OpCode.Code == Code.Ldloca)
             {
-                valueInstructionIndex = i;
+                ldlocaIndex = i;
+                bmw.WriteWarning($"      Found ldloca instruction at index {i}");
                 break;
             }
         }
         
-        if (valueInstructionIndex >= 0)
+        if (ldlocaIndex >= 0 && ldlocaIndex < formatCallIndex - 1)
         {
-            formatItem.ValueInstruction = instructions[valueInstructionIndex];
-            bmw.WriteWarning($"      Found value instruction at index {valueInstructionIndex}: {formatItem.ValueInstruction.OpCode}");
-            
-            // Try to determine the type
-            // This is simplified - in a real implementation you'd need more detailed analysis
-            if (methodRef.Parameters.Count > 0)
+            // Get all instructions between ldloca and the call (excluding ldloca)
+            // These are the exact instructions that load the value on the stack
+            for (int i = ldlocaIndex + 1; i < formatCallIndex; i++)
             {
-                formatItem.Type = methodRef.Parameters[0].ParameterType;
-                bmw.WriteWarning($"      Extracted type from method parameters: {formatItem.Type.FullName}");
+                if (instructions[i].OpCode.Code != Code.Nop)  // Skip nop instructions
+                {
+                    formatItem.LoadInstructions.Add(instructions[i]);
+                    bmw.WriteWarning($"      Captured value-loading instruction: {instructions[i].OpCode}");
+                }
+            }
+            
+            if (formatItem.LoadInstructions.Count > 0)
+            {
+                formatItem.ValueInstruction = formatItem.LoadInstructions[0]; // Set first instruction as the primary one
             }
         }
         else
         {
-            bmw.WriteWarning("      Could not find value instruction");
+            bmw.WriteWarning("      Could not find ldloca_s instruction before the AppendFormatted call");
         }
         
-        // Extract format string if available
-        var formatStringIndex = FindPreviousLdstr(instructions, formatCallIndex);
-        if (formatStringIndex >= 0 && formatStringIndex > valueInstructionIndex)
+        // If we don't have a type yet, try to infer it
+        if (formatItem.Type == null && formatItem.ValueInstruction != null)
         {
-            formatItem.FormatClause = instructions[formatStringIndex].Operand as string;
-            bmw.WriteWarning($"      Found format clause: '{formatItem.FormatClause}'");
+            InferTypeFromInstruction(formatItem, instructions, instructions.IndexOf(formatItem.ValueInstruction));
+        }
+        
+        // Look for format string
+        // Format strings are passed as a parameter after the value
+        bool hasFormatStringParam = false;
+        if (methodRef.Parameters.Count > 1)
+        {
+            for (int i = 1; i < methodRef.Parameters.Count; i++)
+            {
+                if (methodRef.Parameters[i].ParameterType.FullName == "System.String")
+                {
+                    hasFormatStringParam = true;
+                    break;
+                }
+            }
+        }
+        
+        if (hasFormatStringParam)
+        {
+            // If there's a format string parameter, look for the last string constant before the call
+            for (int i = formatCallIndex - 1; i > ldlocaIndex; i--)
+            {
+                if (instructions[i].OpCode.Code == Code.Ldstr)
+                {
+                    formatItem.FormatClause = instructions[i].Operand as string;
+                    bmw.WriteWarning($"      Found format clause: '{formatItem.FormatClause}'");
+                    break;
+                }
+            }
         }
         
         return formatItem;
     }
     
-    private void BuildSpecificFormatCall(ILProcessor processor, Instruction insertPoint, InterpolationInfo info)
+    private void InferTypeFromInstruction(FormatItem formatItem, List<Instruction> instructions, int valueIndex)
+    {
+        if (formatItem.Type != null)
+            return; // Already have a type
+        
+        var instruction = instructions[valueIndex];
+        
+        // Try to infer type from the instruction
+        switch (instruction.OpCode.Code)
+        {
+            case Mono.Cecil.Cil.Code.Ldloc:
+            case Mono.Cecil.Cil.Code.Ldloc_0:
+            case Mono.Cecil.Cil.Code.Ldloc_1:
+            case Mono.Cecil.Cil.Code.Ldloc_2:
+            case Mono.Cecil.Cil.Code.Ldloc_3:
+            case Mono.Cecil.Cil.Code.Ldloc_S:
+                // Local variable load
+                if (instruction.Operand is VariableDefinition vd)
+                {
+                    formatItem.Type = vd.VariableType;
+                    bmw.WriteWarning($"      Inferred type from local variable: {formatItem.Type.FullName}");
+                }
+                break;
+                
+            case Mono.Cecil.Cil.Code.Ldarg:
+            case Mono.Cecil.Cil.Code.Ldarg_0:
+            case Mono.Cecil.Cil.Code.Ldarg_1:
+            case Mono.Cecil.Cil.Code.Ldarg_2:
+            case Mono.Cecil.Cil.Code.Ldarg_3:
+            case Mono.Cecil.Cil.Code.Ldarg_S:
+                // Argument load
+                if (instruction.Operand is ParameterDefinition pd)
+                {
+                    formatItem.Type = pd.ParameterType;
+                    bmw.WriteWarning($"      Inferred type from parameter: {formatItem.Type.FullName}");
+                }
+                break;
+                
+            case Mono.Cecil.Cil.Code.Ldfld:
+            case Mono.Cecil.Cil.Code.Ldsfld:
+                // Field load
+                if (instruction.Operand is FieldReference fr)
+                {
+                    formatItem.Type = fr.FieldType;
+                    bmw.WriteWarning($"      Inferred type from field: {formatItem.Type.FullName}");
+                }
+                break;
+                
+            case Mono.Cecil.Cil.Code.Call:
+            case Mono.Cecil.Cil.Code.Callvirt:
+                // Method call
+                if (instruction.Operand is MethodReference mr && mr.ReturnType.FullName != "System.Void")
+                {
+                    formatItem.Type = mr.ReturnType;
+                    bmw.WriteWarning($"      Inferred type from method return: {formatItem.Type.FullName}");
+                }
+                break;
+                
+            case Mono.Cecil.Cil.Code.Ldc_I4:
+            case Mono.Cecil.Cil.Code.Ldc_I4_0:
+            case Mono.Cecil.Cil.Code.Ldc_I4_1:
+            case Mono.Cecil.Cil.Code.Ldc_I4_2:
+            case Mono.Cecil.Cil.Code.Ldc_I4_3:
+            case Mono.Cecil.Cil.Code.Ldc_I4_4:
+            case Mono.Cecil.Cil.Code.Ldc_I4_5:
+            case Mono.Cecil.Cil.Code.Ldc_I4_6:
+            case Mono.Cecil.Cil.Code.Ldc_I4_7:
+            case Mono.Cecil.Cil.Code.Ldc_I4_8:
+            case Mono.Cecil.Cil.Code.Ldc_I4_M1:
+            case Mono.Cecil.Cil.Code.Ldc_I4_S:
+                // Integer constant
+                formatItem.Type = _module.ImportReference(typeof(int));
+                bmw.WriteWarning("      Inferred type as System.Int32 from integer constant");
+                break;
+                
+            case Mono.Cecil.Cil.Code.Ldc_I8:
+                // Long constant
+                formatItem.Type = _module.ImportReference(typeof(long));
+                bmw.WriteWarning("      Inferred type as System.Int64 from long constant");
+                break;
+                
+            case Mono.Cecil.Cil.Code.Ldc_R4:
+                // Float constant
+                formatItem.Type = _module.ImportReference(typeof(float));
+                bmw.WriteWarning("      Inferred type as System.Single from float constant");
+                break;
+                
+            case Mono.Cecil.Cil.Code.Ldc_R8:
+                // Double constant
+                formatItem.Type = _module.ImportReference(typeof(double));
+                bmw.WriteWarning("      Inferred type as System.Double from double constant");
+                break;
+                
+            case Mono.Cecil.Cil.Code.Ldstr:
+                // String constant
+                formatItem.Type = _module.ImportReference(typeof(string));
+                bmw.WriteWarning("      Inferred type as System.String from string constant");
+                break;
+        }
+    }
+    
+    private void BuildSpecificFormatCall(List<Instruction> instructions, ILProcessor processor, InterpolationInfo info)
     {
         // Build the format string with placeholders
         var formatBuilder = new StringBuilder();
@@ -410,88 +809,65 @@ public class StringInterpolationHandler
             }
         }
         
-        // Add any remaining literals
-        if (info.Literals.Count > info.FormatItems.Count)
-        {
-            for (int i = info.FormatItems.Count; i < info.Literals.Count; i++)
-            {
-                formatBuilder.Append(info.Literals[i]);
-            }
-        }
-        
         var formatString = formatBuilder.ToString();
         bmw.WriteWarning($"    Built format string: '{formatString}'");
         
-        // Load the format string
-        processor.InsertBefore(insertPoint, processor.Create(OpCodes.Ldstr, formatString));
-        
-        // Add the format items (arguments)
-        foreach (var formatItem in info.FormatItems)
+        try
         {
-            // Clone the instruction that loads the value
-            var clonedInstruction = CloneInstruction(processor, formatItem.ValueInstruction);
-            processor.InsertBefore(insertPoint, clonedInstruction);
-            bmw.WriteWarning($"    Added value instruction: {clonedInstruction.OpCode}");
+            // Load the format string
+            instructions.Add(processor.Create(OpCodes.Ldstr, formatString));
             
-            // If needed, box value types
-            if (formatItem.Type != null && formatItem.Type.IsValueType)
+            // Add the format items (arguments) - using the original instructions
+            foreach (var formatItem in info.FormatItems)
             {
-                processor.InsertBefore(insertPoint, processor.Create(OpCodes.Box, formatItem.Type));
-                bmw.WriteWarning($"    Added boxing for type: {formatItem.Type.FullName}");
+                try
+                {
+                    if (formatItem.LoadInstructions.Count == 0)
+                    {
+                        throw new Exception("Format item has no load instructions");
+                    }
+                    
+                    // Copy the original value-loading instructions to preserve behavior
+                    CopyInstructionSequence(instructions, processor, formatItem.LoadInstructions);
+                    
+                    // No boxing needed - String.Format accepts objects directly
+                }
+                catch (Exception ex)
+                {
+                    bmw.WriteWarning($"    ERROR adding format item: {ex.Message}");
+                    throw;
+                }
             }
+            
+            // Call the appropriate String.Format method
+            MethodReference formatMethod = null;
+            switch (info.FormatItems.Count)
+            {
+                case 1:
+                    formatMethod = _stringFormat1;
+                    break;
+                case 2:
+                    formatMethod = _stringFormat2;
+                    break;
+                case 3:
+                    formatMethod = _stringFormat3;
+                    break;
+                default:
+                    throw new InvalidOperationException($"Invalid number of format arguments: {info.FormatItems.Count}");
+            }
+            
+            instructions.Add(processor.Create(OpCodes.Call, formatMethod));
+            bmw.WriteWarning($"    Added call to String.Format with {info.FormatItems.Count} arguments");
         }
-        
-        // Call the appropriate String.Format method
-        MethodReference formatMethod = null;
-        switch (info.FormatItems.Count)
+        catch (Exception ex)
         {
-            case 1:
-                formatMethod = _stringFormat1;
-                break;
-            case 2:
-                formatMethod = _stringFormat2;
-                break;
-            case 3:
-                formatMethod = _stringFormat3;
-                break;
-            default:
-                throw new InvalidOperationException($"Invalid number of format arguments: {info.FormatItems.Count}");
-        }
-        
-        processor.InsertBefore(insertPoint, processor.Create(OpCodes.Call, formatMethod));
-        bmw.WriteWarning($"    Added call to String.Format with {info.FormatItems.Count} arguments");
-    }
-    
-    private Instruction CloneInstruction(ILProcessor processor, Instruction original)
-    {
-        // Create a clone of an instruction
-        switch (original.OpCode.OperandType)
-        {
-            case OperandType.InlineNone:
-                return processor.Create(original.OpCode);
-            case OperandType.InlineI:
-                return processor.Create(original.OpCode, (int)original.Operand);
-            case OperandType.InlineI8:
-                return processor.Create(original.OpCode, (long)original.Operand);
-            case OperandType.InlineR:
-                return processor.Create(original.OpCode, (double)original.Operand);
-            case OperandType.InlineString:
-                return processor.Create(original.OpCode, (string)original.Operand);
-            case OperandType.InlineType:
-            case OperandType.InlineField:
-            case OperandType.InlineMethod:
-            case OperandType.InlineTok:
-                return processor.Create(original.OpCode, (string)original.Operand);
-            default:
-                bmw.WriteWarning($"WARNING: Unsupported instruction operand type {original.OpCode.OperandType}");
-                return processor.Create(original.OpCode);
+            bmw.WriteWarning($"    ERROR in BuildSpecificFormatCall: {ex.Message}\n{ex.StackTrace}");
+            throw;
         }
     }
     
-    private void BuildArrayFormatCall(ILProcessor processor, Instruction insertPoint, InterpolationInfo info)
+    private void BuildArrayFormatCall(List<Instruction> instructions, ILProcessor processor, InterpolationInfo info)
     {
-        // Similar to BuildSpecificFormatCall, but use object array
-        
         // Build the format string with placeholders
         var formatBuilder = new StringBuilder();
         int formatIndex = 0;
@@ -514,59 +890,331 @@ public class StringInterpolationHandler
                     formatBuilder.Append(formatItem.FormatClause);
                 }
                 
-                formatBuilder.Append("}");
-            }
-        }
-        
-        // Add any remaining literals
-        if (info.Literals.Count > info.FormatItems.Count)
-        {
-            for (int i = info.FormatItems.Count; i < info.Literals.Count; i++)
-            {
-                formatBuilder.Append(info.Literals[i]);
+                formatBuilder.Append("}"); 
             }
         }
         
         var formatString = formatBuilder.ToString();
         bmw.WriteWarning($"    Built format string: '{formatString}'");
         
-        // Load the format string
-        processor.InsertBefore(insertPoint, processor.Create(OpCodes.Ldstr, formatString));
-        
-        // Create the object array
-        processor.InsertBefore(insertPoint, processor.Create(OpCodes.Ldc_I4, info.FormatItems.Count));
-        var objectType = _module.ImportReference(typeof(object));
-        processor.InsertBefore(insertPoint, processor.Create(OpCodes.Newarr, objectType));
-        
-        // Fill the array with arguments
-        for (int i = 0; i < info.FormatItems.Count; i++)
+        try
         {
-            var formatItem = info.FormatItems[i];
+            // Load the format string
+            instructions.Add(processor.Create(OpCodes.Ldstr, formatString));
             
-            // Duplicate the array reference
-            processor.InsertBefore(insertPoint, processor.Create(OpCodes.Dup));
+            // Create the object array
+            instructions.Add(processor.Create(OpCodes.Ldc_I4, info.FormatItems.Count));
+            var objectType = _module.ImportReference(typeof(object));
+            instructions.Add(processor.Create(OpCodes.Newarr, objectType));
             
-            // Load the array index
-            processor.InsertBefore(insertPoint, processor.Create(OpCodes.Ldc_I4, i));
-            
-            // Clone the instruction that loads the value
-            var clonedInstruction = CloneInstruction(processor, formatItem.ValueInstruction);
-            processor.InsertBefore(insertPoint, clonedInstruction);
-            bmw.WriteWarning($"    Added array element {i} value instruction: {clonedInstruction.OpCode}");
-            
-            // If needed, box value types
-            if (formatItem.Type != null && formatItem.Type.IsValueType)
+            // Fill the array with format items
+            for (int i = 0; i < info.FormatItems.Count; i++)
             {
-                processor.InsertBefore(insertPoint, processor.Create(OpCodes.Box, formatItem.Type));
-                bmw.WriteWarning($"    Added boxing for type: {formatItem.Type.FullName}");
+                var formatItem = info.FormatItems[i];
+                
+                try
+                {
+                    if (formatItem.LoadInstructions.Count == 0)
+                    {
+                        throw new Exception($"Format item {i} has no load instructions");
+                    }
+                    
+                    // Duplicate the array reference for each item
+                    instructions.Add(processor.Create(OpCodes.Dup));
+                    
+                    // Load the array index
+                    instructions.Add(processor.Create(OpCodes.Ldc_I4, i));
+                    
+                    // Add the instructions that load the value
+                    foreach (var loadInstr in formatItem.LoadInstructions)
+                    {
+                        instructions.Add(CopyInstruction(processor, loadInstr));
+                        bmw.WriteWarning($"    Array item {i}: Added {loadInstr.OpCode}");
+                    }
+                    
+                    // No boxing - let the runtime handle it
+                    
+                    // Store in the array as object reference
+                    instructions.Add(processor.Create(OpCodes.Stelem_Ref));
+                    bmw.WriteWarning($"    Array item {i}: Stored in array");
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception($"ERROR adding array element {i}: {ex.Message}");
+                    bmw.WriteError($"ERROR adding array element {i}: {ex.Message}");
+                }
             }
             
-            // Store in the array
-            processor.InsertBefore(insertPoint, processor.Create(OpCodes.Stelem_Ref));
+            // Call String.Format with the array
+            instructions.Add(processor.Create(OpCodes.Call, _stringFormatArray));
+            bmw.WriteWarning($"    Added call to String.Format with object array of {info.FormatItems.Count} arguments");
+        }
+        catch (Exception ex)
+        {
+            bmw.WriteWarning($"    ERROR in BuildArrayFormatCall: {ex.Message}\n{ex.StackTrace}");
+            throw;
+        }
+    }
+
+    // Helper method to create a copy of an instruction
+    private Instruction CopyInstruction(ILProcessor processor, Instruction source)
+    {
+        if (source == null)
+            return null;
+        
+        try
+        {
+            switch (source.OpCode.OperandType)
+            {
+                case OperandType.InlineNone:
+                    return processor.Create(source.OpCode);
+                    
+                case OperandType.InlineString:
+                    return processor.Create(source.OpCode, (string)source.Operand);
+                    
+                case OperandType.InlineI:
+                    return processor.Create(source.OpCode, (int)source.Operand);
+                    
+                case OperandType.InlineI8:
+                    return processor.Create(source.OpCode, (long)source.Operand);
+                    
+                case OperandType.InlineR:
+                case OperandType.ShortInlineR:
+                    if (source.OpCode.Code == Code.Ldc_R4)
+                        return processor.Create(source.OpCode, (float)source.Operand);
+                    else
+                        return processor.Create(source.OpCode, (double)source.Operand);
+                    
+                case OperandType.InlineField:
+                    return processor.Create(source.OpCode, (FieldReference)source.Operand);
+                    
+                case OperandType.InlineMethod:
+                    return processor.Create(source.OpCode, (MethodReference)source.Operand);
+                    
+                case OperandType.InlineType:
+                    return processor.Create(source.OpCode, (TypeReference)source.Operand);
+                    
+                case OperandType.ShortInlineI:
+                    if (source.Operand is byte b)
+                        return processor.Create(source.OpCode, b);
+                    else if (source.Operand is sbyte sb)
+                        return processor.Create(source.OpCode, sb);
+                    else
+                        return processor.Create(source.OpCode, (int)source.Operand);
+                    
+                case OperandType.ShortInlineVar:
+                case OperandType.InlineVar:
+                    if (source.Operand is VariableDefinition vd)
+                        return processor.Create(source.OpCode, vd);
+                    else
+                    {
+                        int varIndex = source.Operand is byte byteIndex ? byteIndex : (int)source.Operand;
+                        return processor.Create(source.OpCode, varIndex);
+                    }
+                    
+                case OperandType.InlineArg:
+                case OperandType.ShortInlineArg:
+                    if (source.Operand is ParameterDefinition pd)
+                        return processor.Create(source.OpCode, pd);
+                    else
+                    {
+                        int paramIndex = source.Operand is byte byteIndex ? byteIndex : (int)source.Operand;
+                        return processor.Create(source.OpCode, paramIndex);
+                    }
+                    
+                case OperandType.InlineTok:
+                    if (source.Operand is TypeReference tr)
+                        return processor.Create(source.OpCode, tr);
+                    else if (source.Operand is MethodReference mr)
+                        return processor.Create(source.OpCode, mr);
+                    else if (source.Operand is FieldReference fr)
+                        return processor.Create(source.OpCode, fr);
+                    else
+                        throw new Exception($"Unsupported token type: {source.Operand?.GetType().Name ?? "null"}");
+                    
+                case OperandType.InlineBrTarget:
+                case OperandType.ShortInlineBrTarget:
+                    // Branch instructions should be skipped for safety
+                    throw new Exception($"Branch instructions cannot be copied: {source.OpCode}");
+                    
+                default:
+                    throw new Exception($"Unsupported operand type: {source.OpCode.OperandType}");
+            }
+        }
+        catch (Exception ex)
+        {
+            bmw.WriteWarning($"    Error copying instruction {source.OpCode}: {ex.Message}");
+            return processor.Create(OpCodes.Ldnull); // Fallback
+        }
+    }
+
+    // Helper to copy a sequence of instructions
+    private void CopyInstructionSequence(List<Instruction> targetList, ILProcessor processor, List<Instruction> sourceInstructions)
+    {
+        if (sourceInstructions == null || sourceInstructions.Count == 0)
+        {
+            bmw.WriteWarning("    WARNING: No source instructions to copy, using default value");
+            // Fallback to loading a simple default value
+            targetList.Add(processor.Create(OpCodes.Ldnull));
+            return;
         }
         
-        // Call String.Format with the array
-        processor.InsertBefore(insertPoint, processor.Create(OpCodes.Call, _stringFormatArray));
-        bmw.WriteWarning($"    Added call to String.Format with object array of {info.FormatItems.Count} arguments");
+        foreach (var sourceInstr in sourceInstructions)
+        {
+            Instruction newInstr = null;
+            
+            try
+            {
+                // Create a copy of the instruction based on its opcode and operand
+                switch (sourceInstr.OpCode.OperandType)
+                {
+                    case OperandType.InlineNone:
+                        newInstr = processor.Create(sourceInstr.OpCode);
+                        break;
+                        
+                    case OperandType.InlineString:
+                        newInstr = processor.Create(sourceInstr.OpCode, (string)sourceInstr.Operand);
+                        break;
+                        
+                    case OperandType.InlineI:
+                        newInstr = processor.Create(sourceInstr.OpCode, (int)sourceInstr.Operand);
+                        break;
+                        
+                    case OperandType.InlineI8:
+                        newInstr = processor.Create(sourceInstr.OpCode, (long)sourceInstr.Operand);
+                        break;
+                        
+                    case OperandType.InlineR:
+                        if (sourceInstr.OpCode.Code == Code.Ldc_R4)
+                            newInstr = processor.Create(sourceInstr.OpCode, (float)sourceInstr.Operand);
+                        else
+                            newInstr = processor.Create(sourceInstr.OpCode, (double)sourceInstr.Operand);
+                        break;
+                        
+                    case OperandType.ShortInlineR:
+                        // Handle ldc.r4 instruction
+                        newInstr = processor.Create(sourceInstr.OpCode, (float)sourceInstr.Operand);
+                        break;
+                        
+                    case OperandType.InlineField:
+                        newInstr = processor.Create(sourceInstr.OpCode, (FieldReference)sourceInstr.Operand);
+                        break;
+                        
+                    case OperandType.InlineMethod:
+                        newInstr = processor.Create(sourceInstr.OpCode, (MethodReference)sourceInstr.Operand);
+                        break;
+                        
+                    case OperandType.InlineType:
+                        newInstr = processor.Create(sourceInstr.OpCode, (TypeReference)sourceInstr.Operand);
+                        break;
+                        
+                    case OperandType.ShortInlineI:
+                        if (sourceInstr.Operand is byte b)
+                            newInstr = processor.Create(sourceInstr.OpCode, b);
+                        else if (sourceInstr.Operand is sbyte sb)
+                            newInstr = processor.Create(sourceInstr.OpCode, sb);
+                        else
+                            newInstr = processor.Create(sourceInstr.OpCode, (int)sourceInstr.Operand);
+                        break;
+                        
+                    case OperandType.ShortInlineVar:
+                    case OperandType.InlineVar:
+                        if (sourceInstr.Operand is VariableDefinition vd)
+                            newInstr = processor.Create(sourceInstr.OpCode, vd);
+                        else 
+                        {
+                            int varIndex = sourceInstr.Operand is byte byteIndex ? byteIndex : (int)sourceInstr.Operand;
+                            newInstr = processor.Create(sourceInstr.OpCode, varIndex);
+                        }
+                        break;
+                        
+                    case OperandType.InlineArg:
+                    case OperandType.ShortInlineArg:
+                        if (sourceInstr.Operand is ParameterDefinition pd)
+                            newInstr = processor.Create(sourceInstr.OpCode, pd);
+                        else
+                        {
+                            int paramIndex = sourceInstr.Operand is byte byteIndex ? byteIndex : (int)sourceInstr.Operand;
+                            newInstr = processor.Create(sourceInstr.OpCode, paramIndex);
+                        }
+                        break;
+                        
+                    case OperandType.InlineTok:
+                        if (sourceInstr.Operand is TypeReference tr)
+                            newInstr = processor.Create(sourceInstr.OpCode, tr);
+                        else if (sourceInstr.Operand is MethodReference mr)
+                            newInstr = processor.Create(sourceInstr.OpCode, mr);
+                        else if (sourceInstr.Operand is FieldReference fr)
+                            newInstr = processor.Create(sourceInstr.OpCode, fr);
+                        else
+                        {
+                            bmw.WriteWarning($"    WARNING: Unsupported token type: {sourceInstr.Operand?.GetType().Name ?? "null"}");
+                            // Skip this instruction
+                            continue;
+                        }
+                        break;
+                        
+                    case OperandType.InlineBrTarget:
+                    case OperandType.ShortInlineBrTarget:
+                        // Branch instructions are problematic to copy
+                        bmw.WriteWarning($"    WARNING: Skipping branch instruction: {sourceInstr.OpCode}");
+                        // Skip this instruction 
+                        continue;
+                        
+                    default:
+                        bmw.WriteWarning($"    WARNING: Unsupported operand type: {sourceInstr.OpCode.OperandType} for opcode {sourceInstr.OpCode}");
+                        // Log detailed information about the instruction to help with debugging
+                        if (sourceInstr.Operand != null)
+                        {
+                            bmw.WriteWarning($"    Operand type: {sourceInstr.Operand.GetType().Name}, Value: {sourceInstr.Operand}");
+                        }
+                        // Skip this instruction
+                        continue;
+                }
+                
+                if (newInstr != null)
+                {
+                    targetList.Add(newInstr);
+                    bmw.WriteWarning($"    Copied instruction: {sourceInstr.OpCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                bmw.WriteWarning($"    ERROR copying instruction {sourceInstr.OpCode}: {ex.Message}");
+                // On error, use a simple null value as fallback
+                targetList.Add(processor.Create(OpCodes.Ldnull));
+                break;
+            }
+        }
+    }
+
+    // Helper method to dump all IL instructions for a method
+    private void DumpMethodInstructions(MethodDefinition method)
+    {
+        if (!method.HasBody)
+            return;
+        
+        bmw.WriteWarning($"IL dump for method {method.FullName}:");
+        var instructions = method.Body.Instructions.ToList();
+        
+        for (int i = 0; i < instructions.Count; i++)
+        {
+            var instr = instructions[i];
+            string operandStr = "null";
+            
+            if (instr.Operand != null)
+            {
+                if (instr.Operand is MethodReference mr)
+                    operandStr = $"{mr.Name} in {mr.DeclaringType?.FullName}";
+                else if (instr.Operand is TypeReference tr)
+                    operandStr = tr.FullName;
+                else if (instr.Operand is FieldReference fr)
+                    operandStr = $"{fr.Name} in {fr.DeclaringType?.FullName}";
+                else
+                    operandStr = instr.Operand.ToString();
+            }
+            
+            bmw.WriteWarning($"[{i}] {instr.OpCode.Code} - {operandStr}");
+        }
     }
 } 

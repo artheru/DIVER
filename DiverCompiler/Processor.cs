@@ -556,6 +556,11 @@ internal partial class Processor
                 args.Add(new StackInitVals(){offset = psize, typeID = typing.typeid, instantiateClsID = -1});  
                 psize += 1+typing.size;
             }
+            else if (paramType.Resolve().IsEnum)
+            {
+                args.Add(new StackInitVals() { offset = psize, typeID = tMapDict["Int32"].typeid, instantiateClsID = -1 });
+                psize += 1 + tMapDict["Int32"].size;
+            }
             else if (IsStruct(paramType))
             {
                 var tt = new StackInitVals() { offset = psize, typeID = tMap.aJump.typeid, instantiateClsID = -1 };
@@ -566,6 +571,12 @@ internal partial class Processor
                     if (tt.instantiateClsID == -1) throw new WeavingException($"Parameter struct {paramType} not instanceable?");
                 });
                 psize += 5;
+            }
+            else if (paramType.IsByReference) 
+            { 
+                // address.
+                args.Add(new StackInitVals() { offset = psize, typeID = tMap.aAddress.typeid, instantiateClsID = -1 });
+                psize += 6;
             }
             else
             {
@@ -763,6 +774,12 @@ internal partial class Processor
                 {
                     mysz = typing.size + 1;
                     typeid = typing.typeid; 
+                }
+                else if (ftype.IsDefinition && ftype.Resolve().IsEnum)
+                {
+                    // Treat enums as integers
+                    mysz = tMapDict["Int32"].size + 1;
+                    typeid = tMapDict["Int32"].typeid;
                 }
                 else if (IsStruct(ftype))
                 {
@@ -1470,7 +1487,7 @@ internal partial class Processor
                 cc.Error("not allowed to create heap object");
                 return [0x79];
             case Code.Newobj:
-            {
+            { 
                 cc.Error("not allowed to create heap object");
                 // if 0x7A, first according to class_id, get layout, then generate a heap object
                 var mref = (MethodReference)instruction.Operand;

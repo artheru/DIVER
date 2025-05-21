@@ -69,6 +69,7 @@ internal partial class Processor
         "System.String.Format(String, Object[])",
         "System.String.Concat(String, String)",
         "System.String.Concat(String, String, String)",
+        "System.String.Concat(String, String, String, String)",
         "System.String.Substring(Int32, Int32)",
         "System.String.get_Length()",
 

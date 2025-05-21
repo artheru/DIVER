@@ -4,7 +4,7 @@ namespace CartActivator
 {
     public class LogicRunOnMCUAttribute : Attribute
     {
-        public string mcuUri = "";
+        public string mcuUri = "default";
         public int scanInterval = 1000;
     }
 

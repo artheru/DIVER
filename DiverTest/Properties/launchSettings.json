@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "DiverTest": {
+      "commandName": "Project",
+      "nativeDebugging": true
+    }
+  }
+}
