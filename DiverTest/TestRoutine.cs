@@ -41,7 +41,7 @@ namespace DiverTest
         ResetNode = 0x81,
         ResetComm = 0x82
     }
-
+     
     public enum HEARTBEAT : byte
     {
         Bootup = 0x00,
@@ -49,16 +49,16 @@ namespace DiverTest
         Stopped = 0x04
     }
 
-    public enum MotorBootupStage
-    {
+    public enum MotorBootupStage 
+    { 
         Unknown = 0,
-        ResetSent = 1,
+        ResetSent = 1, 
         BootupReceived = 2,
         StartSent = 3,
         StartReceived = 4,
     }
 
-    public class Motor
+    public class Motor 
     {
         public enum Mode : byte
         {
@@ -129,10 +129,10 @@ namespace DiverTest
         public override void Define()
         {
             Console.WriteLine("Coralinker Definition");
-            var node1 = Root.Downlink(typeof(TestMCURoutine));
-            var p1 = node1.ResolvedPin<A10Pin>("battery-12V", "input-1"); // denote a pin is forcefully placed.
-            var p2 = node1.ArbitaryPin<A10Pin>("gnd");
-            RequireConnect(p1, p2);
+            //var node1 = Root.Downlink(typeof(TestMCURoutine));
+            //var p1 = node1.ResolvedPin<A10Pin>("battery-12V", "input-1"); // denote a pin is forcefully placed.
+            //var p2 = node1.ArbitaryPin<A10Pin>("gnd");
+            //RequireConnect(p1, p2);
 
             // var node2 = node1.Downlink(typeof(TestMCURoutineNode2));
             // //.. list all connection here.
@@ -159,7 +159,7 @@ namespace DiverTest
     }
 
     [DefineCoralinking<TestLinking>]
-    public class TestVehicle : CoralinkerDIVERVehicle
+    public class TestVehicle : LocalDebugDIVERVehicle//CoralinkerDIVERVehicle
     {
         [AsLowerIO] public int motor_actual_velocity_A;
         [AsLowerIO] public int motor_actual_velocity_B;
@@ -169,7 +169,8 @@ namespace DiverTest
 
     // Logic and MCU is strictly 1:1
     [UseCoralinkerMCU<CoralinkerCL1_0_12p>]
-    [LogicRunOnMCU(mcuUri = "serial://name=COM5", scanInterval = 50)]
+    // [LogicRunOnMCU(mcuUri = "serial://name=COM15", scanInterval = 50)]
+    [LogicRunOnMCU(scanInterval = 50)]
     public class TestMCURoutine : LadderLogic<TestVehicle>
     {
         bool variableInitialized = false;
@@ -239,25 +240,25 @@ namespace DiverTest
                     return false;
                 case (int)MotorBootupStage.ResetSent:
                     // 检查是否收到Bootup
-                {
-                    byte[] heartbeatMsg = RunOnMCU.ReadEvent(
-                        (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.HEARTBEAT + motorID[i]);
-                    if (heartbeatMsg != null && heartbeatMsg.Length == 1 && heartbeatMsg[0] == (byte)HEARTBEAT.Bootup)
                     {
-                        motorStage[i] = (int)MotorBootupStage.BootupReceived;
-                        motorRetryCount[i] = 0;
-                        Console.WriteLine("Motor Bootup Received");
-                    }
-                    else
-                    {
-                        motorRetryCount[i]++;
-                        if (motorRetryCount[i] > BootupRetryLimit)
+                        byte[] heartbeatMsg = RunOnMCU.ReadEvent(
+                            (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.HEARTBEAT + motorID[i]);
+                        if (heartbeatMsg != null && heartbeatMsg.Length == 1 && heartbeatMsg[0] == (byte)HEARTBEAT.Bootup)
                         {
-                            // 重发Reset
-                            motorStage[i] = (int)MotorBootupStage.Unknown;
+                            motorStage[i] = (int)MotorBootupStage.BootupReceived;
+                            motorRetryCount[i] = 0;
+                            Console.WriteLine("Motor Bootup Received");
+                        }
+                        else
+                        {
+                            motorRetryCount[i]++;
+                            if (motorRetryCount[i] > BootupRetryLimit)
+                            {
+                                // 重发Reset
+                                motorStage[i] = (int)MotorBootupStage.Unknown;
+                            }
                         }
                     }
-                }
                     return false;
                 case (int)MotorBootupStage.BootupReceived:
                     //isAllMotorBootupOK = false;
@@ -271,26 +272,26 @@ namespace DiverTest
                 case (int)MotorBootupStage.StartSent:
                     //isAllMotorBootupOK = false;
                     // 检查是否收到Start后的心跳
-                {
-                    byte[] heartbeatMsg = RunOnMCU.ReadEvent(
-                        (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.HEARTBEAT + (int)motorID[i]);
-                    if (heartbeatMsg != null && heartbeatMsg.Length == 1 &&
-                        heartbeatMsg[0] == (byte)HEARTBEAT.Operational)
                     {
-                        motorStage[i] = (int)MotorBootupStage.StartReceived;
-                        motorRetryCount[i] = 0;
-                        Console.WriteLine("Motor Start Received");
-                    }
-                    else
-                    {
-                        motorRetryCount[i]++;
-                        if (motorRetryCount[i] > BootupRetryLimit)
+                        byte[] heartbeatMsg = RunOnMCU.ReadEvent(
+                            (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.HEARTBEAT + (int)motorID[i]);
+                        if (heartbeatMsg != null && heartbeatMsg.Length == 1 &&
+                            heartbeatMsg[0] == (byte)HEARTBEAT.Operational)
                         {
-                            // 重发Start
-                            motorStage[i] = (int)MotorBootupStage.BootupReceived;
+                            motorStage[i] = (int)MotorBootupStage.StartReceived;
+                            motorRetryCount[i] = 0;
+                            Console.WriteLine("Motor Start Received");
+                        }
+                        else
+                        {
+                            motorRetryCount[i]++;
+                            if (motorRetryCount[i] > BootupRetryLimit)
+                            {
+                                // 重发Start
+                                motorStage[i] = (int)MotorBootupStage.BootupReceived;
+                            }
                         }
                     }
-                }
                     return false;
                 case (int)MotorBootupStage.StartReceived:
                     return true;

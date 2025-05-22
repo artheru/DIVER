@@ -14,7 +14,7 @@ public class TestStringInterpolation : LadderLogic<TestVehicle2>
 { 
     private static int counter = 0; 
 
-    enum ee
+    enum ee 
     { 
         A, B, C 
     }

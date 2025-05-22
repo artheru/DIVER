@@ -75,11 +75,11 @@ internal partial class Processor
 
         "CartActivator.RunOnMCU.ReadEvent(Int32, Int32)",
         "CartActivator.RunOnMCU.ReadSnapshot()",
-        "CartActivator.RunOnMCU.ReadStream(Int32)",
+        "CartActivator.RunOnMCU.ReadStream(Int32)", 
         "CartActivator.RunOnMCU.WriteEvent(Byte[], Int32, Int32)",
         "CartActivator.RunOnMCU.WriteSnapshot(Byte[])",
         "CartActivator.RunOnMCU.WriteStream(Byte[], Int32)",
-
+         
         "CartActivator.RunOnMCU.GetMicrosFromStart()",
         "CartActivator.RunOnMCU.GetMillisFromStart()",
         "CartActivator.RunOnMCU.GetSecondsFromStart()",
@@ -90,9 +90,13 @@ internal partial class Processor
 
         "System.Runtime.CompilerServices.RuntimeHelpers.InitializeArray(Array, RuntimeFieldHandle)",
         "System.Boolean.ToString()",
+        "System.Byte.ToString()",
+        "System.Char.ToString()",
         "System.Int16.ToString()",
         "System.Int32.ToString()",
         "System.Single.ToString()",
+        "System.UInt16.ToString()",
+        "System.UInt32.ToString()",
 
         "System.Action..ctor(Object, IntPtr)",
         "System.Action.Invoke(T)",

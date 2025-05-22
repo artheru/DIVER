@@ -99,7 +99,7 @@ public class ModuleWeaver : BaseModuleWeaver
             }
         }  
          
-        WriteWarning($"RunOnMCU Processor v0.34 finished");
+        WriteWarning($"RunOnMCU Processor v0.35 finished");
     }
 
     public override IEnumerable<string> GetAssembliesForScanning()

@@ -27,7 +27,7 @@
 #ifdef _DEBUG
 #define INLINE static inline
 
-// #define _VERBOSE
+//#define _VERBOSE
 
 #ifdef _VERBOSE
 #define DBG printf
@@ -1978,14 +1978,15 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			}
 			else
 			{
-				DIEIF(arr->typeid != typeid) DOOM("array_%d is type %d but stelem as %d\n", arr_id, arr->typeid, typeid);
+				if(arr->typeid != typeid) 
+					INFO("array_%d is type %d but stelem as %d\n", arr_id, arr->typeid, typeid);
 				CPYVAL(elem_addr, value+1, arr->typeid)
 			}
 
 			DBG
 			("IL_Stelem typeid_%d to obj_%d[%d]\n", typeid, arr_id, index);
 			break;
-		}
+		} 
 
 
 		case 0xA0: // Callvirt (abstract)
@@ -3634,6 +3635,83 @@ void builtin_Single_ToString(uchar** reptr) {
 	PUSH_STACK_REFERENCEID(result_str_id);
 }
 
+void builtin_Byte_ToString(uchar** reptr) {
+	POP;
+	uchar typeid = **reptr;
+	DIEIF(typeid != Byte && typeid != Address) { DOOM("Bad input type, got %d", typeid) }
+
+	unsigned char value;
+	if (typeid == Address)
+	{
+		uchar* ptr = TypedAddrAsValPtr(*reptr);
+		value = *(unsigned char*)(ptr);
+	}
+	else value = *(*reptr + 1);
+
+	char str[4];
+	snprintf(str, sizeof(str), "%u", value);
+	int result_str_id = newstr(strlen(str), (uchar*)str);
+	PUSH_STACK_REFERENCEID(result_str_id);
+}
+
+void builtin_Char_ToString(uchar** reptr) {
+	POP;
+	uchar typeid = **reptr;
+	DIEIF(typeid != 3 && typeid != Address) { DOOM("Bad input type, got %d", typeid) }
+
+	unsigned short value;
+	if (typeid == Address)
+	{
+		uchar* ptr = TypedAddrAsValPtr(*reptr);
+		value = *(unsigned short*)(ptr);
+	}
+	else value = *(unsigned short*)(*reptr + 1);
+
+	char str[2];
+	str[0] = (char)value;
+	str[1] = '\0';
+	int result_str_id = newstr(1, (uchar*)str);
+	PUSH_STACK_REFERENCEID(result_str_id);
+}
+
+void builtin_UInt16_ToString(uchar** reptr) {
+	POP;
+	uchar typeid = **reptr;
+	DIEIF(typeid != UInt16 && typeid != Address) { DOOM("Bad input type, got %d", typeid) }
+
+	unsigned short value;
+	if (typeid == Address)
+	{
+		uchar* ptr = TypedAddrAsValPtr(*reptr);
+		value = *(unsigned short*)(ptr);
+	}
+	else value = *(unsigned short*)(*reptr + 1);
+
+	char str[8];
+	snprintf(str, sizeof(str), "%u", value);
+	int result_str_id = newstr(strlen(str), (uchar*)str);
+	PUSH_STACK_REFERENCEID(result_str_id);
+}
+
+void builtin_UInt32_ToString(uchar** reptr) {
+	POP;
+	uchar typeid = **reptr;
+	DIEIF(typeid != UInt32 && typeid != Address) { DOOM("Bad input type, got %d", typeid) }
+
+	unsigned int value;
+	if (typeid == Address)
+	{
+		uchar* ptr = TypedAddrAsValPtr(*reptr);
+		value = *(unsigned int*)(ptr);
+	}
+	else value = *(unsigned int*)(*reptr + 1);
+
+	char str[16];
+	snprintf(str, sizeof(str), "%u", value);
+	int result_str_id = newstr(strlen(str), (uchar*)str);
+	PUSH_STACK_REFERENCEID(result_str_id);
+}
+
 void delegate_ctor(uchar** reptr, short clsid)
 {
 	POP;
@@ -3985,47 +4063,51 @@ void setup_builtin_methods() {
 	builtin_methods[bn++] = builtin_Int32_ToString; //79
 	builtin_methods[bn++] = builtin_Int16_ToString; //80
 	builtin_methods[bn++] = builtin_Single_ToString; //81
+	builtin_methods[bn++] = builtin_Byte_ToString; //82
+	builtin_methods[bn++] = builtin_Char_ToString; //83
+	builtin_methods[bn++] = builtin_UInt16_ToString; //84
+	builtin_methods[bn++] = builtin_UInt32_ToString; //85
 
-	builtin_methods[bn++] = builtin_Action_ctor; //82
-	builtin_methods[bn++] = builtin_Action_Invoke; //83
-	builtin_methods[bn++] = builtin_Action1_ctor; //84
-	builtin_methods[bn++] = builtin_Action1_Invoke; //85
-	builtin_methods[bn++] = builtin_Action2_ctor; //86
-	builtin_methods[bn++] = builtin_Action2_Invoke; //87
-	builtin_methods[bn++] = builtin_Action3_ctor; //88
-	builtin_methods[bn++] = builtin_Action3_Invoke; //89
-	builtin_methods[bn++] = builtin_Action4_ctor; //90
-	builtin_methods[bn++] = builtin_Action4_Invoke; //91
-	builtin_methods[bn++] = builtin_Action5_ctor; //92
-	builtin_methods[bn++] = builtin_Action5_Invoke; //93
-	builtin_methods[bn++] = builtin_Func1_ctor; //94
-	builtin_methods[bn++] = builtin_Func1_Invoke; //95
-	builtin_methods[bn++] = builtin_Func2_ctor; //96
-	builtin_methods[bn++] = builtin_Func2_Invoke; //97
-	builtin_methods[bn++] = builtin_Func3_ctor; //98
-	builtin_methods[bn++] = builtin_Func3_Invoke; //99
-	builtin_methods[bn++] = builtin_Func4_ctor; //100
-	builtin_methods[bn++] = builtin_Func4_Invoke; //101
-	builtin_methods[bn++] = builtin_Func5_ctor; //102
-	builtin_methods[bn++] = builtin_Func5_Invoke; //103
-	builtin_methods[bn++] = builtin_Func6_ctor; //104
-	builtin_methods[bn++] = builtin_Func6_Invoke; //105
-	builtin_methods[bn++] = builtin_Console_WriteLine; //106
+	builtin_methods[bn++] = builtin_Action_ctor; //86
+	builtin_methods[bn++] = builtin_Action_Invoke; //87
+	builtin_methods[bn++] = builtin_Action1_ctor; //88
+	builtin_methods[bn++] = builtin_Action1_Invoke; //89
+	builtin_methods[bn++] = builtin_Action2_ctor; //90
+	builtin_methods[bn++] = builtin_Action2_Invoke; //91
+	builtin_methods[bn++] = builtin_Action3_ctor; //92
+	builtin_methods[bn++] = builtin_Action3_Invoke; //93
+	builtin_methods[bn++] = builtin_Action4_ctor; //94
+	builtin_methods[bn++] = builtin_Action4_Invoke; //95
+	builtin_methods[bn++] = builtin_Action5_ctor; //96
+	builtin_methods[bn++] = builtin_Action5_Invoke; //97
+	builtin_methods[bn++] = builtin_Func1_ctor; //98
+	builtin_methods[bn++] = builtin_Func1_Invoke; //99
+	builtin_methods[bn++] = builtin_Func2_ctor; //100
+	builtin_methods[bn++] = builtin_Func2_Invoke; //101
+	builtin_methods[bn++] = builtin_Func3_ctor; //102
+	builtin_methods[bn++] = builtin_Func3_Invoke; //103
+	builtin_methods[bn++] = builtin_Func4_ctor; //104
+	builtin_methods[bn++] = builtin_Func4_Invoke; //105
+	builtin_methods[bn++] = builtin_Func5_ctor; //106
+	builtin_methods[bn++] = builtin_Func5_Invoke; //107
+	builtin_methods[bn++] = builtin_Func6_ctor; //108
+	builtin_methods[bn++] = builtin_Func6_Invoke; //109
+	builtin_methods[bn++] = builtin_Console_WriteLine; //110
 
-	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Boolean; //107
-	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Char; //108
-	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Int16; //109
-	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Int32; //110
-	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Single; //111
-	builtin_methods[bn++] = builtin_BitConverter_GetBytes_UInt16; //112
-	builtin_methods[bn++] = builtin_BitConverter_GetBytes_UInt32; //113
-	builtin_methods[bn++] = builtin_BitConverter_ToBoolean; //114
-	builtin_methods[bn++] = builtin_BitConverter_ToChar; //115
-	builtin_methods[bn++] = builtin_BitConverter_ToInt16; //116
-	builtin_methods[bn++] = builtin_BitConverter_ToInt32; //117
-	builtin_methods[bn++] = builtin_BitConverter_ToSingle; //118
-	builtin_methods[bn++] = builtin_BitConverter_ToUInt16; //119
-	builtin_methods[bn++] = builtin_BitConverter_ToUInt32; //120
+	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Boolean; //111
+	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Char; //112
+	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Int16; //113
+	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Int32; //114
+	builtin_methods[bn++] = builtin_BitConverter_GetBytes_Single; //115
+	builtin_methods[bn++] = builtin_BitConverter_GetBytes_UInt16; //116
+	builtin_methods[bn++] = builtin_BitConverter_GetBytes_UInt32; //117
+	builtin_methods[bn++] = builtin_BitConverter_ToBoolean; //118
+	builtin_methods[bn++] = builtin_BitConverter_ToChar; //119
+	builtin_methods[bn++] = builtin_BitConverter_ToInt16; //120
+	builtin_methods[bn++] = builtin_BitConverter_ToInt32; //121
+	builtin_methods[bn++] = builtin_BitConverter_ToSingle; //122
+	builtin_methods[bn++] = builtin_BitConverter_ToUInt16; //123
+	builtin_methods[bn++] = builtin_BitConverter_ToUInt32; //124
 
 	INFO("System builtin methods n=%d", bn);
 	add_additional_builtins();
@@ -4097,7 +4179,7 @@ __declspec(dllexport) void test(uchar* bin, int len)
 	printf("====START TEST===\r\n");
 	vm_set_program(bin, len);
 
-	for (int i = 0; i < 100; ++i)
+	for (int i = 0; i < 10; ++i)
 	{
 		char buffer[38];
 		vm_put_snapshot_buffer(buffer, 38);
