@@ -470,6 +470,10 @@ internal partial class Processor
      
     public MethodEntry Process(MethodDefinition method, MethodReference methodRef=null, int scanInterval=1000)
     {
+
+        var stringInterpolationHandler = new StringInterpolationHandler(bmw.ModuleDefinition, bmw);
+        stringInterpolationHandler.ProcessMethod(method);
+
         if (isRoot) 
         {
             SI.EntryMethod = method;

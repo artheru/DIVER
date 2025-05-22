@@ -250,7 +250,7 @@ namespace DiverTest
                             Console.WriteLine("Motor Bootup Received");
                         }
                         else
-                        {
+                        { 
                             motorRetryCount[i]++;
                             if (motorRetryCount[i] > BootupRetryLimit)
                             {
@@ -259,7 +259,7 @@ namespace DiverTest
                             }
                         }
                     }
-                    return false;
+                    return false; 
                 case (int)MotorBootupStage.BootupReceived:
                     //isAllMotorBootupOK = false;
                     // 发送Start命令

@@ -1776,7 +1776,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 					POP;
 					copy_val(field_ptr, eptr);
 					DBG
-					("stflds type_%d\n", *field_ptr);
+					("stflds type_%d to offset_%d\n", *field_ptr, offset);
 				}
 			}
 			else
@@ -3121,98 +3121,242 @@ void builtin_Math_Tanh(uchar** reptr) {
 }
 
 void format_string(char* format, char* result, int len_args, uchar** arg_ptr) {
-	char* format_ptr = format;
-	char* result_ptr = result;
+    char* format_ptr = format;
+    char* result_ptr = result;
 
-	while (*format_ptr) {
-		if (*format_ptr == '{') {
-			char* end_brace = strchr(format_ptr, '}');
-			if (end_brace && (end_brace - format_ptr) <= 3) {  // Max 2 digits for index
-				char index_str[3] = { 0 };
-				strncpy(index_str, format_ptr + 1, end_brace - format_ptr - 1);
-				int index = atoi(index_str);
+    while (*format_ptr) {
+        if (*format_ptr == '{') {
+            char* end_brace = strchr(format_ptr, '}');
+            if (end_brace) {
+                // Extract the content between braces
+                int content_len = end_brace - format_ptr - 1;
+                if (content_len <= 10) {  // Reasonable limit for index + format
+                    char content[12] = {0};
+                    strncpy(content, format_ptr + 1, content_len);
+                    
+                    // Look for format specifier separator
+                    char* format_sep = strchr(content, ':');
+                    char* format_spec = NULL;
+                    char index_str[4] = {0};
+                    
+                    if (format_sep) {
+                        // We have a format specifier
+                        *format_sep = '\0'; // Split the string
+                        format_spec = format_sep + 1;
+                        strncpy(index_str, content, sizeof(index_str) - 1);
+                    } else {
+                        // No format specifier
+                        strncpy(index_str, content, sizeof(index_str) - 1);
+                    }
+                    
+                    int index = atoi(index_str);
 
-				if (index >= 0 && index < len_args) {
-					uchar* heap_val_ptr = arg_ptr[index];
-				retry:
-					uchar type_id = *heap_val_ptr;
-					uchar* payload = &heap_val_ptr[1];  // Skip the header byte
+                    if (index >= 0 && index < len_args) {
+                        uchar* heap_val_ptr = arg_ptr[index];
+                    retry:
+                        uchar type_id = *heap_val_ptr;
+                        uchar* payload = &heap_val_ptr[1];  // Skip the header byte
 
-					switch (type_id) {
-					case SByte:
-						result_ptr += sprintf(result_ptr, "%d", *(char*)payload);
-						break;
-					case Byte:
-						result_ptr += sprintf(result_ptr, "%u", *(unsigned char*)payload);
-						break;
-					case Int16:
-						result_ptr += sprintf(result_ptr, "%d", *(short*)payload);
-						break;
-					case UInt16:
-						result_ptr += sprintf(result_ptr, "%u", *(unsigned short*)payload);
-						break;
-					case Int32:
-						result_ptr += sprintf(result_ptr, "%d", *(int*)payload);
-						break;
-					case UInt32:
-						result_ptr += sprintf(result_ptr, "%u", *(unsigned int*)payload);
-						break;
-					case Single:
-						result_ptr += sprintf(result_ptr, "%f", *(float*)payload);
-						break;
-					case Boolean:
-						result_ptr += sprintf(result_ptr, "%s", *(bool*)payload ? "True" : "False");
-						break;
-					case Address:
-						result_ptr += sprintf(result_ptr, "<Address>");
-						break;
-					case JumpAddress:
-						result_ptr += sprintf(result_ptr, "<JumpAddress>");
-						break;
-					case ReferenceID:
-					{
-						int str_id = *(int*)payload;
-						if (str_id == 0) break; //null.
-						uchar* objh = heap_obj[str_id].pointer;
-						if (*objh == ArrayHeader)
-						{
-							result_ptr += sprintf(result_ptr, "<Array>");
-						}
-						else if (*objh == StringHeader) {
-							struct string_val* str = (struct string_val*)objh;
-							int len = str->str_len;
-							memcpy(result_ptr, &str->payload, len);
-							result_ptr += len;
-						}
-						else if (*objh == ObjectHeader)
-						{
-							result_ptr += sprintf(result_ptr, "<Object>");
-						}
-					}
-					break;
-					case MethodPointer:
-					{
-						struct method_pointer* mp = (struct method_pointer*)payload;
-						result_ptr += sprintf(result_ptr, "<Method: type=%d, id=%d>", mp->type, mp->id);
-					}
-					break;
-					case BoxedObject:
-					{
-						heap_val_ptr += 1;
-						goto retry;
-					}
-					default:
-						result_ptr += sprintf(result_ptr, "<Unsupported type: %d>", type_id);
-					}
-					format_ptr = end_brace + 1;
-					continue;
-				}
-			}
-		}
-		*result_ptr++ = *format_ptr++;
-	}
+                        // Build format specifier if provided
+                        char sprintf_format[20] = {0};
+                        
+                        switch (type_id) {
+                        case SByte:
+                            if (format_spec) {
+                                if (format_spec[0] == 'X' || format_spec[0] == 'x') {
+                                    // Hexadecimal format
+                                    if (strlen(format_spec) > 1) {
+                                        // Add padding if specified (e.g., X2)
+                                        int width = atoi(format_spec + 1);
+                                        sprintf(sprintf_format, "%%0%d%s", width, format_spec[0] == 'X' ? "X" : "x");
+                                    } else {
+                                        sprintf(sprintf_format, "%%%s", format_spec[0] == 'X' ? "X" : "x");
+                                    }
+                                    result_ptr += sprintf(result_ptr, sprintf_format, *(char*)payload);
+                                } else {
+                                    sprintf(sprintf_format, "%%%s", format_spec);
+                                    result_ptr += sprintf(result_ptr, sprintf_format, *(char*)payload);
+                                }
+                            } else {
+                                result_ptr += sprintf(result_ptr, "%d", *(char*)payload);
+                            }
+                            break;
+                        case Byte:
+                            if (format_spec) {
+                                if (format_spec[0] == 'X' || format_spec[0] == 'x') {
+                                    // Hexadecimal format
+                                    if (strlen(format_spec) > 1) {
+                                        // Add padding if specified (e.g., X2)
+                                        int width = atoi(format_spec + 1);
+                                        sprintf(sprintf_format, "%%0%d%s", width, format_spec[0] == 'X' ? "X" : "x");
+                                    } else {
+                                        sprintf(sprintf_format, "%%%s", format_spec[0] == 'X' ? "X" : "x");
+                                    }
+                                    result_ptr += sprintf(result_ptr, sprintf_format, *(unsigned char*)payload);
+                                } else {
+                                    sprintf(sprintf_format, "%%%s", format_spec);
+                                    result_ptr += sprintf(result_ptr, sprintf_format, *(unsigned char*)payload);
+                                }
+                            } else {
+                                result_ptr += sprintf(result_ptr, "%u", *(unsigned char*)payload);
+                            }
+                            break;
+                        case Int16:
+                            if (format_spec) {
+                                if (format_spec[0] == 'X' || format_spec[0] == 'x') {
+                                    // Hexadecimal format
+                                    if (strlen(format_spec) > 1) {
+                                        // Add padding if specified (e.g., X2)
+                                        int width = atoi(format_spec + 1);
+                                        sprintf(sprintf_format, "%%0%d%s", width, format_spec[0] == 'X' ? "X" : "x");
+                                    } else {
+                                        sprintf(sprintf_format, "%%%s", format_spec[0] == 'X' ? "X" : "x");
+                                    }
+                                    result_ptr += sprintf(result_ptr, sprintf_format, *(short*)payload);
+                                } else {
+                                    sprintf(sprintf_format, "%%%s", format_spec);
+                                    result_ptr += sprintf(result_ptr, sprintf_format, *(short*)payload);
+                                }
+                            } else {
+                                result_ptr += sprintf(result_ptr, "%d", *(short*)payload);
+                            }
+                            break;
+                        case UInt16:
+                            if (format_spec) {
+                                if (format_spec[0] == 'X' || format_spec[0] == 'x') {
+                                    // Hexadecimal format
+                                    if (strlen(format_spec) > 1) {
+                                        // Add padding if specified (e.g., X2)
+                                        int width = atoi(format_spec + 1);
+                                        sprintf(sprintf_format, "%%0%d%s", width, format_spec[0] == 'X' ? "X" : "x");
+                                    } else {
+                                        sprintf(sprintf_format, "%%%s", format_spec[0] == 'X' ? "X" : "x");
+                                    }
+                                    result_ptr += sprintf(result_ptr, sprintf_format, *(unsigned short*)payload);
+                                } else {
+                                    sprintf(sprintf_format, "%%%s", format_spec);
+                                    result_ptr += sprintf(result_ptr, sprintf_format, *(unsigned short*)payload);
+                                }
+                            } else {
+                                result_ptr += sprintf(result_ptr, "%u", *(unsigned short*)payload);
+                            }
+                            break;
+                        case Int32:
+                            if (format_spec) {
+                                if (format_spec[0] == 'X' || format_spec[0] == 'x') {
+                                    // Hexadecimal format
+                                    if (strlen(format_spec) > 1) {
+                                        // Add padding if specified (e.g., X2)
+                                        int width = atoi(format_spec + 1);
+                                        sprintf(sprintf_format, "%%0%d%s", width, format_spec[0] == 'X' ? "X" : "x");
+                                    } else {
+                                        sprintf(sprintf_format, "%%%s", format_spec[0] == 'X' ? "X" : "x");
+                                    }
+                                    result_ptr += sprintf(result_ptr, sprintf_format, *(int*)payload);
+                                } else {
+                                    sprintf(sprintf_format, "%%%s", format_spec);
+                                    result_ptr += sprintf(result_ptr, sprintf_format, *(int*)payload);
+                                }
+                            } else {
+                                result_ptr += sprintf(result_ptr, "%d", *(int*)payload);
+                            }
+                            break;
+                        case UInt32:
+                            if (format_spec) {
+                                if (format_spec[0] == 'X' || format_spec[0] == 'x') {
+                                    // Hexadecimal format
+                                    if (strlen(format_spec) > 1) {
+                                        // Add padding if specified (e.g., X2)
+                                        int width = atoi(format_spec + 1);
+                                        sprintf(sprintf_format, "%%0%d%s", width, format_spec[0] == 'X' ? "X" : "x");
+                                    } else {
+                                        sprintf(sprintf_format, "%%%s", format_spec[0] == 'X' ? "X" : "x");
+                                    }
+                                    result_ptr += sprintf(result_ptr, sprintf_format, *(unsigned int*)payload);
+                                } else {
+                                    sprintf(sprintf_format, "%%%s", format_spec);
+                                    result_ptr += sprintf(result_ptr, sprintf_format, *(unsigned int*)payload);
+                                }
+                            } else {
+                                result_ptr += sprintf(result_ptr, "%u", *(unsigned int*)payload);
+                            }
+                            break;
+                        case Single:
+                            if (format_spec) {
+                                if (format_spec[0] == 'F' || format_spec[0] == 'f') {
+                                    if (strlen(format_spec) > 1) {
+                                        // Add precision if specified (e.g., F2)
+                                        int precision = atoi(format_spec + 1);
+                                        sprintf(sprintf_format, "%%.%df", precision);
+                                    } else {
+                                        sprintf(sprintf_format, "%%f");
+                                    }
+                                    result_ptr += sprintf(result_ptr, sprintf_format, *(float*)payload);
+                                } else {
+                                    sprintf(sprintf_format, "%%%s", format_spec);
+                                    result_ptr += sprintf(result_ptr, sprintf_format, *(float*)payload);
+                                }
+                            } else {
+                                result_ptr += sprintf(result_ptr, "%g", *(float*)payload);
+                            }
+                            break;
+                        case Boolean:
+                            result_ptr += sprintf(result_ptr, "%s", *(bool*)payload ? "True" : "False");
+                            break;
+                        case Address:
+                            result_ptr += sprintf(result_ptr, "<Address>");
+                            break;
+                        case JumpAddress:
+                            result_ptr += sprintf(result_ptr, "<JumpAddress>");
+                            break;
+                        case ReferenceID:
+                        {
+                            int str_id = *(int*)payload;
+                            if (str_id == 0) {
+                                result_ptr += sprintf(result_ptr, "null");
+                                break;
+                            }
+                            uchar* objh = heap_obj[str_id].pointer;
+                            if (*objh == ArrayHeader)
+                            {
+                                result_ptr += sprintf(result_ptr, "<Array>");
+                            }
+                            else if (*objh == StringHeader) {
+                                struct string_val* str = (struct string_val*)objh;
+                                int len = str->str_len;
+                                memcpy(result_ptr, &str->payload, len);
+                                result_ptr += len;
+                            }
+                            else if (*objh == ObjectHeader)
+                            {
+                                result_ptr += sprintf(result_ptr, "<Object>");
+                            }
+                        }
+                        break;
+                        case MethodPointer:
+                        {
+                            struct method_pointer* mp = (struct method_pointer*)payload;
+                            result_ptr += sprintf(result_ptr, "<Method: type=%d, id=%d>", mp->type, mp->id);
+                        }
+                        break;
+                        case BoxedObject:
+                        {
+                            heap_val_ptr += 1;
+                            goto retry;
+                        }
+                        default:
+                            result_ptr += sprintf(result_ptr, "<Unsupported type: %d>", type_id);
+                        }
+                        format_ptr = end_brace + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        *result_ptr++ = *format_ptr++;
+    }
 
-	*result_ptr = '\0';  // Null-terminate the result string
+    *result_ptr = '\0';  // Null-terminate the result string
 }
 
 void do_job(uchar** reptr, int len, uchar** arg_ptr)
@@ -3902,19 +4046,17 @@ void builtin_BitConverter_GetBytes_Single(uchar** reptr) {
 }
 
 void builtin_BitConverter_GetBytes_UInt16(uchar** reptr) {
-	unsigned short value = (unsigned short)pop_int(reptr);
-	int array_id = newarr(2, Byte);
+	int startIndex = pop_int(reptr);
+	int array_id = pop_reference(reptr);
 	struct array_val* arr = heap_obj[array_id].pointer;
-	*(short*)(&arr->payload) = *(short*)&value;
-	PUSH_STACK_REFERENCEID(array_id);
+	PUSH_STACK_UINT16(*(unsigned short*)(&arr->payload + startIndex));
 }
 
 void builtin_BitConverter_GetBytes_UInt32(uchar** reptr) {
-	unsigned int value = (unsigned int)pop_int(reptr);
-	int array_id = newarr(4, Byte);
+	int startIndex = pop_int(reptr);
+	int array_id = pop_reference(reptr);
 	struct array_val* arr = heap_obj[array_id].pointer;
-	*(int*)(&arr->payload) = value;
-	PUSH_STACK_REFERENCEID(array_id);
+	push_int(reptr, *(unsigned int*)(&arr->payload + startIndex));
 }
 
 void builtin_BitConverter_ToBoolean(uchar** reptr) {
@@ -3969,6 +4111,329 @@ void builtin_BitConverter_ToUInt32(uchar** reptr) {
 	push_int(reptr, *(unsigned int*)(&arr->payload + startIndex));
 }
 
+
+
+// String.Join implementation for IEnumerable<T>
+void builtin_String_Join_IEnumerable(uchar** reptr) {
+	// Pop the enumerable (array) from the stack
+	int array_id = pop_reference(reptr);
+
+	// Pop the separator string from the stack
+	int separator_id = pop_reference(reptr);
+
+	if (array_id == 0) {
+		// Handle null array - return empty string
+		int empty_str_id = newstr(0, (uchar*)"");
+		PUSH_STACK_REFERENCEID(empty_str_id);
+		return;
+	}
+
+	if (separator_id == 0) {
+		// Handle null separator - use empty string as separator
+		separator_id = newstr(0, (uchar*)"");
+	}
+
+	uchar* array_header = heap_obj[array_id].pointer;
+	if (*array_header != ArrayHeader) {
+		DOOM("String.Join expects an array, got type %d", *array_header);
+	}
+
+	struct array_val* arr = (struct array_val*)array_header;
+	struct string_val* separator = (struct string_val*)heap_obj[separator_id].pointer;
+
+	if (arr->len == 0) {
+		// Return empty string for empty array
+		int empty_str_id = newstr(0, (uchar*)"");
+		PUSH_STACK_REFERENCEID(empty_str_id);
+		return;
+	}
+
+	// First pass: calculate total length
+	int total_length = 0;
+	int valid_items = 0;
+
+	for (int i = 0; i < arr->len; i++) {
+		if (arr->typeid == ReferenceID) {
+			int* elem_ptr = (int*)(&arr->payload + i * get_type_sz(ReferenceID));
+			int item_id = *elem_ptr;
+
+			if (item_id != 0) { // Skip null items
+				uchar* item_header = heap_obj[item_id].pointer;
+				if (*item_header == StringHeader) {
+					struct string_val* str = (struct string_val*)item_header;
+					total_length += str->str_len;
+					valid_items++;
+				}
+				else {
+					// For non-string objects, assume a placeholder size
+					total_length += 9; // "[Object]"
+					valid_items++;
+				}
+			}
+		}
+		else {
+			// For non-reference types, assume a default string representation
+			total_length += 10;
+			valid_items++;
+		}
+	}
+
+	// Add separators length
+	if (valid_items > 1) {
+		total_length += (valid_items - 1) * separator->str_len;
+	}
+
+	// Allocate buffer for the result
+	char result[256]; // Fixed buffer for simplicity, adjust as needed
+	if (total_length > 255) {
+		total_length = 255; // Limit to buffer size
+	}
+
+	// Second pass: build the string
+	int offset = 0;
+	int items_added = 0;
+
+	for (int i = 0; i < arr->len && offset < 255; i++) {
+		if (arr->typeid == ReferenceID) {
+			int* elem_ptr = (int*)(&arr->payload + i * get_type_sz(ReferenceID));
+			int item_id = *elem_ptr;
+
+			if (item_id != 0) { // Skip null items
+				uchar* item_header = heap_obj[item_id].pointer;
+
+				// Add separator if not the first item
+				if (items_added > 0 && separator->str_len > 0) {
+					int sep_len = separator->str_len;
+					if (offset + sep_len > 255) sep_len = 255 - offset;
+					memcpy(result + offset, &separator->payload, sep_len);
+					offset += sep_len;
+					if (offset >= 255) break;
+				}
+
+				if (*item_header == StringHeader) {
+					struct string_val* str = (struct string_val*)item_header;
+					int str_len = str->str_len;
+					if (offset + str_len > 255) str_len = 255 - offset;
+					memcpy(result + offset, &str->payload, str_len);
+					offset += str_len;
+					items_added++;
+				}
+				else {
+					// Handle non-string objects with a placeholder
+					const char* placeholder = "[Object]";
+					int plc_len = 8;
+					if (offset + plc_len > 255) plc_len = 255 - offset;
+					memcpy(result + offset, placeholder, plc_len);
+					offset += plc_len;
+					items_added++;
+				}
+			}
+		}
+		else {
+			// Add separator if not the first item
+			if (items_added > 0 && separator->str_len > 0) {
+				int sep_len = separator->str_len;
+				if (offset + sep_len > 255) sep_len = 255 - offset;
+				memcpy(result + offset, &separator->payload, sep_len);
+				offset += sep_len;
+				if (offset >= 255) break;
+			}
+
+			// Handle value types with a placeholder
+			const char* placeholder = "[Value]";
+			int plc_len = 7;
+			if (offset + plc_len > 255) plc_len = 255 - offset;
+			memcpy(result + offset, placeholder, plc_len);
+			offset += plc_len;
+			items_added++;
+		}
+	}
+
+	result[offset] = '\0';
+
+	// Create a new string and push it onto the stack
+	int result_str_id = newstr(offset, (uchar*)result);
+	PUSH_STACK_REFERENCEID(result_str_id);
+}
+
+// String.Join implementation for Object[]
+void builtin_String_Join_ObjectArray(uchar** reptr) {
+	// Pop the object array from the stack
+	int array_id = pop_reference(reptr);
+
+	// Pop the separator string from the stack
+	int separator_id = pop_reference(reptr);
+
+	if (array_id == 0) {
+		// Handle null array - return empty string
+		int empty_str_id = newstr(0, (uchar*)"");
+		PUSH_STACK_REFERENCEID(empty_str_id);
+		return;
+	}
+
+	if (separator_id == 0) {
+		// Handle null separator - use empty string as separator
+		separator_id = newstr(0, (uchar*)"");
+	}
+
+	uchar* array_header = heap_obj[array_id].pointer;
+	if (*array_header != ArrayHeader) {
+		DOOM("String.Join expects an array, got type %d", *array_header);
+	}
+
+	struct array_val* arr = (struct array_val*)array_header;
+	struct string_val* separator = (struct string_val*)heap_obj[separator_id].pointer;
+
+	if (arr->len == 0) {
+		// Return empty string for empty array
+		int empty_str_id = newstr(0, (uchar*)"");
+		PUSH_STACK_REFERENCEID(empty_str_id);
+		return;
+	}
+
+	// Use same logic as for IEnumerable but handle boxed objects
+	char result[256]; // Fixed buffer for simplicity
+	int offset = 0;
+	int items_added = 0;
+
+	for (int i = 0; i < arr->len && offset < 255; i++) {
+		uchar* elem_ptr;
+		int item_id = 0;
+
+		if (arr->typeid == ReferenceID) {
+			elem_ptr = &arr->payload + i * get_type_sz(ReferenceID);
+			item_id = *(int*)elem_ptr;
+		}
+		else if (arr->typeid == BoxedObject) {
+			elem_ptr = &arr->payload + i * get_type_sz(BoxedObject);
+			if (*elem_ptr == ReferenceID) {
+				item_id = *(int*)(elem_ptr + 1);
+			}
+		}
+
+		// Add separator if not the first item
+		if (items_added > 0 && separator->str_len > 0) {
+			int sep_len = separator->str_len;
+			if (offset + sep_len > 255) sep_len = 255 - offset;
+			memcpy(result + offset, &separator->payload, sep_len);
+			offset += sep_len;
+			if (offset >= 255) break;
+		}
+
+		if (item_id != 0) {
+			uchar* item_header = heap_obj[item_id].pointer;
+			if (*item_header == StringHeader) {
+				struct string_val* str = (struct string_val*)item_header;
+				int str_len = str->str_len;
+				if (offset + str_len > 255) str_len = 255 - offset;
+				memcpy(result + offset, &str->payload, str_len);
+				offset += str_len;
+			}
+			else {
+				// Handle non-string objects
+				const char* placeholder = "[Object]";
+				int plc_len = 8;
+				if (offset + plc_len > 255) plc_len = 255 - offset;
+				memcpy(result + offset, placeholder, plc_len);
+				offset += plc_len;
+			}
+		}
+		else {
+			// Handle null
+			const char* placeholder = "";
+			memcpy(result + offset, placeholder, 0);
+		}
+
+		items_added++;
+	}
+
+	result[offset] = '\0';
+
+	// Create a new string and push it onto the stack
+	int result_str_id = newstr(offset, (uchar*)result);
+	PUSH_STACK_REFERENCEID(result_str_id);
+}
+
+// Implementation of Enumerable.Select
+void builtin_Enumerable_Select(uchar** reptr) {
+	// Pop the selector delegate (Func<TSource, TResult>)
+	int selector_id = pop_reference(reptr);
+
+	// Pop the source enumerable (IEnumerable<TSource>)
+	int source_id = pop_reference(reptr);
+
+	if (source_id == 0 || selector_id == 0) {
+		// Return null for null source or selector
+		PUSH_STACK_REFERENCEID(0);
+		return;
+	}
+
+	uchar* source_header = heap_obj[source_id].pointer;
+	if (*source_header != ArrayHeader) {
+		DOOM("Enumerable.Select expects an array as source, got type %d", *source_header);
+	}
+
+	struct array_val* source_arr = (struct array_val*)source_header;
+	struct object_val* selector = (struct object_val*)heap_obj[selector_id].pointer;
+
+	// We treat the delegate as a Func<TSource, TResult> (0xf003)
+	if (selector->clsid != 0xf003) {
+		DOOM("Enumerable.Select expects a Func<T, TResult> delegate, got class ID %d", selector->clsid);
+	}
+
+	// Create a new array to hold the results
+	int result_arr_id = newarr(source_arr->len, ReferenceID);
+	struct array_val* result_arr = (struct array_val*)heap_obj[result_arr_id].pointer;
+
+	// Extract the delegate info
+	int delegate_this_id = *(int*)(&selector->payload + 1);
+	int delegate_method_id = *(int*)(&selector->payload + get_val_sz(ReferenceID) + 1);
+
+	// Process each element of the source array
+	for (int i = 0; i < source_arr->len; i++) {
+		// Save the current stack pointer
+		uchar* current_stack_ptr = *reptr;
+
+		// Push the delegate's target object (this pointer)
+		PUSH_STACK_REFERENCEID(delegate_this_id);
+
+		// Push the element from the source array as the argument to the delegate
+		if (source_arr->typeid == ReferenceID) {
+			int* elem_ptr = (int*)(&source_arr->payload + i * get_type_sz(ReferenceID));
+			int element_id = *elem_ptr;
+			PUSH_STACK_REFERENCEID(element_id);
+		}
+		else {
+			// For value types, push the value directly
+			**reptr = source_arr->typeid;
+			memcpy(*reptr + 1, &source_arr->payload + i * get_type_sz(source_arr->typeid), get_type_sz(source_arr->typeid));
+			*reptr += STACK_STRIDE;
+		}
+
+		// Invoke the delegate method
+		vm_push_stack(delegate_method_id, -1, reptr);
+
+		// Get the result (it's now on the stack)
+		POP;
+
+		// Store the result in our result array
+		if (**reptr == ReferenceID) {
+			int result_id = *(int*)(*reptr + 1);
+			*(int*)(&result_arr->payload + i * get_type_sz(ReferenceID)) = result_id;
+		}
+		else {
+			// For value types, we would need to box them
+			// For simplicity, store null for non-reference results
+			*(int*)(&result_arr->payload + i * get_type_sz(ReferenceID)) = 0;
+		}
+
+		// Restore the stack pointer for the next iteration
+		*reptr = current_stack_ptr;
+	}
+
+	// Push the result array onto the stack
+	PUSH_STACK_REFERENCEID(result_arr_id);
+}
 
 // Helper function to set up the built-in method table
 void setup_builtin_methods() {
@@ -4108,6 +4573,14 @@ void setup_builtin_methods() {
 	builtin_methods[bn++] = builtin_BitConverter_ToSingle; //122
 	builtin_methods[bn++] = builtin_BitConverter_ToUInt16; //123
 	builtin_methods[bn++] = builtin_BitConverter_ToUInt32; //124
+
+	// Add our new methods
+	builtin_methods[bn++] = builtin_String_Join_IEnumerable; //125
+	builtin_methods[bn++] = builtin_String_Join_ObjectArray; //126
+	builtin_methods[bn++] = builtin_Enumerable_Select; //127
+
+	// batch 2 builtins:
+	
 
 	INFO("System builtin methods n=%d", bn);
 	add_additional_builtins();

@@ -56,22 +56,22 @@ public class ModuleWeaver : BaseModuleWeaver
 
                 WriteWarning($">>> Processing {type.Name}.`");
 
-                foreach (var mm in type.Methods)
-                {
-                    if (mm.HasBody)
-                    {
-                        WriteWarning($"Processing string interpolation in `{type.Name}::{mm.Name}`");
-                        try
-                        {
-                            var stringInterpolationHandler = new StringInterpolationHandler(module, this); 
-                            stringInterpolationHandler.ProcessMethod(mm);
-                        }
-                        catch (Exception ex)
-                        {
-                            WriteWarning($"Failed to process string interpolation in {mm.FullName}: {ex.Message}");
-                        }
-                    }
-                }
+                // foreach (var mm in type.Methods)
+                // {
+                //     if (mm.HasBody)
+                //     {
+                //         WriteWarning($"Processing string interpolation in `{type.Name}::{mm.Name}`");
+                //         try
+                //         {
+                //             var stringInterpolationHandler = new StringInterpolationHandler(module, this); 
+                //             stringInterpolationHandler.ProcessMethod(mm);
+                //         }
+                //         catch (Exception ex)
+                //         {
+                //             WriteWarning($"Failed to process string interpolation in {mm.FullName}: {ex.Message}");
+                //         }
+                //     }
+                // }
 
                 var zk=type.CustomAttributes.First(attr => attr.AttributeType.Name == "LogicRunOnMCUAttribute");
                 var myinterval = 1000;
@@ -99,7 +99,7 @@ public class ModuleWeaver : BaseModuleWeaver
             }
         }  
          
-        WriteWarning($"RunOnMCU Processor v0.35 finished");
+        WriteWarning($"RunOnMCU Processor v0.35a finished");
     }
 
     public override IEnumerable<string> GetAssembliesForScanning()

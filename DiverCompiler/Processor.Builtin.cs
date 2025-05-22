@@ -141,6 +141,11 @@ internal partial class Processor
         "System.BitConverter.ToSingle(Byte[], Int32)",
         "System.BitConverter.ToUInt16(Byte[], Int32)",
         "System.BitConverter.ToUInt32(Byte[], Int32)",
+
+// put here.
+        "System.String.Join(String, IEnumerable`1)",
+        "System.String.Join(String, Object[])",
+        "System.Linq.Enumerable.Select(IEnumerable`1, Func`2)",
     ];
 
 }
