@@ -223,7 +223,7 @@ namespace DiverTest
 
     // Logic and MCU is strictly 1:1
     [UseCoralinkerMCU<CoralinkerCL1_0_12p>]
-    [LogicRunOnMCU(mcuUri = "serial://name=COM15", scanInterval = 50)]
+    [LogicRunOnMCU(mcuUri = "serial://vid=1A86&pid=55D3&serial=5A32001877", scanInterval = 50)]
     public class TestMCURoutine : LadderLogic<TestVehicle>
     {
         bool variableInitialized = false;

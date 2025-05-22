@@ -1,6 +1,7 @@
 ﻿using System.IO.Ports;
 using System.Management;
 using System.Runtime.InteropServices;
+using Microsoft.Win32;
 // For Windows WMI
 
 namespace DiverTest.DIVER.CoralinkerAdaption;
@@ -79,26 +80,62 @@ public class SerialPortResolver
         return (name, baudrate);
     }
 
-    static private string FindPortNameWindows(string vid, string pid, string serial)
+    private static string FindPortNameWindows(string vid, string pid, string serial)
     {
         try
         {
+            // Step 1: Find the device in Win32_PnPEntity
             var searcher = new ManagementObjectSearcher("SELECT * FROM Win32_PnPEntity WHERE ClassGuid='{4d36e978-e325-11ce-bfc1-08002be10318}'");
             foreach (ManagementObject obj in searcher.Get())
             {
                 string pnpDeviceId = obj["PNPDeviceID"]?.ToString() ?? "";
+                Console.WriteLine($"PNPDeviceID: {pnpDeviceId}");
+
                 if (pnpDeviceId.Contains($"VID_{vid.ToUpper()}") &&
                     pnpDeviceId.Contains($"PID_{pid.ToUpper()}") &&
                     pnpDeviceId.Contains(serial.ToUpper()))
                 {
+                    Console.WriteLine($"Found matching PNPDeviceID: {pnpDeviceId}");
+
+                    // Step 2: Construct the correct registry path
+                    // Remove the "USB\" prefix and keep the original backslash between VID_PID and serial
+                    string deviceInstanceId = pnpDeviceId.Replace(@"USB\", "");
+                    string registryPath = $@"SYSTEM\CurrentControlSet\Enum\USB\{deviceInstanceId}\Device Parameters";
+                    Console.WriteLine($"Registry Path: {registryPath}");
+
+                    // Step 3: Query the registry for the COM port
+                    using (RegistryKey key = Registry.LocalMachine.OpenSubKey(registryPath))
+                    {
+                        if (key != null)
+                        {
+                            string portName = key.GetValue("PortName")?.ToString();
+                            if (!string.IsNullOrEmpty(portName))
+                            {
+                                Console.WriteLine($"Found COM port: {portName}");
+                                return portName; // e.g., "COM3"
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine($"Registry key not found: {registryPath}");
+                        }
+                    }
+
+                    // Fallback: Try Win32_SerialPort if registry query fails
                     var portSearcher = new ManagementObjectSearcher("SELECT * FROM Win32_SerialPort");
                     foreach (ManagementObject portObj in portSearcher.Get())
                     {
-                        if (portObj["PNPDeviceID"].ToString() == pnpDeviceId)
-                            return portObj["DeviceID"].ToString();
+                        Console.WriteLine($"PortObj PNPDeviceID: {portObj["PNPDeviceID"]}");
+                        if (portObj["PNPDeviceID"]?.ToString() == pnpDeviceId)
+                        {
+                            string portName = portObj["DeviceID"]?.ToString();
+                            Console.WriteLine($"Found COM port via Win32_SerialPort: {portName}");
+                            return portName;
+                        }
                     }
                 }
             }
+
             throw new Exception($"Serial port with VID={vid}, PID={pid}, Serial={serial} not found.");
         }
         catch (Exception ex)
