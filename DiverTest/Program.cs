@@ -12,7 +12,7 @@ namespace DiverTest
     {
         static void Main(string[] args)
         {
-            new TestVehicle2(){write_to_mcu = 114514}.RunDIVER();
+            new TestVehicle{}.RunDIVER();
         }
     }
 }
