@@ -133,7 +133,66 @@ namespace DiverTest
             return speed;
         }
 
+        // RPDO1 TurnMotor
+        //  60600008HEX Mode
+        //  607A0020HEX TargetPos
+        //  60400010HEX ControlWord
+        public static byte[] GenerateRPDO1TurnMotor(
+            int controlWord = (int)ControlWord.Stop,
+            int position = 0,
+            int mode = (int)Mode.PositionMode
+        )
+        {
+            byte[] RPDO1 = new byte[7];
+            RPDO1[0] = (byte)mode;
+            RPDO1[1] = (byte)(position & 0xFF);
+            RPDO1[2] = (byte)((position >> 8) & 0xFF);
+            RPDO1[3] = (byte)((position >> 16) & 0xFF);
+            RPDO1[4] = (byte)((position >> 24) & 0xFF);
+            RPDO1[5] = (byte)((int)controlWord & 0xFF);
+            RPDO1[6] = (byte)(((int)controlWord >> 8) & 0xFF);
+            return RPDO1;
+        }
 
+        // RPDO2 TurnMotor
+        // 60810020
+        public static byte[] GenerateRPDO2TurnMotor(
+            int turn_speed
+        )
+        {
+            byte[] RPDO2 = new byte[4];
+            RPDO2[0] = (byte)(turn_speed & 0xFF);
+            RPDO2[1] = (byte)((turn_speed >> 8) & 0xFF);
+            RPDO2[2] = (byte)((turn_speed >> 16) & 0xFF);
+            RPDO2[3] = (byte)((turn_speed >> 24) & 0xFF);
+            return RPDO2;
+        }
+
+        // TPDO1 TurnMotor  
+        //60410010 HEX Status Word
+        //60630020 HEX Actual Position
+        //60610008 HEX Mode
+        public static int ParseTPDO1ActualPositionTurnMotor(byte[] TPDO1)
+        {
+            if (TPDO1 == null || TPDO1.Length != 7)
+            {
+                return 0;
+            }
+
+            int position = (int)(TPDO1[2] | (TPDO1[3] << 8) | (TPDO1[4] << 16) | (TPDO1[5] << 24));
+            return position;
+        }
+
+        public static int ParseTPDO1StatusWordTurnMotor(byte[] TPDO1)
+        {
+            if (TPDO1 == null || TPDO1.Length != 7)
+            {
+                return 0;
+            }
+
+            int statusWord = (int)(TPDO1[0] | (TPDO1[1] << 8));
+            return statusWord;
+        }
     }
 
     public class TestLinking: Coralinking
@@ -164,13 +223,13 @@ namespace DiverTest
 
     // Logic and MCU is strictly 1:1
     [UseCoralinkerMCU<CoralinkerCL1_0_12p>]
-    [LogicRunOnMCU(mcuUri = "serial://name=COM15", scanInterval = 300)]
+    [LogicRunOnMCU(mcuUri = "serial://name=COM15", scanInterval = 50)]
     public class TestMCURoutine : LadderLogic<TestVehicle>
     {
         bool variableInitialized = false;
 
-        int lastIteration = 0;
-        int communicationLostTime = 0;
+        int lastIteration;
+        int communicationLostTime;
         bool failProtectionFlag = false;
 
         int[] motorStage;
@@ -178,8 +237,13 @@ namespace DiverTest
         int[] motorID;
         int runMotorSpeed;
         int runMotorTargetSpeed;
+
         int turnMotorPosition;
         int turnMotorTargetPosition;
+        int turnMotorStatusWord;
+
+        bool turnMotorFindOriginCommandSent;
+        bool turnMotorOriginFound;
 
         bool[] inputs;
         bool[] outputs;
@@ -349,9 +413,26 @@ namespace DiverTest
 
             byte[] TPDO1RunMotor = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.TPDO1 + (int)motorID[0]);
             byte[] TPDO1TurnMotor = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.TPDO1 + (int)motorID[1]);
-            runMotorSpeed = Motor.ParseTPDO1SpeedRunMotor(TPDO1RunMotor);
+            if (TPDO1RunMotor != null)
+            {
+                runMotorSpeed = Motor.ParseTPDO1SpeedRunMotor(TPDO1RunMotor);
+            }
+            if (TPDO1TurnMotor != null)
+            {
+                turnMotorPosition = Motor.ParseTPDO1ActualPositionTurnMotor(TPDO1TurnMotor);
+                turnMotorStatusWord = Motor.ParseTPDO1StatusWordTurnMotor(TPDO1TurnMotor);
+            }
             Console.WriteLine("RunMotor Speed = " + runMotorSpeed.ToString());
-            //turnMotorPosition
+            Console.WriteLine("TurnMotorSW = " + turnMotorStatusWord.ToString());
+            Console.WriteLine("TurnMotorPos = " + turnMotorPosition.ToString());
+            turnMotorOriginFound = (turnMotorStatusWord & 0x8000) != 0;
+            if (turnMotorOriginFound)
+            {
+                Console.WriteLine("Found OK");
+            } else
+            {
+                Console.WriteLine("Not Found Yet");
+            }
 
             bool isAllMotorBooted = true;
             for (int i = 0; i < motorStage.Length; i++)
@@ -364,7 +445,34 @@ namespace DiverTest
                 runMotorTargetSpeed = 100000 * (iteration % 100);
                 byte[] RPDO1RunMotor = Motor.GenerateRPDO1RunMotor((int)Motor.ControlWord.Start3, runMotorTargetSpeed);
                 RunOnMCU.WriteEvent(
-                    RPDO1RunMotor, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[0]);
+                    RPDO1RunMotor, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[0]
+                );
+
+                if (!turnMotorOriginFound)
+                {
+                    int turnMotorControlWord = 0x0F;
+                    if (turnMotorFindOriginCommandSent)
+                    {
+                        turnMotorControlWord = 0x1F;
+                    }
+                    byte[] RPDO1TurnMotor = Motor.GenerateRPDO1TurnMotor(turnMotorControlWord, 0, (int)Motor.Mode.FindOrigin);
+                    RunOnMCU.WriteEvent(
+                        RPDO1TurnMotor, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[1]
+                    );
+                    turnMotorFindOriginCommandSent = true;
+                    Console.WriteLine("TurnMotor Send : " + turnMotorControlWord.ToString());
+                } else
+                {
+                    byte[] RPDO1TurnMotor = Motor.GenerateRPDO1TurnMotor(0x103F,
+                        4000 * (iteration % 100), (int)Motor.Mode.PositionMode);
+                    RunOnMCU.WriteEvent(
+                        RPDO1TurnMotor, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[1]
+                    );
+                    byte[] RPDO2TurnMotor = Motor.GenerateRPDO2TurnMotor(6000000);
+                    RunOnMCU.WriteEvent(
+                        RPDO2TurnMotor, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO2 + (int)motorID[1]
+                    );
+                }
                 Console.WriteLine("All Motor Booted");
             }
             else
