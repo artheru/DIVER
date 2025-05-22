@@ -20,13 +20,14 @@ namespace DiverTest
     {
         MotorID1 = 1,
         MotorID2 = 2,
-        MotorID3 = 3,
-        MotorID4 = 4
+        MotorNode2Turn = 3,
+        MotorNode2Run = 4
     }   
 
     public enum CANID : int
     {
         RPDO1 = 0x200,
+        RPDO2 = 0x300,
         TPDO1 = 0x180,
         HEARTBEAT = 0x700,
         NMT = 0x000
@@ -61,6 +62,7 @@ namespace DiverTest
     {
         public enum Mode : byte
         {
+            FindOrigin = 0x06,
             SpeedMode = 0x03,
             PositionMode = 0x01
         }
@@ -72,11 +74,11 @@ namespace DiverTest
             Start3 = 0x0F
         }
 
-        // RPDO1
+        // RPDO1 RunMotor
         // Byte 0 = mode， 60600008 
         // Byte 1 2 3 4 = speed (Little-endian), 60FF0020
         // Byte 5 6 = controlWord (Little-endian), 60400010
-        public static byte[] GenerateRPDO1(
+        public static byte[] GenerateRPDO1RunMotor(
             int controlWord = (int)ControlWord.Stop,
             int speed = 0
         )
@@ -98,26 +100,40 @@ namespace DiverTest
         // 60400010, ControlWord
         // Parse RPDO1 and return
 
-        public struct Feedback {
-            public bool valid;
-            public int controlWord;
-            public int speed;
-            public int statusWord;
-        }
-        public static Feedback ParseTPDO1(byte[] TPDO1)
+        //public struct Feedback {
+        //    public bool valid;
+        //    public int controlWord;
+        //    public int speed;
+        //    public int statusWord;
+        //}
+        //public static Feedback ParseTPDO1RunMotor(byte[] TPDO1)
+        //{
+        //    Feedback feedback = new Feedback();
+        //    feedback.valid = false;
+        //    if (TPDO1 == null || TPDO1.Length != 8)
+        //    {
+        //        return feedback;
+        //    }
+
+        //    feedback.controlWord = (int)(TPDO1[0] | (TPDO1[1] << 8));
+        //    feedback.speed = (int)(TPDO1[2] | (TPDO1[3] << 8) | (TPDO1[4] << 16) | (TPDO1[5] << 24));
+        //    feedback.statusWord = (int)(TPDO1[6] | (TPDO1[7] << 8));
+        //    feedback.valid = true;
+        //    return feedback;
+        //}
+
+        public static int ParseTPDO1SpeedRunMotor(byte[] TPDO1)
         {
-            Feedback feedback = new Feedback();
-            feedback.valid = false;
             if (TPDO1 == null || TPDO1.Length != 8)
             {
-                return feedback;
+                return 0;
             }
 
-            feedback.controlWord = (int)(TPDO1[0] | (TPDO1[1] << 8));
-            feedback.speed = (int)(TPDO1[2] | (TPDO1[3] << 8) | (TPDO1[4] << 16) | (TPDO1[5] << 24));
-            feedback.statusWord = (int)(TPDO1[6] | (TPDO1[7] << 8));
-            return feedback;
+            int speed = (int)(TPDO1[2] | (TPDO1[3] << 8) | (TPDO1[4] << 16) | (TPDO1[5] << 24));
+            return speed;
         }
+
+
     }
 
     public class TestLinking: Coralinking
@@ -148,7 +164,7 @@ namespace DiverTest
 
     // Logic and MCU is strictly 1:1
     [UseCoralinkerMCU<CoralinkerCL1_0_12p>]
-    [LogicRunOnMCU(mcuUri = "serial://name=COM5", scanInterval = 50)]
+    [LogicRunOnMCU(mcuUri = "serial://name=COM15", scanInterval = 300)]
     public class TestMCURoutine : LadderLogic<TestVehicle>
     {
         bool variableInitialized = false;
@@ -160,8 +176,13 @@ namespace DiverTest
         int[] motorStage;
         int[] motorRetryCount;
         int[] motorID;
-        Motor.Feedback[] motorFeedback;
-        int[] motorTargetSpeed;
+        int runMotorSpeed;
+        int runMotorTargetSpeed;
+        int turnMotorPosition;
+        int turnMotorTargetPosition;
+
+        bool[] inputs;
+        bool[] outputs;
 
         const int BootupRetryLimit = 20;
 
@@ -181,25 +202,20 @@ namespace DiverTest
 
             motorID = new int[2];
             motorID
-                [0] = (int)MotorID.MotorID3;
+                [0] = (int)MotorID.MotorNode2Run;
             motorID
-                [1] = (int)MotorID.MotorID4;
+                [1] = (int)MotorID.MotorNode2Turn;
 
-            motorFeedback = new Motor.Feedback[2];
-            motorFeedback[0].valid = false;
-            motorFeedback[1].valid = false;
-
-            motorTargetSpeed = new int[2];
-            motorTargetSpeed[0] = 0;
-            motorTargetSpeed[1] = 0;
+            inputs = new bool[16];
+            outputs = new bool[16];
         }
 
         public void FailSafe()
         {
             // Set motor to fail-safe mode (Stop Mode and Speed 0)
-            byte[] RPDO1FailSafe = Motor.GenerateRPDO1();
-            RunOnMCU.WriteEvent(RPDO1FailSafe, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[0]);
-            RunOnMCU.WriteEvent(RPDO1FailSafe, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[1]);
+            byte[] RPDO1FailSafeRunMotor = Motor.GenerateRPDO1RunMotor();
+            RunOnMCU.WriteEvent(RPDO1FailSafeRunMotor, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[0]);
+            //RunOnMCU.WriteEvent(RPDO1FailSafe, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[1]);
         }
 
         public bool MotorBootupHelper(int i)
@@ -307,49 +323,61 @@ namespace DiverTest
                 failProtectionFlag = false;
             }
 
+            byte[] snapshot = RunOnMCU.ReadSnapshot();
+            if (snapshot != null && snapshot.Length >= 8)
+            {
+                // snapshot is Length 8
+                // the first byte is input 0-7
+                // the second byte is input 8-15
+                for (int i = 0; i < 8; i++)
+                {
+                    inputs[i] = (snapshot[0] & (byte)(1 << i)) != 0;
+                    inputs[i + 8] = (snapshot[1] & (byte)(1 << i)) != 0;
+                }
+            }
+
+            for (int i = 0; i < 16; i++)
+            {
+                if (inputs[i])
+                {
+                    Console.WriteLine(i.ToString() + " ON");
+                } else
+                {
+                    Console.WriteLine(i.ToString() + " OFF");
+                }
+            }
+
+            byte[] TPDO1RunMotor = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.TPDO1 + (int)motorID[0]);
+            byte[] TPDO1TurnMotor = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.TPDO1 + (int)motorID[1]);
+            runMotorSpeed = Motor.ParseTPDO1SpeedRunMotor(TPDO1RunMotor);
+            Console.WriteLine("RunMotor Speed = " + runMotorSpeed.ToString());
+            //turnMotorPosition
+
             bool isAllMotorBooted = true;
             for (int i = 0; i < motorStage.Length; i++)
             {
                 isAllMotorBooted &= MotorBootupHelper(i);
-
-                byte[] TPDO1 = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.TPDO1 + (int)motorID[i]);
-                Motor.Feedback fb = Motor.ParseTPDO1(TPDO1);
-                if (fb.valid)
-                {
-                    motorFeedback[0] = fb;
-                    Console.WriteLine("Actual Speed = " + fb.speed);
-                }
             }
 
             if (isAllMotorBooted)
             {
-                motorTargetSpeed[0] = 0;
-                motorTargetSpeed[1] = 100000 * (iteration % 100) ;
-                for (int i = 0; i < motorStage.Length; i++)
-                {
-                    byte[] TPDO1 = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.TPDO1 + (int)motorID[i]);
-                    Motor.Feedback fb = Motor.ParseTPDO1(TPDO1);
-                    if (fb.valid)
-                    {
-                        motorFeedback[0] = fb;
-                    }
-
-                    byte[] RPDO1 = Motor.GenerateRPDO1((int)Motor.ControlWord.Start3, motorTargetSpeed[i]);
-                    RunOnMCU.WriteEvent(
-                        RPDO1, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[i]);
-                }
+                runMotorTargetSpeed = 100000 * (iteration % 100);
+                byte[] RPDO1RunMotor = Motor.GenerateRPDO1RunMotor((int)Motor.ControlWord.Start3, runMotorTargetSpeed);
+                RunOnMCU.WriteEvent(
+                    RPDO1RunMotor, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[0]);
+                Console.WriteLine("All Motor Booted");
             }
             else
             {
-                Console.WriteLine("Still Waiting");
-                motorTargetSpeed[0] = 0;
-                motorTargetSpeed[1] = 0;
-                // Set motor to wait mode
-                byte[] RPDO1Wait = Motor.GenerateRPDO1((int)Motor.ControlWord.Start);
-                RunOnMCU.WriteEvent(RPDO1Wait, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[0]);
-                RunOnMCU.WriteEvent(RPDO1Wait, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[1]);
+                runMotorTargetSpeed = 0;
+                byte[] RPDO1RunMotor = Motor.GenerateRPDO1RunMotor((int)0x06, runMotorTargetSpeed);
+                RunOnMCU.WriteEvent(
+                    RPDO1RunMotor, (int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.RPDO1 + (int)motorID[0]);
+                
+                Console.WriteLine("Not All Motor Booted");
             }
 
+           
         }
     }
 }

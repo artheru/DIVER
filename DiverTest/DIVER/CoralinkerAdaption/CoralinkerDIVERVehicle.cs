@@ -90,7 +90,10 @@ internal class CoralinkerLowerNodeHandle
                 if (memExchangePackage != null)
                 {
                     mcuState = StateEnum.Running;
-                    _root.NotifyLowerData(_uri, memExchangePackage.MemoryExchangeData);
+                    if (memExchangePackage.MemoryExchangeData.Length > 0)
+                    {
+                        _root.NotifyLowerData(_uri, memExchangePackage.MemoryExchangeData);
+                    }
                     _root.NotifyLog(_uri, Encoding.UTF8.GetString(memExchangePackage.LogData));
                 }
                 break;
