@@ -200,31 +200,67 @@ namespace DiverTest
         public override void Define()
         {
             Console.WriteLine("Coralinker Definition");
-            var node1 = Root.Downlink(typeof(TestMCURoutine));
-            var p1= node1.ResolvedPin("battery-12V","input-1"); // denote a pin is forcefully placed.
-            var p2 = node1.UnresolvedPin("gnd");
-            node1.RequireConnect(p1, p2); // todo vargs
-            // .. multi
+            var node1 = Root.Downlink(typeof(TestMCURoutineNode1));
+            //var p1= node1.ResolvedPin("battery-12V","input-1"); // denote a pin is forcefully placed.
+            //var p2 = node1.UnresolvedPin("gnd");
+            //node1.RequireConnect(p1, p2); // todo vargs
+            //// .. multi
 
            
-            //var node2 = node1.Downlink(typeof(TestMCURoutineNode2));
+            var node2 = node1.Downlink(typeof(TestMCURoutineNode2));
             //.. list all connection here.
         }
     }
 
+    // Front node1
+    // Rear node2
     [DefineCoralinking<TestLinking>]
     public class TestVehicle : CoralinkerDIVERVehicle
     {
-        [AsLowerIO] public int motor_actual_velocity_A;
-        [AsLowerIO] public int motor_actual_velocity_B;
-        [AsUpperIO] public int motor_target_speed_A;
-        [AsUpperIO] public int motor_target_speed_B;
+        [AsLowerIO] public int turn_motor_actual_position_front;
+        [AsLowerIO] public int turn_motor_actual_position_rear;
+        [AsLowerIO] public int run_motor_actual_velocity_front;
+        [AsLowerIO] public int run_motor_actual_velocity_rear;
+
+        [AsUpperIO] public int turn_motor_target_position_front;
+        [AsUpperIO] public int turn_motor_target_position_rear;
+        [AsUpperIO] public int run_motor_target_velocity_front;
+        [AsUpperIO] public int run_motor_target_velocity_rear;
+
+        [AsLowerIO] public int front_node_emegency_stop;
+        [AsLowerIO] public int front_node_bump_edge_stop;
+        [AsLowerIO] public int rear_node_emegency_stop;
+        [AsLowerIO] public int rear_node_bump_edge_stop;
+
+        [AsUpperIO] public int global_start_signal;
+        [AsUpperIO] public int global_stop_signal;
+        [AsUpperIO] public int global_reset_signal;
+
+        [AsUpperIO] public int front_obstacle_area_selection;
+        [AsUpperIO] public int rear_obstacle_area_selection;
+        [AsLowerIO] public int front_obstacle_triggered_near;
+        [AsLowerIO] public int front_obstacle_triggered_middle;
+        [AsLowerIO] public int front_obstacle_triggered_far;
+        [AsLowerIO] public int rear_obstacle_triggered_near;
+        [AsLowerIO] public int rear_obstacle_triggered_middle;
+        [AsLowerIO] public int rear_obstacle_triggered_far;
     }
 
     // Logic and MCU is strictly 1:1
     [UseCoralinkerMCU<CoralinkerCL1_0_12p>]
-    [LogicRunOnMCU(mcuUri = "serial://vid=1A86&pid=55D3&serial=5A32001877", scanInterval = 50)]
-    public class TestMCURoutine : LadderLogic<TestVehicle>
+    [LogicRunOnMCU(mcuUri = "serial://vid=1A86&pid=55D3&serial=5A32001879&id=node1", scanInterval = 50)]
+    public class TestMCURoutineNode1 : LadderLogic<TestVehicle>
+    {
+        public override void Operation(int iteration)
+        {
+            Console.WriteLine("Log from Node1" + iteration.ToString());
+        }
+    }
+
+    // Logic and MCU is strictly 1:1
+    [UseCoralinkerMCU<CoralinkerCL1_0_12p>]
+    [LogicRunOnMCU(mcuUri = "serial://vid=1A86&pid=55D3&serial=5A30034527&id=node2", scanInterval = 50)]
+    public class TestMCURoutineNode2 : LadderLogic<TestVehicle>
     {
         bool variableInitialized = false;
 
@@ -387,6 +423,7 @@ namespace DiverTest
                 failProtectionFlag = false;
             }
 
+            // Update Inputs from Snapshot
             byte[] snapshot = RunOnMCU.ReadSnapshot();
             if (snapshot != null && snapshot.Length >= 8)
             {
@@ -409,6 +446,23 @@ namespace DiverTest
                 {
                     Console.WriteLine(i.ToString() + " OFF");
                 }
+            }
+
+            // Test Safety
+            // B.3 = BUMP EDGE, NO, 1 active
+            bool raw_bump_signal = inputs[7];
+            // A.3 = EMG STOP, NC, 0 active
+            bool raw_emg_signal = !inputs[3];
+
+            if (raw_bump_signal)
+            {
+                Console.WriteLine("BUMP!");
+                cart.rear_node_bump_edge_stop = 1;
+            }
+            if (raw_emg_signal)
+            {
+                Console.WriteLine("EMG!");
+                cart.rear_node_emegency_stop = 1;
             }
 
             byte[] TPDO1RunMotor = RunOnMCU.ReadEvent((int)CoralinkerDIVERVehicle.PortIndex.CAN1, (int)CANID.TPDO1 + (int)motorID[0]);
@@ -440,7 +494,7 @@ namespace DiverTest
                 isAllMotorBooted &= MotorBootupHelper(i);
             }
 
-            if (isAllMotorBooted)
+            if (isAllMotorBooted && cart.rear_node_emegency_stop == 0 && cart.rear_node_bump_edge_stop == 0)
             {
                 runMotorTargetSpeed = 100000 * (iteration % 100);
                 byte[] RPDO1RunMotor = Motor.GenerateRPDO1RunMotor((int)Motor.ControlWord.Start3, runMotorTargetSpeed);
@@ -485,7 +539,24 @@ namespace DiverTest
                 Console.WriteLine("Not All Motor Booted");
             }
 
-           
+            // Update Snapshot(Output) from output
+            if (snapshot != null && snapshot.Length >= 8)
+            {
+                snapshot[4] = 0;
+                snapshot[5] = 0;
+                for (int i = 0; i < 8; i++)
+                {
+                    if (outputs[i])
+                    {
+                        snapshot[4] |= (byte)(1 << i);
+                    }
+                    if (outputs[i + 8])
+                    {
+                        snapshot[5] |= (byte)(1 << i);
+                    }
+                }
+                RunOnMCU.WriteSnapshot(snapshot);
+            }
         }
     }
 }

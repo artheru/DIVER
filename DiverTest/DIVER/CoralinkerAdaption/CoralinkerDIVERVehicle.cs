@@ -32,7 +32,7 @@ internal class CoralinkerLowerNodeHandle
     private const int _MaxWaitCount = 5;
     private const int _WaitInterval = 100;
 
-    private readonly string _uri;
+    public readonly string uri;
     private readonly byte[] _asm;
     private readonly DIVERVehicle _root;
 
@@ -45,16 +45,16 @@ internal class CoralinkerLowerNodeHandle
     public volatile Configuration newConfiguration = null;
 
     // constructor
-    public CoralinkerLowerNodeHandle(string uri, byte[] asm, DIVERVehicle root)
+    public CoralinkerLowerNodeHandle(string uri_, byte[] asm, DIVERVehicle root)
     {
-        _uri = uri;
+        uri = uri_;
         _asm = asm;
         _root = root;
     }
 
     public override string ToString()
     {
-        return $"[<CoralinkerLowerNodeHandle> uri = {_uri}]";
+        return $"[<CoralinkerLowerNodeHandle> uri = {uri}]";
     }
 
     public void SendUpperData(byte[] data)
@@ -92,9 +92,9 @@ internal class CoralinkerLowerNodeHandle
                     mcuState = StateEnum.Running;
                     if (memExchangePackage.MemoryExchangeData.Length > 0)
                     {
-                        _root.NotifyLowerData(_uri, memExchangePackage.MemoryExchangeData);
+                        _root.NotifyLowerData(uri, memExchangePackage.MemoryExchangeData);
                     }
-                    _root.NotifyLog(_uri, Encoding.UTF8.GetString(memExchangePackage.LogData));
+                    _root.NotifyLog(uri, Encoding.UTF8.GetString(memExchangePackage.LogData));
                 }
                 break;
             case FunctionCodeEnum.ConfigurationAck:
@@ -164,10 +164,10 @@ internal class CoralinkerLowerNodeHandle
     public bool OpenNode()
     {
         // Print out the node name and type
-        Console.WriteLine("Coralinker: OpenNode: " + _uri);
+        Console.WriteLine("Coralinker: OpenNode: " + uri);
 
         mcuState = StateEnum.Uninitialized;
-        _serial = new DIVERSerialListener(_uri, OnMCUPackage);
+        _serial = new DIVERSerialListener(uri, OnMCUPackage);
 
         if (!_serial.isOpen)
         {
@@ -203,7 +203,7 @@ internal class CoralinkerLowerNodeHandle
             return false;
         }
 
-        Console.WriteLine("Coralinker: ReadConfiguration: " + _uri);
+        Console.WriteLine("Coralinker: ReadConfiguration: " + uri);
 
         _serial.SendMessage(DIVERSerialPackage.CreateConfigurationReadRequestPackage(_DefaultSlaveAddress).Serialize());
         return WaitConditionOfMCU(
@@ -237,7 +237,7 @@ internal class CoralinkerLowerNodeHandle
             return false;
         }
 
-        Console.WriteLine("Coralinker: ModifyRelays: " + _uri);
+        Console.WriteLine("Coralinker: ModifyRelays: " + uri);
         _serial.SendMessage(DIVERSerialPackage.CreateConfigurationWritePackage(
             _DefaultSlaveAddress, newConfiguration, ConfigurationActionEnum.WriteRelays).Serialize());
         Thread.Sleep(_WaitInterval * 10);
@@ -275,7 +275,7 @@ internal class CoralinkerLowerNodeHandle
             return false;
         }
 
-        Console.WriteLine("Coralinker: WritePortsConfiguration: " + _uri);
+        Console.WriteLine("Coralinker: WritePortsConfiguration: " + uri);
 
         _serial.SendMessage(DIVERSerialPackage.CreateConfigurationWritePackage(
             _DefaultSlaveAddress, mcuConfiguration, ConfigurationActionEnum.WritePorts).Serialize());
@@ -320,7 +320,7 @@ internal class CoralinkerLowerNodeHandle
         }
         var codeList = SplitArrayIntoChunks(_asm, _CodeChunkSplitSize);
 
-        Console.WriteLine($"Coralinker: SetAssembly: {codeList.Count} chunks, {_asm.Length} bytes, to {_uri}");
+        Console.WriteLine($"Coralinker: SetAssembly: {codeList.Count} chunks, {_asm.Length} bytes, to {uri}");
         for (int i = 0; i < codeList.Count; i++)
         {
             var doSendCodeSplitPack = () => {
@@ -379,7 +379,7 @@ internal class CoralinkerLowerNodeHandle
             return false;
         }
 
-        Console.WriteLine("Coralinker: Start: " + _uri);
+        Console.WriteLine("Coralinker: Start: " + uri);
         return WaitConditionOfMCU(
             () => { return mcuState == StateEnum.Running; },
             () => { return false; },
@@ -453,35 +453,37 @@ public abstract class CoralinkerDIVERVehicle : DIVERVehicle
             return;
         }
 
-        var existingWiring = GatherWirings();
 
-        bool topologyDefined = false;
-        foreach (var attr in GetType().GetCustomAttributes())
-        {
-            if (!attr.GetType().IsSubclassOfRawGeneric(typeof(DefineCoralinkingAttribute<>), out var gType)) continue;
-            topologyDefined = true;
+        // TODO
+        //var existingWiring = GatherWirings();
 
-            // gType is wiring requirements.
-            var linker_type = gType.GenericTypeArguments[0];
-            var clinking = Activator.CreateInstance(linker_type) as Coralinking;
-            clinking.Define();
-            var req = clinking.GatherRequirements();
+        //bool topologyDefined = false;
+        //foreach (var attr in GetType().GetCustomAttributes())
+        //{
+        //    if (!attr.GetType().IsSubclassOfRawGeneric(typeof(DefineCoralinkingAttribute<>), out var gType)) continue;
+        //    topologyDefined = true;
 
-            // check topology and SKU is compatible to requirements, then validate if update is required.
-            // if bad topology/SKU, throw. don't run.
-            if (req(existingWiring)) break; // wiring is good, OK to run
+        //    // gType is wiring requirements.
+        //    var linker_type = gType.GenericTypeArguments[0];
+        //    var clinking = Activator.CreateInstance(linker_type) as Coralinking;
+        //    clinking.Define();
+        //    var req = clinking.GatherRequirements();
 
-            var solutions = clinking.Solve();
-            // break.
-            // update comparators
-            // update connections.
+        //    // check topology and SKU is compatible to requirements, then validate if update is required.
+        //    // if bad topology/SKU, throw. don't run.
+        //    if (req(existingWiring)) break; // wiring is good, OK to run
 
-            Console.WriteLine($"layout updated for `{GetType().Name}` according to `{clinking.GetType().Name}`");
-        }
+        //    var solutions = clinking.Solve();
+        //    // break.
+        //    // update comparators
+        //    // update connections.
 
-        if (!topologyDefined)
-            throw new Exception(
-                $"No node topology for `{GetType().Name}`, use DefineCoralinking<T> to define a linking requreiment");
+        //    Console.WriteLine($"layout updated for `{GetType().Name}` according to `{clinking.GetType().Name}`");
+        //}
+
+        //if (!topologyDefined)
+        //    throw new Exception(
+        //        $"No node topology for `{GetType().Name}`, use DefineCoralinking<T> to define a linking requreiment");
 
         //// TODO: This should be included by SKU Def
         //// for each node set configuration
@@ -498,7 +500,7 @@ public abstract class CoralinkerDIVERVehicle : DIVERVehicle
             };
         }
 
-        //// Disconnect all connections
+        // Disconnect all connections
         //foreach (var nodeHandle in _nodeMap)
         //{
         //    nodeHandle.Value.newConfiguration = nodeHandle.Value.mcuConfiguration;
@@ -512,39 +514,74 @@ public abstract class CoralinkerDIVERVehicle : DIVERVehicle
         //}
 
         //Thread.Sleep(1000);
+        // Connect DPDT
+/*
+V24 
+-ES-
+N2P4 - N2P11 = N1P3 - N1P4
+-ES-
+N1P5 - N1P2 = N2P10 - N2P6 - N2INPUTA.3
+|
+N1P6 - N1INPUTA.3
 
-        //// Connect DPDT
+NODE1: P3-P4 P2-P5-P6 = PS3PS4 PS5PS6PS7
+NODE2: P4-P11 P6-P10 = PS10PS11 PS6PS5
+
+NODE1: 
+	SORT P2 TO PS7. Solution = 2->9->7 RELAY INDEX = 5, 14
+	CONNECTION = 3-4, 5-6, 6-7, INDEX = 7, 0, 3
+NODE2:
+	SORT R1 R7 R20; R6
+	CONNECTION = 10-11, 5-6, INDEX = 5, 0
+*/
         //foreach (var nodeHandle in _nodeMap)
         //{
-        //    for (int i = 0; i < 25; i++)
+        //    if (nodeHandle.Value.uri.Contains("id=node1"))
         //    {
-        //        nodeHandle.Value.newConfiguration.Relays[i].IsOn = ConfigurationRelayIsOnEnum.Off;
+        //        for (int i = 0; i < 25; i++)
+        //        {
+        //            nodeHandle.Value.newConfiguration.Relays[i].IsOn = ConfigurationRelayIsOnEnum.Off;
+        //        }
+        //        nodeHandle.Value.newConfiguration.Relays[5].IsOn = ConfigurationRelayIsOnEnum.On;
+        //        nodeHandle.Value.newConfiguration.Relays[14].IsOn = ConfigurationRelayIsOnEnum.On;
+        //        nodeHandle.Value.ModifyRelays();
         //    }
 
-        //    nodeHandle.Value.newConfiguration.Relays[8].IsOn = ConfigurationRelayIsOnEnum.On;
-        //    nodeHandle.Value.ModifyRelays();
-        //}
-
-        //// Connect DPDT
-        //foreach (var nodeHandle in _nodeMap)
-        //{
-        //    for (int i = 0; i < 25; i++)
+        //    if (nodeHandle.Value.uri.Contains("id=node2"))
         //    {
-        //        nodeHandle.Value.newConfiguration.Relays[i].IsOn = ConfigurationRelayIsOnEnum.Off;
+        //        for (int i = 0; i < 25; i++)
+        //        {
+        //            nodeHandle.Value.newConfiguration.Relays[i].IsOn = ConfigurationRelayIsOnEnum.Off;
+        //        }
+        //        nodeHandle.Value.newConfiguration.Relays[1].IsOn = ConfigurationRelayIsOnEnum.On;
+        //        nodeHandle.Value.newConfiguration.Relays[7].IsOn = ConfigurationRelayIsOnEnum.On;
+        //        nodeHandle.Value.newConfiguration.Relays[20].IsOn = ConfigurationRelayIsOnEnum.On;
+        //        nodeHandle.Value.newConfiguration.Relays[6].IsOn = ConfigurationRelayIsOnEnum.On;
+        //        nodeHandle.Value.ModifyRelays();
         //    }
 
-        //    nodeHandle.Value.newConfiguration.Relays[8].IsOn = ConfigurationRelayIsOnEnum.On;
-        //    nodeHandle.Value.ModifyRelays();
         //}
-
         //Thread.Sleep(1000);
 
         //// Connect SPST
         //foreach (var nodeHandle in _nodeMap)
         //{
-        //    nodeHandle.Value.newConfiguration.Relays[25 + 1].IsOn = ConfigurationRelayIsOnEnum.On;
-        //    nodeHandle.Value.ModifyRelays();
+        //    if (nodeHandle.Value.uri.Contains("id=node1"))
+        //    {
+        //        nodeHandle.Value.newConfiguration.Relays[25 + 7].IsOn = ConfigurationRelayIsOnEnum.On;
+        //        nodeHandle.Value.newConfiguration.Relays[25 + 0].IsOn = ConfigurationRelayIsOnEnum.On;
+        //        nodeHandle.Value.newConfiguration.Relays[25 + 3].IsOn = ConfigurationRelayIsOnEnum.On;
+        //        nodeHandle.Value.ModifyRelays();
+        //    }
+
+        //    if (nodeHandle.Value.uri.Contains("id=node2"))
+        //    {
+        //        nodeHandle.Value.newConfiguration.Relays[25 + 5].IsOn = ConfigurationRelayIsOnEnum.On;
+        //        nodeHandle.Value.newConfiguration.Relays[25 + 0].IsOn = ConfigurationRelayIsOnEnum.On;
+        //        nodeHandle.Value.ModifyRelays();
+        //    }
         //}
+        //Thread.Sleep(1000);
 
         // Write Ports to nodes
         foreach (var nodeHandle in _nodeMap)
