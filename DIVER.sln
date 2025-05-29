@@ -2,8 +2,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.33627.172
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Build", "Build", "{43E26D22-6B5F-4443-B9E2-9B6ACDDC7D59}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "000 - Build", "000 - Build", "{43E26D22-6B5F-4443-B9E2-9B6ACDDC7D59}"
 	ProjectSection(SolutionItems) = preProject
+		Build.md = Build.md
 		Directory.Build.props = Directory.Build.props
 		README.md = README.md
 	EndProjectSection
@@ -15,6 +16,10 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "MCURuntime", "MCURuntime\MCURuntime.vcxproj", "{809EC741-D1A8-4522-8DE4-A9D1F4687DD1}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DiverTest", "DiverTest\DiverTest.csproj", "{7A78D970-5AD3-44C6-A04B-21EF79CB1BEF}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "3rd-party", "3rd-party", "{FFF7E424-7982-4A87-92A6-351CF85A459F}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "CoralinkerDIVER", "3rd\Coralinker\CoralinkerDIVER.csproj", "{11D9C96B-EDD9-43AC-A090-C9F0A93F0F45}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -57,6 +62,18 @@ Global
 		{7A78D970-5AD3-44C6-A04B-21EF79CB1BEF}.Release|x64.Build.0 = Release|Any CPU
 		{7A78D970-5AD3-44C6-A04B-21EF79CB1BEF}.Release|x86.ActiveCfg = Release|Any CPU
 		{7A78D970-5AD3-44C6-A04B-21EF79CB1BEF}.Release|x86.Build.0 = Release|Any CPU
+		{11D9C96B-EDD9-43AC-A090-C9F0A93F0F45}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{11D9C96B-EDD9-43AC-A090-C9F0A93F0F45}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{11D9C96B-EDD9-43AC-A090-C9F0A93F0F45}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{11D9C96B-EDD9-43AC-A090-C9F0A93F0F45}.Debug|x64.Build.0 = Debug|Any CPU
+		{11D9C96B-EDD9-43AC-A090-C9F0A93F0F45}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{11D9C96B-EDD9-43AC-A090-C9F0A93F0F45}.Debug|x86.Build.0 = Debug|Any CPU
+		{11D9C96B-EDD9-43AC-A090-C9F0A93F0F45}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{11D9C96B-EDD9-43AC-A090-C9F0A93F0F45}.Release|Any CPU.Build.0 = Release|Any CPU
+		{11D9C96B-EDD9-43AC-A090-C9F0A93F0F45}.Release|x64.ActiveCfg = Release|Any CPU
+		{11D9C96B-EDD9-43AC-A090-C9F0A93F0F45}.Release|x64.Build.0 = Release|Any CPU
+		{11D9C96B-EDD9-43AC-A090-C9F0A93F0F45}.Release|x86.ActiveCfg = Release|Any CPU
+		{11D9C96B-EDD9-43AC-A090-C9F0A93F0F45}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -65,6 +82,7 @@ Global
 		{F9E5081B-0F60-4C0C-9794-B2EB9E6947E1} = {B2A6C4D3-DE17-46F2-85E6-9590C93C802D}
 		{809EC741-D1A8-4522-8DE4-A9D1F4687DD1} = {B2A6C4D3-DE17-46F2-85E6-9590C93C802D}
 		{7A78D970-5AD3-44C6-A04B-21EF79CB1BEF} = {B2A6C4D3-DE17-46F2-85E6-9590C93C802D}
+		{11D9C96B-EDD9-43AC-A090-C9F0A93F0F45} = {FFF7E424-7982-4A87-92A6-351CF85A459F}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {9E25F555-8231-4297-9ECA-E68B766FE2B4}

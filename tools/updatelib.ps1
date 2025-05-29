@@ -1,0 +1,2 @@
+Invoke-WebRequest -Uri "https://mdcs.lessokaji.com/dependencies/Medulla/RefCartActivator.dll" -OutFile "deps/RefCartActivator.dll"
+Invoke-WebRequest -Uri "https://mdcs.lessokaji.com/dependencies/Medulla/RefMedullaCore.dll" -OutFile "deps/RefMedullaCore.dll"

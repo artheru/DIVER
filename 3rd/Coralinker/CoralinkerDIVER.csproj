@@ -1,0 +1,52 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net8.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>disable</Nullable>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	</PropertyGroup>
+
+	<ItemGroup>
+	  <Compile Remove="tmp_ref\**" />
+	  <EmbeddedResource Remove="tmp_ref\**" />
+	  <None Remove="tmp_ref\**" />
+	</ItemGroup>
+ 
+	<ItemGroup> 
+	  <None Remove="DiverCompiler.exe" />
+	  <None Remove="ExtraMethods.dll" />
+	  <None Remove="extra_methods.txt" />
+	  <None Remove="mcu_runtime.obj" />
+	  <None Remove="vc140.pdb" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Reference Include="CartActivator">
+			<HintPath>$(SolutionDir)\tools\CartActivator.dll</HintPath>
+		</Reference>
+		<Reference Include="MedullaCore">
+			<HintPath>$(SolutionDir)\tools\MedullaCore.dll</HintPath>
+		</Reference>
+
+		<PackageReference Include="Fody" Version="6.6.4">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+		<PackageReference Include="System.IO.Ports" Version="9.0.3" />
+		<PackageReference Include="System.Management" Version="9.0.4" />
+		<WeaverFiles Include="DiverCompiler.exe" />
+	</ItemGroup>
+
+	<UsingTask TaskName="CppCompile" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.CppTasks.Common.dll" />
+
+
+	<Target Name="PreBuild" BeforeTargets="PreBuildEvent">
+	  <Exec Command="xcopy $(SolutionDir)DiverCompiler\bin\$(Configuration)\DiverCompiler.exe . /y /f /i" />
+	  <Exec Command="DiverCompiler.exe -g" />
+	  <Exec Command="build_cpp.bat" EnvironmentVariables="OutputPath=$(OutputPath);DiverMCURuntimeSource=$(SolutionDir)MCURuntime\" />
+	</Target>
+
+</Project>
