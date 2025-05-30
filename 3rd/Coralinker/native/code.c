@@ -9,7 +9,7 @@
 
 // function begins
 
-i4 cfun12(u1* args){
+i4 cfun0(u1* args){
 //args:
 int argN=0;
  ptr arg0 = *(ptr*)&args[(argN++)*4];
@@ -73,7 +73,7 @@ IL_0035: stack_0_i4=(var2); //IL_0035: ldloc.2: s_0, pop0, push1
 IL_0036: return stack_0_i4; //IL_0036: ret: s_1, pop1, push0
 }
 
-i4 cfun13(u1* args){
+i4 cfun1(u1* args){
 //args:
 int argN=0;
  ptr arg0 = *(ptr*)&args[(argN++)*4];
@@ -137,7 +137,7 @@ IL_0035: stack_0_i4=(var2); //IL_0035: ldloc.2: s_0, pop0, push1
 IL_0036: return stack_0_i4; //IL_0036: ret: s_1, pop1, push0
 }
 
-i4 cfun14(u1* args){
+i4 cfun2(u1* args){
 //args:
 int argN=0;
  ptr arg0 = *(ptr*)&args[(argN++)*4];
