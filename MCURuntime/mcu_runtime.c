@@ -4525,11 +4525,11 @@ void setup_builtin_methods() {
 	builtin_methods[bn++] = builtin_RuntimeHelpers_InitializeArray; //77
 
 	builtin_methods[bn++] = builtin_Boolean_ToString; //78
-	builtin_methods[bn++] = builtin_Int32_ToString; //79
-	builtin_methods[bn++] = builtin_Int16_ToString; //80
-	builtin_methods[bn++] = builtin_Single_ToString; //81
-	builtin_methods[bn++] = builtin_Byte_ToString; //82
-	builtin_methods[bn++] = builtin_Char_ToString; //83
+	builtin_methods[bn++] = builtin_Byte_ToString; //79
+	builtin_methods[bn++] = builtin_Char_ToString; //80
+	builtin_methods[bn++] = builtin_Int16_ToString; //81
+	builtin_methods[bn++] = builtin_Int32_ToString; //82
+	builtin_methods[bn++] = builtin_Single_ToString; //83
 	builtin_methods[bn++] = builtin_UInt16_ToString; //84
 	builtin_methods[bn++] = builtin_UInt32_ToString; //85
 

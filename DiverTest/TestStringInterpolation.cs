@@ -27,7 +27,7 @@ public class TestStringInterpolation : LadderLogic<TestVehicle2>
     }
      
     private ee vvv; 
-    // This method will be processed by our StringInterpolationHandler   
+    // This method will be processed by our StringInterpolationHandler    
     // String interpolation ($"...") will be converted to String.Format calls
     public override void Operation(int i)
     {
@@ -39,7 +39,7 @@ public class TestStringInterpolation : LadderLogic<TestVehicle2>
         vvv = (ee)(i % 3);
         stest[i % 10] = (byte)(i*2);
 
-        var vstr = string.Join(" ", stest.Select(p => $"{p:X2}"));
+        var vstr = string.Join(" ", stest.Select(p => $"{p:X2}")) + 1032.ToString();
 
         Console.WriteLine($"p:{(int)vvv}, stest=[{vstr}]");
     }
