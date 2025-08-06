@@ -3572,7 +3572,7 @@ void builtin_RunOnMCU_WriteStream(uchar** reptr) {
 	writing_buf->offset += arr->len;
 	leave_critical();
 
-	memcpy(&writing_buf->payload, &arr->payload, arr->len);
+	memcpy(&writing_buf->payload + n_offset, &arr->payload, arr->len);
 
 	write_stream(port, (&writing_buf->payload) + n_offset, arr->len);
 }
@@ -3634,7 +3634,7 @@ void builtin_RunOnMCU_WriteSnapshot(uchar** reptr) {
 	writing_buf->offset += arr->len;
 	leave_critical();
 
-	memcpy(&writing_buf->payload, &arr->payload, arr->len);
+	memcpy(&writing_buf->payload + n_offset, &arr->payload, arr->len);
 
 	write_snapshot(&writing_buf->payload + n_offset, arr->len);
 }
