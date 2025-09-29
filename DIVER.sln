@@ -18,13 +18,10 @@ EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DiverTest", "DiverTest\DiverTest.csproj", "{7A78D970-5AD3-44C6-A04B-21EF79CB1BEF}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "3rd-party", "3rd-party", "{FFF7E424-7982-4A87-92A6-351CF85A459F}"
-	ProjectSection(SolutionItems) = preProject
-		Extensions.cs = Extensions.cs
-	EndProjectSection
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "CoralinkerDIVER", "3rd\Coralinker\CoralinkerDIVER.csproj", "{11D9C96B-EDD9-43AC-A090-C9F0A93F0F45}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Coralinker_arch", "3rd\Coralinker_arch\Coralinker_arch.csproj", "{FEBBD16F-0950-4125-95F9-B02C85DA9737}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Coralinker_arch", "3rd\Coralinker_arch\Coralinker_arch.csproj", "{FEBBD16F-0950-4125-95F9-B02C85DA9737}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
