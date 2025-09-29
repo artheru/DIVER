@@ -27,8 +27,8 @@ public class TestLogic : LadderLogic<TestVehicle>
     }
      
     private ee vvv; 
+
     // This method will be processed by our StringInterpolationHandler    
-    // String interpolation ($"...") will be converted to String.Format calls
     public override void Operation(int i)
     {
         if (i == 0)
