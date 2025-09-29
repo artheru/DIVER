@@ -10,7 +10,7 @@ public class TestVehicle : LocalDebugDIVERVehicle
 }  
 
 [LogicRunOnMCU(scanInterval = 1000)]
-public class TestStringInterpolation : LadderLogic<TestVehicle> 
+public class TestLogic : LadderLogic<TestVehicle> 
 { 
     private static int counter = 0;
      
