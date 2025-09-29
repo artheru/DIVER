@@ -27,6 +27,7 @@
 #ifdef _DEBUG
 #define INLINE static inline
 
+// swith on this variable to allow verbose output.
 //#define _VERBOSE
 
 #ifdef _VERBOSE

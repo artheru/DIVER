@@ -12,7 +12,7 @@ namespace DiverTest
     {
         static void Main(string[] args)
         {
-            new TestVehicle2(){}.RunDIVER();
+            new TestVehicle(){}.RunDIVER();
         }
     }
 }

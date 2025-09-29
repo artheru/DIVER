@@ -3,14 +3,14 @@ using CartActivator;
 
 namespace DiverTest;
   
-public class TestVehicle2 : LocalDebugDIVERVehicle
+public class TestVehicle : LocalDebugDIVERVehicle
 {
     [AsLowerIO] public int read_from_mcu;
     [AsUpperIO] public int write_to_mcu;
 }  
 
 [LogicRunOnMCU(scanInterval = 1000)]
-public class TestStringInterpolation : LadderLogic<TestVehicle2> 
+public class TestStringInterpolation : LadderLogic<TestVehicle> 
 { 
     private static int counter = 0;
      
