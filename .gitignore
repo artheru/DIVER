@@ -368,3 +368,8 @@ FodyWeavers.xsd
 
 tmp_ref/
 /DiverTest/tmp_ref/temp.dll
+/DiverTest/mcuruntime.dll
+/DiverTest/mcuruntime.exp
+/DiverTest/mcuruntime.ilk
+/DiverTest/mcuruntime.lib
+/DiverTest/mcuruntime.pdb
