@@ -373,3 +373,4 @@ tmp_ref/
 /DiverTest/mcuruntime.ilk
 /DiverTest/mcuruntime.lib
 /DiverTest/mcuruntime.pdb
+/DiverTest/native/code.c
