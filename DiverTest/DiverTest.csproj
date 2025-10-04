@@ -33,6 +33,10 @@
 		<WeaverFiles Include="DiverCompiler.exe" />
 	</ItemGroup>
 
+	<ItemGroup>
+	  <Folder Include="native\" />
+	</ItemGroup>
+
 	<Target Name="RebuildDiverCompiler" BeforeTargets="PreBuildEvent">
 		<MSBuild Projects="..\DiverCompiler\DiverCompiler.csproj" Targets="Rebuild" />
 	</Target>

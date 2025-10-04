@@ -3,6 +3,7 @@
 // DIVER: Dotnet Integrating Vehicle Embedded Runtime
 
 typedef unsigned char uchar;
+typedef unsigned short ushort;
 
 /*
 

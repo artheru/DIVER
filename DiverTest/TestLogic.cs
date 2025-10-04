@@ -41,31 +41,15 @@ public class DerivedProcessor : BaseProcessor, IDataProvider
     }
 }
 
-public struct DataPacket
-{
-    public int id;
-    public float value;
-    public bool flag;
-}
-
-public struct SensorData
-{
-    public ushort rawValue;
-    public float temperature;
-    public DerivedProcessor processor;
-}
 
 public class TestVehicle : LocalDebugDIVERVehicle
 {
     [AsLowerIO] public int read_from_mcu;
     [AsLowerIO] public float sensor_value;
-    [AsLowerIO] public DataPacket downlink_packet;
-    [AsLowerIO] public SensorData sensor_data;
     [AsLowerIO] public ushort status_code;
     
     [AsUpperIO] public int write_to_mcu;
     [AsUpperIO] public float target_speed;
-    [AsUpperIO] public DataPacket uplink_packet;
     [AsUpperIO] public bool[] control_flags;
 
     public int test_shared_var;
@@ -170,19 +154,13 @@ public class TestLogic : LadderLogic<TestVehicle>
         cart.sensor_value = iteration * 1.23f;
         cart.status_code = (ushort)(iteration % 256);
         
-        cart.downlink_packet.id = iteration;
-        cart.downlink_packet.value = cart.shared_coefficient * iteration;
-        cart.downlink_packet.flag = iteration % 2 == 0;
-
-        cart.sensor_data.rawValue = (ushort)(iteration * 3);
-        cart.sensor_data.temperature = 25.0f + (iteration % 40) * 0.5f;
 
         // AsUpperIO: Host writes, MCU reads
         float targetSpeed = cart.target_speed;
         int commandId = cart.write_to_mcu;
-        
-        if (cart.uplink_packet.flag && cart.uplink_packet.id > 0)
-            DataProcessor.GlobalCounter += cart.uplink_packet.id;
+
+        if (cart.write_to_mcu > 1)
+            DataProcessor.GlobalCounter += (int)cart.target_speed;
 
         if (cart.control_flags != null && cart.control_flags.Length > 0 && cart.control_flags[0])
             targetSpeed *= 1.5f;
@@ -273,11 +251,16 @@ public class TestLogic : LadderLogic<TestVehicle>
             (iteration + 1, (iteration + 1) * 0.5f),
             (iteration + 2, (iteration + 2) * 0.5f)
         };
-        
-        var filteredTuples = tupleList
+
+        (Func<int,int> f, int a) ta(List<int> blah)
+        {
+            return ((i) => blah[i], 1);
+        }
+
+        var (filteredTuples, id) = ta(tupleList
             .Where(t => t.x % 2 == 0)
-            .Select(t => t.y)
-            .ToArray();
+            .Select(t => (int)t.y)
+            .ToList());
 
         // ============ TEST Complex Logic ============
         
@@ -288,13 +271,12 @@ public class TestLogic : LadderLogic<TestVehicle>
             return (int)(a * 2 + b * 2.5f) + c;
         }
 
-        int refParam = iteration;
         bool outParam;
-        int computeResult = Compute(iteration, targetSpeed, ref refParam, out outParam);
+        int computeResult = Compute(iteration, targetSpeed, ref id, out outParam);
 
         // ============ TEST Native Code ============
         
-        // RunOnMCU.WriteSnapshot(RenderPattern(new byte[256]));
+        RunOnMCU.WriteSnapshot(RenderPattern(new byte[256]));
 
         // ============ OUTPUT ============
         

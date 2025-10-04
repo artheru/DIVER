@@ -25,43 +25,7 @@ internal partial class Processor
     public class ResultDLL
     {
         public byte[] bytes;
-        public CartFieldInfo[] CartFields;
-        public CartDescriptorInfo[] CartDescriptors;
-    }
-
-    public enum CartDescriptorKind : byte
-    {
-        Primitive = 0,
-        Array = 1,
-        Struct = 2,
-        String = 3,
-        Reference = 4,
-    }
-
-    public class CartFieldInfo
-    {
-        public string FieldName { get; set; }
-        public int Offset { get; set; }
-        public byte TypeTag { get; set; }
-        public ushort DescriptorId { get; set; }
-    }
-
-    public class CartDescriptorInfo
-    {
-        public ushort Id { get; set; }
-        public CartDescriptorKind Kind { get; set; }
-        public byte PrimitiveTypeId { get; set; }
-        public ushort ElementDescriptorId { get; set; }
-        public ushort StructDataOffset { get; set; }
-        public CartStructFieldInfo[] Fields { get; set; } = Array.Empty<CartStructFieldInfo>();
-        public ushort ClassId { get; set; }
-    }
-
-    public class CartStructFieldInfo
-    {
-        public string Name { get; set; }
-        public ushort Offset { get; set; }
-        public ushort DescriptorId { get; set; }
+        public (string FieldName, int offset, byte typeid)[] IOs;
     }
 
     public class StackInitVals
@@ -93,7 +57,6 @@ internal partial class Processor
         internal Dictionary<string, MethodEntry> methods = new();
 
         internal Dictionary<string, (TypeReference tr, FieldReference fr)> referenced_typefield = []; //name::fieldname
-        internal HashSet<TypeReference> referenced_types = new(new TypeReferenceEqualityComparer());
 
         internal class class_fields
         {
@@ -107,10 +70,7 @@ internal partial class Processor
         internal Dictionary<string, class_fields> class_ifield_offset = new(); //key:typereference.fullname
         internal class_fields sfield_offset = new();
         internal List<string> instanceable_classes = [];
-        internal List<(string field, TypeReference tr, byte typeId, int offset, ushort descriptorId)> cart_io_layout = [];
-        internal List<CartDescriptorInfo> cart_descriptors = new();
-        internal Dictionary<TypeReference, ushort> descriptorLookup = new(new TypeReferenceEqualityComparer());
-
+        internal List<string> cart_io_list = [];
         internal List<Action> linking_actions = [];
 
         internal Dictionary<string, (TypeReference tr, MethodReference mr)> RT_types = [];
@@ -131,7 +91,7 @@ internal partial class Processor
         SI = p.SI;
     } 
 
-        static bool IsDerivedFrom(TypeDefinition type, string baseTypeFullName)
+    static bool IsDerivedFrom(TypeDefinition type, string baseTypeFullName)
     {
         if (type == null)
             return false;
@@ -142,154 +102,10 @@ internal partial class Processor
         return IsDerivedFrom(type.BaseType?.Resolve(), baseTypeFullName);
     }
 
-        ushort EnsureDescriptor(TypeReference type)
-        {
-            if (type == null) return 0;
-
-            // Canonicalize type BEFORE lookup to avoid duplicate descriptor ids for ByRef/Pointer/Enum
-            if (type.IsByReference)
-                type = ((ByReferenceType)type).ElementType;
-
-            if (type.IsPointer)
-                type = ((PointerType)type).ElementType;
-
-            if (type.IsValueType && type.Resolve()?.IsEnum == true)
-            {
-                var enumType = type.Resolve();
-                var valueField = enumType.Fields.FirstOrDefault(f => f.Name == "value__");
-                if (valueField != null)
-                {
-                    type = valueField.FieldType;
-                }
-                else
-                {
-                    type = enumType.Module.TypeSystem.Int32;
-                }
-            }
-
-            if (SI.descriptorLookup.TryGetValue(type, out var existing)) return existing;
-
-            // Reserve id and slot early to stabilize ids and break recursion
-            ushort id = (ushort)SI.cart_descriptors.Count;
-            SI.descriptorLookup[type] = id;
-            SI.cart_descriptors.Add(new CartDescriptorInfo { Id = id }); // placeholder
-
-            var descriptor = new CartDescriptorInfo { Id = id };
-
-            if (tMapDict.TryGetValue(type.Name, out var primitive))
-            {
-                descriptor.Kind = CartDescriptorKind.Primitive;
-                descriptor.PrimitiveTypeId = primitive.typeid;
-            }
-            else if (type.FullName == "System.String")
-            {
-                descriptor.Kind = CartDescriptorKind.String;
-            }
-            else if (type.IsArray)
-            {
-                var element = ((ArrayType)type).ElementType;
-                descriptor.Kind = CartDescriptorKind.Array;
-                descriptor.ElementDescriptorId = EnsureDescriptor(element);
-            }
-            else if (IsStruct(type))
-            {
-                descriptor.Kind = CartDescriptorKind.Struct;
-                var td = type.Resolve();
-                if (td == null)
-                    throw new WeavingException($"Cannot resolve struct {type.FullName}");
-
-                if (!SI.class_ifield_offset.TryGetValue(type.FullName, out var classInfo))
-                {
-                    // Build minimal field layout if not present yet
-                    classInfo = new shared_info.class_fields
-                    {
-                        tr = type,
-                        baseType = td.BaseType,
-                        field_offset = new Dictionary<string, (int offset, TypeReference tr, byte typeid, TypeReference dtr)>(),
-                        baseInitialized = true,
-                    };
-                    int runningOffset = 0;
-                    foreach (var fd in td.Fields.Where(f => !f.IsStatic))
-                    {
-                        var ft = fd.FieldType;
-                        var typeId = GetTypeID(ft);
-                        classInfo.field_offset[fd.Name] = (runningOffset, ft, typeId, ft);
-                        runningOffset += tMapDict.TryGetValue(ft.Name, out var tv) ? tv.size : 4; // rough size for refs
-                    }
-                    classInfo.size = runningOffset;
-                    SI.class_ifield_offset[type.FullName] = classInfo;
-                }
-                var fields = new List<CartStructFieldInfo>();
-                foreach (var fd in td.Fields.Where(f => !f.IsStatic))
-                {
-                    if (!classInfo.field_offset.TryGetValue(fd.Name, out var meta))
-                        continue;
-                    var subtype = fd.FieldType;
-                    ushort child = EnsureDescriptor(subtype);
-                    var offset = (ushort)meta.offset;
-                    fields.Add(new CartStructFieldInfo
-                    {
-                        Name = fd.Name,
-                        Offset = offset,
-                        DescriptorId = child,
-                    });
-                }
-                descriptor.Fields = fields.ToArray();
-                descriptor.StructDataOffset = 0;
-                descriptor.ClassId = (ushort)SI.instanceable_classes.IndexOf(type.FullName);
-            }
-            else if (type.IsGenericInstance)
-            {
-                // Handle generic types as references
-                descriptor.Kind = CartDescriptorKind.Reference;
-            }
-            else if (type.Name.Contains("`"))
-            {
-                // Handle generic type definitions
-                descriptor.Kind = CartDescriptorKind.Reference;
-            }
-            else if (type.FullName.StartsWith("System.Collections.Generic"))
-            {
-                // Handle collection types as references
-                descriptor.Kind = CartDescriptorKind.Reference;
-            }
-            else if (type.FullName.StartsWith("System.Linq"))
-            {
-                // Handle LINQ types as references
-                descriptor.Kind = CartDescriptorKind.Reference;
-            }
-            else
-            {
-                // Treat unknown reference types as reference descriptors rather than throwing
-                descriptor.Kind = CartDescriptorKind.Reference;
-            }
-
-            // Replace placeholder with finalized descriptor
-            SI.cart_descriptors[id] = descriptor;
-            return id;
-        }
-
     string GetNameNonGeneric(MethodDefinition method)
     {
         return $"{method.DeclaringType.FullName}.{method.Name}({string.Join(", ", method.Parameters.Select(p => p.ParameterType.Name))})";
     }
-    byte GetTypeID(TypeReference type)
-    {
-        string typeName = type.Name;
-
-        // Handle some special cases
-        if (typeName == "Void") return 0; // We shouldn't need this for List elements
-
-        // Check if it's a value type or reference type
-        if (tMapDict.TryGetValue(typeName, out var typeInfo))
-        {
-            return typeInfo.typeid;
-        }
-
-        // For reference types, return ReferenceID
-        return 16; // ReferenceID
-    }
-
     string GetGenericResolvedName(MethodDefinition method, MethodReference methodRef)
     {
         if (method == null)
@@ -350,139 +166,6 @@ internal partial class Processor
         }
 
         return $"{declaringTypeName}.{methodName}({string.Join(", ", parameterNames)})";
-    }
-
-    // Helper to strip generic parameters from type name for matching against BuiltInMethods
-    // E.g., "System.Collections.Generic.List`1<Int32>.Add(Int32)" -> "System.Collections.Generic.List`1.Add(!0)"
-    // E.g., "System.ValueTuple`3<Int32, Single, Boolean>..ctor(Int32, Single, Boolean)" -> "System.ValueTuple`3..ctor(T1, T2, T3)"
-    // E.g., "System.Linq.Enumerable.Where<Int32>(IEnumerable`1, Func`2)" -> "System.Linq.Enumerable.Where(IEnumerable`1, Func`2)"
-    string StripGenericParameters(string methodName)
-    {
-        // only allow system library to be generic.
-        if (!methodName.StartsWith("System.")) 
-            return methodName;
-        return methodName;
-
-        // First check for generic methods (method-level generics) like Where<Int32>
-        // Pattern: TypeName.MethodName<GenericArgs>(params)
-        var methodGenericMatch = System.Text.RegularExpressions.Regex.Match(methodName, @"^(.+)\.([^.]+)<(.+?)>\((.*?)\)$");
-        if (methodGenericMatch.Success)
-        {
-            var typeAndNamespace = methodGenericMatch.Groups[1].Value;
-            var methodNameOnly = methodGenericMatch.Groups[2].Value;
-            var genericArgsJoined = methodGenericMatch.Groups[3].Value; // e.g., "Int32" or "TKey, TValue"
-            var parameters = methodGenericMatch.Groups[4].Value;
-
-            // For method-level generics (e.g., DefaultIfEmpty<T>(..., T)), normalize parameters:
-            // - If a parameter exactly equals a generic arg name, replace with !index
-            // - Strip inner generic type arguments from parameter types (e.g., IEnumerable`1<Int32> -> IEnumerable`1)
-            if (!string.IsNullOrEmpty(genericArgsJoined) && !string.IsNullOrEmpty(parameters))
-            {
-                var genericArgs = genericArgsJoined.Split(new[] { ", " }, StringSplitOptions.None);
-                var paramList = parameters.Split(new[] { ", " }, StringSplitOptions.None);
-                for (int i = 0; i < paramList.Length; i++)
-                {
-                    for (int j = 0; j < genericArgs.Length; j++)
-                    {
-                        if (paramList[i] == genericArgs[j])
-                        {
-                            paramList[i] = $"!{j}";
-                            break;
-                        }
-                    }
-                    // Strip generic arguments from generic type parameters in-place
-                    var m = System.Text.RegularExpressions.Regex.Match(paramList[i], @"^(.*?)`(\d+)<.+?>$");
-                    if (m.Success)
-                    {
-                        var typePrefix = m.Groups[1].Value;
-                        var gcount = m.Groups[2].Value;
-                        paramList[i] = $"{typePrefix}`{gcount}";
-                    }
-                }
-                parameters = string.Join(", ", paramList);
-            }
-
-            return $"{typeAndNamespace}.{methodNameOnly}({parameters})";
-        }
-        
-        // For system library generics, strip the <...> part but keep the `N marker
-        var match = System.Text.RegularExpressions.Regex.Match(methodName, @"^(.*?)`(\d+)<(.+?)>\.(.+?)\((.*?)\)$");
-        if (match.Success)
-        {
-            // Found a generic type with method and parameters
-            var typePrefix = match.Groups[1].Value;
-            var genericCount = int.Parse(match.Groups[2].Value);
-            var genericArgs = match.Groups[3].Value.Split(new[] { ", " }, StringSplitOptions.None);
-            var methodName_only = match.Groups[4].Value;
-            var parameters = match.Groups[5].Value;
-            
-            // Special handling for ValueTuple constructors - use T1, T2, T3 notation
-            if (typePrefix.Contains("ValueTuple") && methodName_only == ".ctor")
-            {
-                if (!string.IsNullOrEmpty(parameters))
-                {
-                    var paramList = parameters.Split(new[] { ", " }, StringSplitOptions.None);
-                    if (paramList.Length == genericCount)
-                    {
-                        var genericParams = string.Join(", ", Enumerable.Range(1, genericCount).Select(i => $"T{i}"));
-                        return $"{typePrefix}`{genericCount}.{methodName_only}({genericParams})";
-                    }
-                }
-            }
-            
-            // Special handling for Action/Func Invoke methods - use T, T1, T2, T3 notation
-            if ((typePrefix.Contains("Action") || typePrefix.Contains("Func")) && methodName_only == "Invoke")
-            {
-                if (!string.IsNullOrEmpty(parameters))
-                {
-                    var paramList = parameters.Split(new[] { ", " }, StringSplitOptions.None);
-                    // Action has N parameters for Action`N, Func has N-1 parameters for Func`N (last is return type)
-                    if (typePrefix.Contains("Action") && paramList.Length == genericCount)
-                    {
-                        var genericParams = genericCount == 1 ? "T" : string.Join(", ", Enumerable.Range(1, genericCount).Select(i => $"T{i}"));
-                        return $"{typePrefix}`{genericCount}.{methodName_only}({genericParams})";
-                    }
-                    else if (typePrefix.Contains("Func") && paramList.Length == genericCount - 1)
-                    {
-                        var genericParams = paramList.Length == 1 ? "T" : string.Join(", ", Enumerable.Range(1, paramList.Length).Select(i => $"T{i}"));
-                        return $"{typePrefix}`{genericCount}.{methodName_only}({genericParams})";
-                    }
-                }
-                else if (typePrefix.Contains("Func") && genericCount == 1)
-                {
-                    // Func`1.Invoke() has no parameters (just returns TResult)
-                    return $"{typePrefix}`{genericCount}.{methodName_only}()";
-                }
-            }
-            
-            // For other generic types (like List<T>), replace matching parameter types with !0, !1, etc.
-            if (!string.IsNullOrEmpty(parameters))
-            {
-                var paramList = parameters.Split(new[] { ", " }, StringSplitOptions.None);
-                for (int i = 0; i < paramList.Length; i++)
-                {
-                    // Check if this parameter matches one of the generic arguments
-                    for (int j = 0; j < genericArgs.Length; j++)
-                    {
-                        if (paramList[i] == genericArgs[j])
-                        {
-                            paramList[i] = $"!{j}";
-                        }
-                    }
-                }
-                parameters = string.Join(", ", paramList);
-            }
-            
-            return $"{typePrefix}`{genericCount}.{methodName_only}({parameters})";
-        }
-        
-        // Simpler case: just strip <...> from type name
-        match = System.Text.RegularExpressions.Regex.Match(methodName, @"^(.*?)<.*?>(.*)$");
-        if (match.Success)
-        {
-            return match.Groups[1].Value + match.Groups[2].Value;
-        }
-        return methodName;
     }
 
     public struct TypeInfo
@@ -585,84 +268,77 @@ internal partial class Processor
     }
 
     // Memory chunk for value: |typeid 1B|payload {n}B| 
+
     // use methodRef because there could be generic parameters.
+
+
+    // if a method is:
+    //  1. call only builtin-C functions or CC functions 
+    //  2. no singleton load a reference.
+    //  3. no address loading
     internal class CCoder
     {
         public static int ccid = 0;
-        // if a method is:
-        //  1. call only builtin-C functions or CC functions 
-        //  2. no singleton load a reference.
-        //  3. no address loading
         public string CError = "none";
-
-        public List<string> FunPtr = new();
-         
+        
         public static string[] CCTyping =
         [
             "u1", "u1", "i1", "i2", "i2", "u2", "i4", "u4", "r4",
             //9~16
             "/","/","/","/","/","/","/","ptr", "/", "/", "/"
         ];
-        public static (string sname, string signature, int args)[] Cbuiltins = new[]
+        public static (string sname, string signature, int args, string cc_ret)[] Cbuiltins = new[]
         {
-            ("System.Object..ctor()", "(void*)()", 0), // we don't pass this.
-            ("System.Math.Abs(Decimal)", "(float*)(float)", 1),
-            ("System.Math.Abs(Double)", "(float*)(float)", 1),
-            ("System.Math.Abs(Int16)", "(int*)(int)", 1),
-            ("System.Math.Abs(Int32)", "(int*)(int)", 1),
-            ("System.Math.Abs(SByte)", "(int*)(int)", 1),
-            ("System.Math.Abs(Single)", "(float*)(float)", 1),
-            ("System.Math.Acos(Double)", "(float*)(float)", 1),
-            ("System.Math.Acosh(Double)", "(float*)(float)", 1),
-            ("System.Math.Asin(Double)", "(float*)(float)", 1),
-            ("System.Math.Asinh(Double)", "(float*)(float)", 1),
-            ("System.Math.Atan(Double)", "(float*)(float)", 1),
-            ("System.Math.Atan2(Double, Double)", "(float*)(float, float)", 2),
-            ("System.Math.Atanh(Double)", "(float*)(float)", 1),
-            ("System.Math.Ceiling(Double)", "(float*)(float)", 1),
-            ("System.Math.Clamp(Double, Double, Double)", "(float*)(float, float, float)", 3),
-            ("System.Math.Clamp(Int16, Int16, Int16)", "(int*)(int, int, int)", 3),
-            ("System.Math.Clamp(Int32, Int32, Int32)", "(int*)(int, int, int)", 3),
-            ("System.Math.Clamp(SByte, SByte, SByte)", "(int*)(int, int, int)", 3),
-            ("System.Math.Clamp(Single, Single, Single)", "(float*)(float, float, float)", 3),
-            ("System.Math.Cos(Double)", "(float*)(float)", 1),
-            ("System.Math.Cosh(Double)", "(float*)(float)", 1),
-            ("System.Math.Exp(Double)", "(float*)(float)", 1),
-            ("System.Math.Floor(Double)", "(float*)(float)", 1),
-            ("System.Math.Log(Double)", "(float*)(float)", 1),
-            ("System.Math.Log(Double, Double)", "(float*)(float, float)", 2),
-            ("System.Math.Log10(Double)", "(float*)(float)", 1),
-            ("System.Math.Log2(Double)", "(float*)(float)", 1),
-            ("System.Math.Max(Double, Double)", "(float*)(float, float)", 2),
-            ("System.Math.Max(Int16, Int16)", "(int*)(int, int)", 2),
-            ("System.Math.Max(Int32, Int32)", "(int*)(int, int)", 2),
-            ("System.Math.Max(SByte, SByte)", "(int*)(int, int)", 2),
-            ("System.Math.Max(Single, Single)", "(float*)(float, float)", 2),
-            ("System.Math.Min(Double, Double)", "(float*)(float, float)", 2),
-            ("System.Math.Min(Int16, Int16)", "(int*)(int, int)", 2),
-            ("System.Math.Min(Int32, Int32)", "(int*)(int, int)", 2),
-            ("System.Math.Min(SByte, SByte)", "(int*)(int, int)", 2),
-            ("System.Math.Min(Single, Single)", "(float*)(float, float)", 2),
-            ("System.Math.Pow(Double, Double)", "(float*)(float, float)", 2),
-            ("System.Math.Round(Double)", "(float*)(float)", 1),
-            ("System.Math.Sign(Double)", "(int*)(float)", 1),
-            ("System.Math.Sign(Int16)", "(int*)(int)", 1),
-            ("System.Math.Sign(Int32)", "(int*)(int)", 1),
-            ("System.Math.Sign(SByte)", "(int*)(int)", 1),
-            ("System.Math.Sign(Single)", "(int*)(float)", 1),
-            ("System.Math.Sin(Double)", "(float*)(float)", 1),
-            ("System.Math.Sinh(Double)", "(float*)(float)", 1),
-            ("System.Math.Sqrt(Double)", "(float*)(float)", 1),
-            ("System.Math.Tan(Double)", "(float*)(float)", 1),
-            ("System.Math.Tanh(Double)", "(float*)(float)", 1),
-            // LINQ operations for arrays
-            ("System.Linq.Enumerable.Where(Byte[], System.Func`2[Byte,Boolean])", "(u1*)(u1*, int)", 2),
-            ("System.Linq.Enumerable.Sum(Int32[])", "(int*)(int*)", 1),
-            ("System.Linq.Enumerable.Max(Int32[])", "(int*)(int*)", 1),
-            ("System.Linq.Enumerable.Min(Int32[])", "(int*)(int*)", 1),
-            ("System.Linq.Enumerable.Take(Byte[], Int32)", "(u1*)(u1*, int)", 2),
-            // String operations
-            ("System.String.Join(System.String, System.String[])", "(char*)(char*, char**)", 2),
+            ("System.Object..ctor()", "_ctor", 0, "i1"), // we don't pass this. (arbitrary, not used)
+            ("System.Math.Abs(Decimal)", "abs", 1, "i1"), // Not supported, placeholder
+            ("System.Math.Abs(Double)", "abs", 1, "r4"),
+            ("System.Math.Abs(Int16)", "abs", 1, "i2"),
+            ("System.Math.Abs(Int32)", "abs", 1, "i4"),
+            ("System.Math.Abs(SByte)", "abs", 1, "i1"),
+            ("System.Math.Abs(Single)", "abs", 1, "r4"),
+            ("System.Math.Acos(Double)", "acos", 1, "r4"),
+            ("System.Math.Acosh(Double)", "acosh", 1, "r4"),
+            ("System.Math.Asin(Double)", "asin", 1, "r4"),
+            ("System.Math.Asinh(Double)", "asinh", 1, "r4"),
+            ("System.Math.Atan(Double)", "atan", 1, "r4"),
+            ("System.Math.Atan2(Double, Double)", "atan2", 2, "r4"),
+            ("System.Math.Atanh(Double)", "atanh", 1, "r4"),
+            ("System.Math.Ceiling(Double)", "ceiling", 1, "r4"),
+            ("System.Math.Clamp(Double, Double, Double)", "clamp", 3, "r4"),
+            ("System.Math.Clamp(Int16, Int16, Int16)", "clamp", 3, "i2"),
+            ("System.Math.Clamp(Int32, Int32, Int32)", "clamp", 3, "i4"),
+            ("System.Math.Clamp(SByte, SByte, SByte)", "clamp", 3, "i1"),
+            ("System.Math.Clamp(Single, Single, Single)", "clamp", 3, "r4"),
+            ("System.Math.Cos(Double)", "cos", 1, "r4"),
+            ("System.Math.Cosh(Double)", "cosh", 1, "r4"),
+            ("System.Math.Exp(Double)", "exp", 1, "r4"),
+            ("System.Math.Floor(Double)", "floor", 1, "r4"),
+            ("System.Math.Log(Double)", "log", 1, "r4"),
+            ("System.Math.Log(Double, Double)", "log", 2, "r4"),
+            ("System.Math.Log10(Double)", "log10", 1, "r4"),
+            ("System.Math.Log2(Double)", "log2", 1, "r4"),
+            ("System.Math.Max(Double, Double)", "max", 2, "r4"),
+            ("System.Math.Max(Int16, Int16)", "max", 2, "i2"),
+            ("System.Math.Max(Int32, Int32)", "max", 2, "i4"),
+            ("System.Math.Max(SByte, SByte)", "max", 2, "i1"),
+            ("System.Math.Max(Single, Single)", "max", 2, "r4"),
+            ("System.Math.Min(Double, Double)", "min", 2, "r4"),
+            ("System.Math.Min(Int16, Int16)", "min", 2, "i2"),
+            ("System.Math.Min(Int32, Int32)", "min", 2, "i4"),
+            ("System.Math.Min(SByte, SByte)", "min", 2, "i1"),
+            ("System.Math.Min(Single, Single)", "min", 2, "r4"),
+            ("System.Math.Pow(Double, Double)", "pow", 2, "r4"),
+            ("System.Math.Round(Double)", "round", 1, "r4"),
+            ("System.Math.Sign(Double)", "sign", 1, "i4"),
+            ("System.Math.Sign(Int16)", "sign", 1, "i4"),
+            ("System.Math.Sign(Int32)", "sign", 1, "i4"),
+            ("System.Math.Sign(SByte)", "sign", 1, "i4"),
+            ("System.Math.Sign(Single)", "sign", 1, "i4"),
+            ("System.Math.Sin(Double)", "sin", 1, "r4"),
+            ("System.Math.Sinh(Double)", "sinh", 1, "r4"),
+            ("System.Math.Sqrt(Double)", "sqrt", 1, "r4"),
+            ("System.Math.Tan(Double)", "tan", 1, "r4"),
+            ("System.Math.Tanh(Double)", "tanh", 1, "r4"),
         };
 
         public Instruction curI;
@@ -873,17 +549,15 @@ internal partial class Processor
                 ret.ret_name = "void";
                 ret.retBytes = [0xff, 0, 0];
             }
+            // else if (IsStruct(rettype))
+            // {
+            //     ret.retBytes = [tMap.aJump.typeid, 0, 0]; //method always use newobj for a struct on the heap.
+            // }
             else if (tMapDict.TryGetValue(rettype.Name, out var typing))
             {
                 ret.retBytes = [typing.typeid, 0, 0]; 
                 ret.ret_name = rettype.Name;
-            }
-            else if (IsStruct(rettype))
-            {
-                ret.retBytes = [tMap.aJump.typeid, 0, 0];
-                ret.ret_name = rettype.Name;
-            }
-            else if (rettype.Name == "Object")
+            } else if (rettype.Name == "Object")
             {
                 ret.retBytes = [tMap.pObject.typeid, 0, 0]; //boxed object.
             }
@@ -1008,18 +682,6 @@ internal partial class Processor
 
         AnalyzeMethod(method);
 
-        // ensure cart descriptors are prepared for cart fields
-        if (isRoot)
-        {
-            foreach (var field in method.DeclaringType.BaseType.Resolve().Fields.Where(f => f.IsPublic && !f.IsStatic))
-            {
-                if (IsDerivedFrom(field.DeclaringType, "CartActivator.CartDefinition"))
-                {
-                    EnsureDescriptor(field.FieldType);
-                }
-            }
-        }
-
         // foreach (var instruction in method.Body.Instructions)
         //     bmw.WriteWarning($"{fname}> s_{stackStates[instruction]} for {instruction}");
 
@@ -1031,7 +693,7 @@ internal partial class Processor
         {
             ILoffset2BCoffset[instruction.Offset] = i;
 
-            //bmw.WriteWarning(fname+">"+ instruction.ToString()); 
+            // bmw.WriteWarning(fname+">"+ instruction.ToString()); 
 
             // Generate bytecode based on IL instructions
             if (ConvertToBytecode(instruction, methodRef) is { } ilbytes)
@@ -1181,7 +843,23 @@ internal partial class Processor
                 var iscart = IsDerivedFrom(fd.DeclaringType, "CartActivator.CartDefinition");
                 if (iscart)
                 {
-                    EnsureDescriptor(ftype);
+                    // Allow primitive, array of primitive, or string for Cart IO fields
+                    bool isAllowed = false;
+                    if (ftype.IsPrimitive)
+                    {
+                        isAllowed = true;
+                    }
+                    else if (ftype.IsArray && ftype is ArrayType arrType && arrType.ElementType.IsPrimitive)
+                    {
+                        isAllowed = true;
+                    }
+                    else if (ftype.FullName == "System.String")
+                    {
+                        isAllowed = true;
+                    }
+
+                    if (!isAllowed)
+                        throw new WeavingException($"Cart IO must be primitive, array of primitive, or string! problem field:{fd.FullName}, actual type: {ftype.FullName}");
                 }
                 if (fd.IsStatic || iscart)
                 {
@@ -1201,7 +879,7 @@ internal partial class Processor
                         cname = SI.EntryMethod.DeclaringType.FullName;
                     EnsureInheritanceLayout(v.tr);
                     if (!SI.class_ifield_offset.TryGetValue(cname, out var cfields))
-                        SI.class_ifield_offset[cname] = cfields = new() { tr = v.tr };
+                        SI.class_ifield_offset[cname] = cfields = new();
                     cfields.field_offset[fd.Name] = (cfields.size, ftype, typeid, v.tr);
                     cfields.size += mysz;
                     cfields.tr = v.tr;
@@ -1259,17 +937,13 @@ internal partial class Processor
                 EnsureInheritanceLayout(derivedType);
             }
 
-            SI.cart_io_layout = SI.sfield_offset.field_offset
-                .Where(fo => IsDerivedFrom(fo.Value.dtr.Resolve(), "CartActivator.CartDefinition"))
-                .Select(p =>
-                {
-                    var descriptorId = EnsureDescriptor(p.Value.tr);
-                    return (p.Key, p.Value.tr, p.Value.typeid, p.Value.offset, descriptorId);
-                }).ToList();
+
+            SI.cart_io_list = SI.sfield_offset.field_offset
+                .Where(fo => IsDerivedFrom(fo.Value.dtr.Resolve(), "CartActivator.CartDefinition")).Select(p=>p.Key).ToList();
 
             bmw.WriteWarning($"abstract method:[{string.Join(",", SI.virtcallMethods.Select(p=>p.Name))}]");
             bmw.WriteWarning($"instanced classes:[{string.Join(", ", SI.instanceable_classes)}]");
-            bmw.WriteWarning($"cart IO:[{string.Join(", ", SI.cart_io_layout.Select(p=>$"{p.field}(desc:{p.descriptorId})"))}]");
+            bmw.WriteWarning($"cart IO:[{string.Join(", ", SI.cart_io_list)}]");
             // bmw.WriteWarning(
             //     $"instanced fields:[{string.Join(",", class_ifield_offset.Select(p => p.Key.FullName + ":" + p.Value.sz))}]");
             // bmw.WriteWarning(
@@ -1326,7 +1000,7 @@ internal partial class Processor
                     var fcname = CCoder.ccid++;
                     m.ccoder.clinked_name = fcname; 
 
-                    var arg_set = $"int argN=0;\n {
+                    var arg_set = $"int argN=0;\n{
                         string.Join("\n", m.argumentList.Select((p, ai) => $"{CCoder.CCTyping[p.typeID]} arg{ai} = *({CCoder.CCTyping[p.typeID]}*)&args[(argN++)*4];"))}{
                             (m.ccoder.additional_Args.Count == 0 ? "" : $"\n{
                                 string.Join("\n", m.ccoder.additional_Args.Select(p => $"{p.argtype} {p.name} = *({p.argtype}*)&args[(argN++)*4];"))}")}";
@@ -1335,8 +1009,8 @@ internal partial class Processor
                         $"{retN} cfun{fcname}(u1* args){{\n" +
                         $"//args:\n{arg_set}\n" +
                         $"//stack_vars:\n{string.Join(";\n", m.ccoder.stackVars)};\n " +
-                        $"//local_vars:\n{string.Join(";\n", m.variableList.Select((p, ai) => $"{CCoder.CCTyping[p.typeID]} var{ai}"))};\n " +
-                        $"{string.Join("", ccodes)}}}\n\n";
+                        $"//local_vars:\n{string.Join(";\n", m.variableList.Select((p, ai) => $"{CCoder.CCTyping[p.typeID]} var{ai}"))};\n" +
+                        $"//code:\n{string.Join("", ccodes)}}}\n\n";
                     bmw.WriteWarning($"Full CCode of {m.name}:\n{cCode}");
                     allCCodes += cCode;
                 } 
@@ -1380,10 +1054,7 @@ internal partial class Processor
             byte[] code_chunk = [..code_table, ..codes.SelectMany(p => p.meta.Concat(p.code).ToArray())];
 
             byte[][] iclass = SI.instanceable_classes.Select((p,id) =>
-            {
-                var classInfo = SI.class_ifield_offset[p];
-                EnsureInheritanceLayout(classInfo.tr);
-                return classInfo.field_offset.SelectMany(k =>
+                SI.class_ifield_offset[p].field_offset.SelectMany(k =>
                 {
                     var aux = -1; 
                     if (IsStruct(k.Value.tr) && k.Value.typeid== tMap.aReference.typeid)
@@ -1397,8 +1068,7 @@ internal partial class Processor
                         (byte)(k.Value.offset & 0xff), (byte)(k.Value.offset >> 8),
                         (byte)(aux &0xff), (byte)(aux>>8)
                     };
-                }).ToArray();
-            }).ToArray();
+                }).ToArray()).ToArray();
 
             List<byte> iclass_layout = [];
             int ic_offset = 0;
@@ -1415,56 +1085,10 @@ internal partial class Processor
                 ic_offset += iclass[j].Length;
             }
              
-            var staticFieldTypesInOrder = SI.sfield_offset.field_offset
-                .ToArray()
-                .OrderBy(p => p.Value.offset)
-                .Select(p => p.Value.tr)
-                .ToArray();
-
-            // Ensure all static field types have descriptors
-            foreach (var t in staticFieldTypesInOrder)
-                EnsureDescriptor(t);
-
-            // Map descriptor Id -> array index in cart_descriptors, then emit indices for statics
-            var idToIndex = SI.cart_descriptors
-                .Select((d, idx) => (d.Id, idx))
-                .ToDictionary(p => p.Id, p => (ushort)p.idx);
-
-            var orderedStaticDescriptorIndices = staticFieldTypesInOrder
-                .Select(t => idToIndex[SI.descriptorLookup[t]])
-                .ToArray();
-
-            bmw.WriteWarning($"statics descriptor indices: [{string.Join(",", orderedStaticDescriptorIndices)}], descCount={SI.cart_descriptors.Count}");
-
-            byte[] cart_desc_blob = SI.cart_descriptors.SelectMany(desc =>
-            {
-                List<byte> data = [];
-                data.AddRange(BitConverter.GetBytes((ushort)desc.Id));
-                data.Add((byte)desc.Kind);
-                data.Add(desc.PrimitiveTypeId);
-                data.AddRange(BitConverter.GetBytes(desc.ElementDescriptorId));
-                data.AddRange(BitConverter.GetBytes(desc.StructDataOffset));
-                data.AddRange(BitConverter.GetBytes(desc.ClassId));
-                data.Add((byte)desc.Fields.Length);
-                foreach (var field in desc.Fields)
-                {
-                    data.AddRange(BitConverter.GetBytes(field.Offset));
-                    data.AddRange(BitConverter.GetBytes(field.DescriptorId));
-                }
-                return data;
-            }).ToArray();
-
-            byte[] cart_fields_blob = SI.cart_io_layout.SelectMany(p =>
-                BitConverter.GetBytes((short)p.offset)
-                    .Concat(new[]{p.typeId})
-                    .Concat(BitConverter.GetBytes(p.descriptorId))).ToArray();
-
             byte[] program_desc =
             [ 
-                ..BitConverter.GetBytes((ushort)SI.cart_io_layout.Count),
-                ..cart_fields_blob,
-                ..BitConverter.GetBytes((ushort)SI.cart_descriptors.Count),
-                ..cart_desc_blob,
+                ..BitConverter.GetBytes((ushort)SI.cart_io_list.Count),
+                ..SI.cart_io_list.SelectMany(p => BitConverter.GetBytes(SI.sfield_offset.field_offset[p].offset)), 
                 ..BitConverter.GetBytes((ushort)SI.instanceable_classes.Count),
                 ..iclass_layout, 
                 ..iclass.SelectMany(p=>p) 
@@ -1472,8 +1096,14 @@ internal partial class Processor
               
             byte[] statics_descriptor =
             [  
-                ..BitConverter.GetBytes((ushort)orderedStaticDescriptorIndices.Length),
-                ..orderedStaticDescriptorIndices.SelectMany(id => BitConverter.GetBytes(id))
+                ..BitConverter.GetBytes((ushort)SI.sfield_offset.field_offset.Count),
+                ..SI.sfield_offset.field_offset.ToArray().OrderBy(p => p.Value).SelectMany(p =>
+                {
+                    var aux = -1; 
+                    if (IsStruct(p.Value.tr) && p.Value.typeid== tMap.aReference.typeid) 
+                        aux=SI.instanceable_classes.IndexOf(p.Value.tr.FullName);
+                    return new byte[] { p.Value.typeid, (byte)(aux &0xff), (byte)(aux>>8)};
+                })
             ]; 
 
             // virtual method calls:
@@ -1499,6 +1129,7 @@ internal partial class Processor
             // {  
             //     throw new WeavingException("Pure function is not allowed, must make interaction with 'cart' object!");
             // }
+
             bmw.WriteWarning($"entry point, this cls_id={this_clsID}");
 
             byte[] dll = [
@@ -1514,14 +1145,8 @@ internal partial class Processor
             ret.dll = new ResultDLL()
             {
                 bytes = dll,
-                CartFields = SI.cart_io_layout.Select(p => new CartFieldInfo
-                {
-                    FieldName = p.field,
-                    Offset = p.offset,
-                    TypeTag = p.typeId,
-                    DescriptorId = p.descriptorId,
-                }).ToArray(),
-                CartDescriptors = SI.cart_descriptors.ToArray(),
+                IOs = SI.cart_io_list.Select(p => (p, SI.sfield_offset.field_offset[p].offset, SI.sfield_offset.field_offset[p].typeid))
+                    .ToArray()
             }; 
              
             // foreach (var m in all_methods)
@@ -1938,6 +1563,7 @@ internal partial class Processor
                 return [0x79];
             case Code.Newobj:
             { 
+                cc.Error("not allowed to create heap object");
                 // if 0x7A, first according to class_id, get layout, then generate a heap object
                 var mref = (MethodReference)instruction.Operand;
                 var bc = mref.DeclaringType.Resolve();
@@ -1949,7 +1575,6 @@ internal partial class Processor
                 {
                     var decType = mref.DeclaringType;
                     var fullTypeName = decType.Resolve().FullName;
-                    SI.referenced_types.Add(decType);
                     if (BuildInClasses.Contains(fullTypeName))
                     {
                         // Use builtin method id for ctor in BuiltInMethods
@@ -1962,13 +1587,7 @@ internal partial class Processor
                         }
                     }
                 }
-
-                cc.Error("not allowed to create heap object");
-                var methodCallBytes = HandleMethodCall(mref);
-                if (methodCallBytes == null)
-                    return null;
-                    
-                byte[] ret = [0x7A, 0, 0, ..methodCallBytes];
+                byte[] ret = [0x7A, 0, 0, ..HandleMethodCall(mref)];
                 SI.linking_actions.Add(() =>
                 {
                     var id = SI.instanceable_classes.IndexOf(mref.DeclaringType.FullName);
@@ -2091,7 +1710,6 @@ internal partial class Processor
                         cname = SI.EntryMethod.DeclaringType.FullName;
 
                     SI.referenced_typefield[$"{cname}::{fr.Name}"] = (tr, fr);
-                    SI.referenced_types.Add(tr);
 
                     var iscart = IsDerivedFrom(fd.DeclaringType, "CartActivator.CartDefinition");  
                     byte type = (byte)((instanced ? 0 : 1) | (iscart ? 2 : 0));
@@ -2119,9 +1737,13 @@ internal partial class Processor
 
                         if (iscart)
                         {
-                            var entry = SI.cart_io_layout.First(p => p.field == fd.Name);
-                            ret[4] = (byte)(entry.descriptorId & 0xff);
-                            ret[5] = (byte)(entry.descriptorId >> 8);
+                            var id = SI.cart_io_list.IndexOf(fd.Name);
+                            if (id == -1)
+                                throw new WeavingException(
+                                    $"WTF? a cart io '{fd.FullName}' doesn't in cart_io_ls?");
+
+                            ret[4] = (byte)(id & 0xff);
+                            ret[5] = (byte)(id >> 8);
                         }
                     });
                     return ret; 
@@ -2239,19 +1861,14 @@ internal partial class Processor
             case Code.Stelem_R8:
                 cc.Append(me => $"((i4*)({me[0]}))[{me[1]}]=*(i4*)&({me[2]})", 3);
                 return [0x91, tMap.vSingle.typeid]; 
-            case Code.Stelem_Ref: 
+            case Code.Stelem_Ref:
                 cc.Error("reference not allowed");
                 return [0x91, tMap.aReference.typeid];
                
                   
 
             case Code.Call:
-            {
-                var result = HandleMethodCall((MethodReference)instruction.Operand); //A6:custom call, A7:builtin call.
-                if (result == null)
-                    throw new WeavingException($"Failed to handle method call at {instruction}");
-                return result;
-            }
+                return HandleMethodCall((MethodReference)instruction.Operand); //A6:custom call, A7:builtin call.
             case Code.Callvirt:
             {
                 cc.Error("no reference to virtual object");
@@ -2274,21 +1891,13 @@ internal partial class Processor
                 } 
                 else
                 {
-                    var callBytes = HandleMethodCall((MethodReference)instruction.Operand);
-                    if (callBytes == null)
-                        throw new WeavingException($"Failed to handle virtual method call at {instruction}");
-                    return [0xA2, ..callBytes];
+                    return [0xA2, .. HandleMethodCall((MethodReference)instruction.Operand)];
                 }
             }
-            case Code.Ldftn:
-            {
+            case Code.Ldftn: 
                 cc.Error();
                 // if use 0xA1 to load address type, 3rd param decide what actual addr-val to be loaded. A1 should convert index into address to mem0
-                var ldftnBytes = HandleMethodCall((MethodReference)instruction.Operand);
-                if (ldftnBytes == null)
-                    throw new WeavingException($"Failed to handle ldftn at {instruction}");
-                return [0xA1, tMap.aAddress.typeid, ..ldftnBytes];
-            }
+                return [0xA1, tMap.aAddress.typeid, ..HandleMethodCall((MethodReference)instruction.Operand)];
 
             case Code.Calli:
             {
@@ -2380,7 +1989,6 @@ internal partial class Processor
             {
                 // Validate cast statically when possible; emit runtime check otherwise
                 var t = (TypeReference)instruction.Operand;
-                SI.referenced_types.Add(t);
                 var resolvedTarget = t.Resolve();
                 if (resolvedTarget == null)
                 {
@@ -2421,7 +2029,7 @@ internal partial class Processor
                     return null;
                 }
 
-                // Handle special builtin methods
+                // Handle C builtin methods
                 if (sname == "System.Object..ctor()")
                 {
                     cc.Append(_ => "", 1);
@@ -2433,25 +2041,22 @@ internal partial class Processor
                 }
                 else
                 {
-                    // Other builtins may not be C-transpilable
-                    cc.Error($"C library doesn't support newobj `{sname}`");
+                    var iscbuiltin = CCoder.Cbuiltins.Any(p => p.sname == sname);
+                    if (iscbuiltin)
+                    {
+                        var (_, signature, args, rettype) = CCoder.Cbuiltins.First(p => p.sname == sname);
+                        cc.Append(me => $"{signature}({string.Join(",", me)})", args, rettype);
+                    }
+                    else
+                    {
+                        // Other builtins may not be C-transpilable
+                        cc.Error($"C library doesn't support newobj `{sname}`");
+                    }
                 }
                 
                 return [0xA7, (byte)(id&0xff), (byte)(id>>8)];
             } 
 
-            if (CCoder.Cbuiltins.Any(p => p.sname == sname))
-            {
-                var (_, _, args) = CCoder.Cbuiltins.First(p => p.sname == sname);
-                var cid = cc.FunPtr.IndexOf(sname);
-                if (cid == -1)
-                {
-                    cid = cc.FunPtr.Count;
-                    cc.FunPtr.Add(sname);
-                }
-                // todo function call..
-                cc.Append(me => $"fun_{cid}({string.Join(",", me)}", args);
-            }
             
             // Check if it's a system library method that's not supported
             if (sname.StartsWith("System.")) 
@@ -2462,8 +2067,10 @@ internal partial class Processor
 
             var en = new Processor(this) { bmw = bmw }.Process(methodDefinition, methodRef);
             if (en == null || en.ccoder.CError != "none") 
-                cc.Error("calling method not C tranpilable.");
+                cc.Error("calling method not C transpilable.");
             if (en == null) return null;
+
+            //todo: consider how to call C transpiled functions.
 
             var ird = en.registry;
             return [0xA6, (byte)(ird & 0xff), (byte)(ird >> 8)];
@@ -2569,10 +2176,10 @@ internal partial class Processor
                     }
 
                 this.stackDepth[instruction] = stackDepth;
-                cc.AnalyzeFrom(previous);
-
+                cc.AnalyzeFrom(previous); 
+                
                 // bmw.WriteWarning($"ins={instruction}");
-                ConvertToBytecode(instruction, method);
+                ConvertToBytecode(instruction, method); 
 
                 stackDepth = UpdateStackDepth(instruction, stackDepth);
 
@@ -2631,7 +2238,7 @@ internal partial class Processor
         }
          
         if (method.CustomAttributes.Any(p => p.AttributeType.Name == "RequireNativeCodeAttribute") && cc.error)
-            throw new WeavingException($"Method {method.FullName} requires native code but cannot transpile!");
+            throw new WeavingException($"Method {method.FullName} requires native code but cannot transpile!, error={cc.CError}");
     }
 
     private int UpdateStackDepth(Instruction instruction, int stackDepth)
@@ -2735,8 +2342,6 @@ internal partial class Processor
         }
     }
 
-        // placeholder for descriptor size calculation
-
     void EnsureInheritanceLayout(TypeReference type)
     {
         var td = type.Resolve();
@@ -2761,6 +2366,4 @@ internal partial class Processor
             info.size = Math.Max(info.size, baseInfo.size);
         }
     }
-
-        int GetDescriptorSize(ushort descriptorId) => 0;
 }

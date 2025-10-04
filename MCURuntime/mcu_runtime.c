@@ -42,7 +42,8 @@
 
 void debugger_break()
 {
-	system("pause");
+	exit(0);
+	// system("pause");
 }
 
 #define DIEIF(expr) if (expr)
@@ -2554,24 +2555,77 @@ void vm_run(int iteration)
 	snapshot_state = 0;
 }
 
-// layout: iterations 4B|payload{1B cid, 1B typeid, NB val}|
+// New layout for upper input buffer:
+// [ArrayHeader=11][Byte=1][len:4]{ per-field payload ... }
+// per-field payload item is one of:
+//   - [typeid (primitive 0..8 or 3=Char)] [value bytes]
+//   - [StringHeader=12][len:2][bytes]
+//   - [ArrayHeader=11][elemTid:1][len:4][raw bytes]
+//   - [ReferenceID=16][rid:4] (null if rid==0)
 
 void vm_put_upper_memory(uchar* buffer, int size)
 {
 	uchar* ptr = buffer;
-	int iters = ReadInt;
+	uchar* end = buffer + size;
 
-	while (ptr < buffer + size)
+	for (int cid = 0; cid < cartIO_N; ++cid)
 	{
-		int cid = ReadShort;
+		if (ptr >= end)
+			DOOM("upper buffer truncated at field %d", cid);
 		uchar* field_ptr = statics_val_ptr + cartIO_layout_ptr[cid];
-		uchar type_id = *field_ptr;
-		uchar put_tid = ReadByte;
-		if (type_id != put_tid)
-			DOOM("put cart_io:%d expected type %d, recv:%d\n", cid, type_id, put_tid);
-		memcpy(field_ptr + 1, ptr, get_type_sz(type_id));
-		ptr += get_type_sz(type_id);
+		uchar expected_tid = *field_ptr;
+		uchar token = *ptr; ptr += 1;
+
+		if (expected_tid == ReferenceID)
+		{
+			if (token == ReferenceID)
+			{
+				int rid = As(ptr, int); ptr += 4;
+				*field_ptr = ReferenceID;
+				As(field_ptr + 1, int) = rid;
+			}
+			else if (token == StringHeader)
+			{
+				unsigned short slen = As(ptr, unsigned short); ptr += 2;
+				int rid = newstr((short)slen, ptr);
+				ptr += slen;
+				*field_ptr = ReferenceID;
+				As(field_ptr + 1, int) = rid;
+			}
+			else if (token == ArrayHeader)
+			{
+				uchar elem_tid = *ptr; ptr += 1;
+				int arr_len = As(ptr, int); ptr += 4;
+				if (!(elem_tid == Boolean || elem_tid == Byte || elem_tid == SByte || elem_tid == 3 ||
+					elem_tid == Int16 || elem_tid == UInt16 || elem_tid == Int32 || elem_tid == UInt32 || elem_tid == Single))
+					DOOM("upper put: array element type %d not allowed", elem_tid);
+				int elem_sz = get_type_sz(elem_tid);
+				if (ptr + elem_sz * arr_len > end) DOOM("upper buffer array payload overflow");
+				int rid = newarr((short)arr_len, elem_tid);
+				struct array_val* arr = heap_obj[rid].pointer;
+				memcpy(&arr->payload, ptr, elem_sz * arr_len);
+				ptr += elem_sz * arr_len;
+				*field_ptr = ReferenceID;
+				As(field_ptr + 1, int) = rid;
+			}
+			else
+			{
+				DOOM("upper put: expected ReferenceID payload (string/array/ref), got token %d", token);
+			}
+		}
+		else
+		{
+			if (token != expected_tid)
+				DOOM("put cart_io:%d expected type %d, recv:%d\n", cid, expected_tid, token);
+			int sz = get_type_sz(expected_tid);
+			if (ptr + sz > end) DOOM("upper buffer primitive overflow");
+			memcpy(field_ptr + 1, ptr, sz);
+			ptr += sz;
+		}
 	}
+
+	if (ptr != end)
+		DOOM("upper buffer size mismatch: leftover %d bytes", (int)(end - ptr));
 }
 
 int lowerUploadSz;
@@ -2580,24 +2634,63 @@ uchar* vm_get_lower_memory()
 	if (new_stack_depth != 0)
 		DOOM("Must perform get_lower_memory after VM execution!");
 	uchar* lowerUpload = stack0;
-	*((int*)lowerUpload) = iterations;
-	uchar* lptr = lowerUpload + 4;
-	// only cartIO vals are uploaded, and primitive only.
+	uchar* lptr = lowerUpload;
+
+	// first 4 bytes: iterations
+	As(lptr, int) = iterations; lptr += 4;
+
 	for (int i = 0; i < cartIO_N; ++i)
 	{
-		if (cart_IO_stored[i / 32] & (1U << (i % 32)))
+		uchar* field_ptr = statics_val_ptr + cartIO_layout_ptr[i];
+		uchar type_id = *field_ptr;
+
+		if (type_id == ReferenceID)
 		{
-			//value modified.
-			As(lptr, short) = i; // which io is modified.
-			lptr += 2;
-			uchar* field_ptr = statics_val_ptr + cartIO_layout_ptr[i];
-			uchar type_id = *field_ptr;
-			int t_sz = get_val_sz(type_id);
-			memcpy(lptr, field_ptr, t_sz); // modified to what?
-			lptr += t_sz;
+			int rid = As(field_ptr + 1, int);
+			if (rid == 0)
+			{
+				*lptr = ReferenceID; lptr += 1;
+				As(lptr, int) = 0; lptr += 4;
+				continue;
+			}
+			uchar* header = heap_obj[rid].pointer;
+			if (*header == StringHeader)
+			{
+				struct string_val* str = (struct string_val*)header;
+				*lptr = StringHeader; lptr += 1;
+				As(lptr, unsigned short) = str->str_len; lptr += 2;
+				memcpy(lptr, &str->payload, str->str_len);
+				lptr += str->str_len;
+			}
+			else if (*header == ArrayHeader)
+			{
+				struct array_val* arr = (struct array_val*)header;
+				uchar elem_tid = arr->typeid;
+				if (!(elem_tid == Boolean || elem_tid == Byte || elem_tid == SByte || elem_tid == 3 ||
+					elem_tid == Int16 || elem_tid == UInt16 || elem_tid == Int32 || elem_tid == UInt32 || elem_tid == Single))
+					DOOM("lower get: array element type %d not allowed", elem_tid);
+				*lptr = ArrayHeader; lptr += 1;
+				*lptr = elem_tid; lptr += 1;
+				As(lptr, int) = arr->len; lptr += 4;
+				int elem_sz = get_type_sz(elem_tid);
+				memcpy(lptr, &arr->payload, elem_sz * arr->len);
+				lptr += elem_sz * arr->len;
+			}
+			else
+			{
+				DOOM("lower get: ReferenceID points to unsupported header %d", *header);
+			}
+		}
+		else
+		{
+			*lptr = type_id; lptr += 1;
+			int sz = get_type_sz(type_id);
+			memcpy(lptr, field_ptr + 1, sz);
+			lptr += sz;
 		}
 	}
-	lowerUploadSz = lptr - lowerUpload;
+
+	lowerUploadSz = (int)(lptr - lowerUpload);
 	return lowerUpload;
 }
 

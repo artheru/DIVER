@@ -1,8 +1,6 @@
 ﻿using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Linq;
-using System.Collections.Generic;
 using DiverTest.DIVER.CoralinkerAdaption;
 using Newtonsoft.Json;
 
@@ -18,7 +16,6 @@ namespace CartActivator
         public abstract void SendUpperData(string mcuUri, byte[] data);
         public virtual void NotifyLog(string mcuUri, string message) { 
         }
-
         /// ////////////////////////////// INTERFACES ////////////////////////////////////////////
 
         // whenever a lower io data is uploaded, call this.
@@ -28,256 +25,264 @@ namespace CartActivator
             using var br = new BinaryReader(ms);
             if (mcu_logics.TryGetValue(mcuUri, out var tup))
             {
-                Console.WriteLine($"recv iter {br.ReadInt32()} lowerIO data from {mcuUri}, operation {tup.name}");
-                while (ms.Position < lowerIOData.Length)
+                Console.WriteLine($"recv iter {br.ReadInt32()} lowerIO data from {mcuUri}, operation {tup.name}", $"DIVER-{tup.name}");
+
+                for (int cid = 0; cid < tup.fields.Length; cid++)
                 {
-                    var cid = br.ReadInt16();
-                    if (cid < 0 || cid > tup.fields.Length) throw new Exception("invalid Cartfield id!");
-                    // if it's upperio skip, otherwise write data.
-
-                    var field = tup.fields[cid];
-                    var descriptor = field.descriptor;
-
+                    // Skip upper-only fields on host writeback (we still consume the bytes)
+                    byte typeid = br.ReadByte();
                     object value;
-                    switch (descriptor.Kind)
+                    switch (typeid)
                     {
-                        case "Primitive":
-                            switch (descriptor.PrimitiveTypeId)
+                        case 0:
+                            value = br.ReadBoolean();
+                            break;
+                        case 1:
+                            value = br.ReadByte();
+                            break;
+                        case 2:
+                            value = (sbyte)br.ReadByte();
+                            break;
+                        case 3:
+                            value = br.ReadChar();
+                            break;
+                        case 4:
+                            value = br.ReadInt16();
+                            break;
+                        case 5:
+                            value = br.ReadUInt16();
+                            break;
+                        case 6:
+                            value = br.ReadInt32();
+                            break;
+                        case 7:
+                            value = br.ReadUInt32();
+                            break;
+                        case 8:
+                            value = br.ReadSingle();
+                            break;
+                        case 16:
+                        {
+                            // ReferenceID: only used for null
+                            int rid = br.ReadInt32();
+                            value = null;
+                            break;
+                        }
+                        case 12:
+                        {
+                            // String: [StringHeader=12][len:2][bytes]
+                            int slen = br.ReadUInt16();
+                            var bytes = br.ReadBytes(slen);
+                            value = Encoding.UTF8.GetString(bytes);
+                            break;
+                        }
+                        case 11:
+                        {
+                            // ArrayHeader: [11][elemTid:1][len:4][payload]
+                            byte elemTid = br.ReadByte();
+                            int arrLen = br.ReadInt32();
+                            Array arr;
+                            switch (elemTid)
                             {
                                 case 0:
-                                    value = br.ReadBoolean();
+                                {
+                                    var bytes = br.ReadBytes(arrLen);
+                                    var a = new bool[arrLen];
+                                    for (int i = 0; i < arrLen; i++) a[i] = bytes[i] != 0;
+                                    arr = a;
                                     break;
+                                }
                                 case 1:
-                                    value = br.ReadByte();
+                                    arr = br.ReadBytes(arrLen);
                                     break;
                                 case 2:
-                                    value = br.ReadSByte();
-                                    break;
-                                case 3:
-                                    value = br.ReadChar();
-                                    break;
-                                case 4:
-                                    value = br.ReadInt16();
-                                    break;
-                                case 5:
-                                    value = br.ReadUInt16();
-                                    break;
-                                case 6:
-                                    value = br.ReadInt32();
-                                    break;
-                                case 7:
-                                    value = br.ReadUInt32();
-                                    break;
-                                case 8:
-                                    value = br.ReadSingle();
-                                    break;
-                                default:
-                                    throw new Exception($"Unsupported primitive type ID: {descriptor.PrimitiveTypeId}");
-                            }
-
-                            break;
-
-                        case "Array":
-                            // Format: length (int32) + elements
-                            var length = br.ReadInt32();
-                            var elementType = field.fi.FieldType.GetElementType();
-                            var array = Array.CreateInstance(elementType, length);
-
-                            for (int i = 0; i < length; i++)
-                            {
-                                var elementDescriptor = descriptors[descriptor.ElementDescriptorId];
-                                var elementValue = DeserializeValue(br, elementDescriptor);
-                                array.SetValue(elementValue, i);
-                            }
-
-                            value = array;
-                            break;
-
-                        case "Struct":
-                            // Deserialize struct fields based on descriptor
-                            var structValue = Activator.CreateInstance(field.fi.FieldType);
-                            foreach (var structField in descriptor.Fields)
-                            {
-                                var fieldDescriptor = descriptors[structField.DescriptorId];
-                                var fieldValue = DeserializeValue(br, fieldDescriptor);
-                                var structFieldInfo = field.fi.FieldType.GetField(structField.Name);
-                                if (structFieldInfo != null)
                                 {
-                                    structFieldInfo.SetValue(structValue, fieldValue);
+                                    var bytes = br.ReadBytes(arrLen);
+                                    var a = new sbyte[arrLen];
+                                    for (int i = 0; i < arrLen; i++) a[i] = unchecked((sbyte)bytes[i]);
+                                    arr = a;
+                                    break;
                                 }
+                                case 3:
+                                {
+                                    var a = new char[arrLen];
+                                    for (int i = 0; i < arrLen; i++) a[i] = br.ReadChar();
+                                    arr = a;
+                                    break;
+                                }
+                                case 4:
+                                {
+                                    var a = new short[arrLen];
+                                    for (int i = 0; i < arrLen; i++) a[i] = br.ReadInt16();
+                                    arr = a;
+                                    break;
+                                }
+                                case 5:
+                                {
+                                    var a = new ushort[arrLen];
+                                    for (int i = 0; i < arrLen; i++) a[i] = br.ReadUInt16();
+                                    arr = a;
+                                    break;
+                                }
+                                case 6:
+                                {
+                                    var a = new int[arrLen];
+                                    for (int i = 0; i < arrLen; i++) a[i] = br.ReadInt32();
+                                    arr = a;
+                                    break;
+                                }
+                                case 7:
+                                {
+                                    var a = new uint[arrLen];
+                                    for (int i = 0; i < arrLen; i++) a[i] = br.ReadUInt32();
+                                    arr = a;
+                                    break;
+                                }
+                                case 8:
+                                {
+                                    var a = new float[arrLen];
+                                    for (int i = 0; i < arrLen; i++) a[i] = br.ReadSingle();
+                                    arr = a;
+                                    break;
+                                }
+                                default:
+                                    throw new Exception($"Unsupported array element type {elemTid}");
                             }
-
-                            value = structValue;
+                            value = arr;
                             break;
-
-                        case "String":
-                            var strLength = br.ReadInt32();
-                            var strBytes = br.ReadBytes(strLength);
-                            value = Encoding.UTF8.GetString(strBytes);
-                            break;
-
+                        }
                         default:
-                            throw new Exception($"Unsupported descriptor kind: {descriptor.Kind}");
+                            throw new Exception($"Unsupported type in lowerIO stream: {typeid}");
                     }
 
-                    if (field.isUpper) continue;
-                    field.fi.SetValue(this, value);
+                    if (tup.fields[cid].isUpper) continue;
+                    tup.fields[cid].fi.SetValue(this, value);
                 }
 
-
-                // ok to send current data.
+                // Build upper buffer: sequential typed payload
                 using var sends = new MemoryStream();
                 using var bw = new BinaryWriter(sends);
-                bw.Write(tup.iterations++);
+
                 for (var cid = 0; cid < tup.fields.Length; cid++)
                 {
-                    bw.Write((short)cid);
-                    var field = tup.fields[cid];
-                    var descriptor = field.descriptor;
-                    var val = field.fi.GetValue(this);
-
-                    SerializeValue(bw, descriptor, val);
+                    var val = tup.fields[cid].fi.GetValue(this);
+                    if (val is string s)
+                    {
+                        var bytes = Encoding.UTF8.GetBytes(s);
+                        bw.Write((byte)12); // StringHeader
+                        bw.Write((ushort)bytes.Length);
+                        bw.Write(bytes);
+                    }
+                    else if (val is Array arr)
+                    {
+                        // array of primitives
+                        byte elemTid;
+                        if (arr is bool[] ab)
+                        {
+                            elemTid = 0;
+                            bw.Write((byte)11); bw.Write(elemTid); bw.Write(ab.Length);
+                            for (int i = 0; i < ab.Length; i++) bw.Write((byte)(ab[i] ? 1 : 0));
+                            continue;
+                        }
+                        if (arr is byte[] a1)
+                        {
+                            elemTid = 1;
+                            bw.Write((byte)11); bw.Write(elemTid); bw.Write(a1.Length); bw.Write(a1);
+                            continue;
+                        }
+                        if (arr is sbyte[] a2)
+                        {
+                            elemTid = 2;
+                            bw.Write((byte)11); bw.Write(elemTid); bw.Write(a2.Length);
+                            for (int i = 0; i < a2.Length; i++) bw.Write((byte)a2[i]);
+                            continue;
+                        }
+                        if (arr is char[] ac)
+                        {
+                            elemTid = 3;
+                            bw.Write((byte)11); bw.Write(elemTid); bw.Write(ac.Length);
+                            for (int i = 0; i < ac.Length; i++) bw.Write(ac[i]);
+                            continue;
+                        }
+                        if (arr is short[] a4)
+                        {
+                            elemTid = 4;
+                            bw.Write((byte)11); bw.Write(elemTid); bw.Write(a4.Length);
+                            for (int i = 0; i < a4.Length; i++) bw.Write(a4[i]);
+                            continue;
+                        }
+                        if (arr is ushort[] a5)
+                        {
+                            elemTid = 5;
+                            bw.Write((byte)11); bw.Write(elemTid); bw.Write(a5.Length);
+                            for (int i = 0; i < a5.Length; i++) bw.Write(a5[i]);
+                            continue;
+                        }
+                        if (arr is int[] a6)
+                        {
+                            elemTid = 6;
+                            bw.Write((byte)11); bw.Write(elemTid); bw.Write(a6.Length);
+                            for (int i = 0; i < a6.Length; i++) bw.Write(a6[i]);
+                            continue;
+                        }
+                        if (arr is uint[] a7)
+                        {
+                            elemTid = 7;
+                            bw.Write((byte)11); bw.Write(elemTid); bw.Write(a7.Length);
+                            for (int i = 0; i < a7.Length; i++) bw.Write(a7[i]);
+                            continue;
+                        }
+                        if (arr is float[] a8)
+                        {
+                            elemTid = 8;
+                            bw.Write((byte)11); bw.Write(elemTid); bw.Write(a8.Length);
+                            for (int i = 0; i < a8.Length; i++) bw.Write(a8[i]);
+                            continue;
+                        }
+                        throw new Exception($"Unsupported array element type for field {tup.fields[cid].field}");
+                    }
+                    else
+                    {
+                        // primitive
+                        switch (Type.GetTypeCode(val.GetType()))
+                        {
+                            case TypeCode.Boolean:
+                                bw.Write((byte)0); bw.Write((bool)val);
+                                break;
+                            case TypeCode.Byte:
+                                bw.Write((byte)1); bw.Write((byte)val);
+                                break;
+                            case TypeCode.SByte:
+                                bw.Write((byte)2); bw.Write((sbyte)val);
+                                break;
+                            case TypeCode.Char:
+                                bw.Write((byte)3); bw.Write((char)val);
+                                break;
+                            case TypeCode.Int16:
+                                bw.Write((byte)4); bw.Write((short)val);
+                                break;
+                            case TypeCode.UInt16:
+                                bw.Write((byte)5); bw.Write((ushort)val);
+                                break;
+                            case TypeCode.Int32:
+                                bw.Write((byte)6); bw.Write((int)val);
+                                break;
+                            case TypeCode.UInt32:
+                                bw.Write((byte)7); bw.Write((uint)val);
+                                break;
+                            case TypeCode.Single:
+                                bw.Write((byte)8); bw.Write((float)val);
+                                break;
+                            default:
+                                throw new Exception($"Unsupported field primitive type for {tup.fields[cid].field}");
+                        }
+                    }
                 }
-
                 SendUpperData(mcuUri, sends.ToArray());
             }
             else
-                Console.WriteLine($"warning: {mcuUri} received lowerIOData but not registered");
-        }
+                Console.WriteLine($"warning: {mcuUri} received lowerIOData but not registered", $"DIVER-{tup.name}");
 
-        private void SerializeValue(BinaryWriter bw, DescriptorInfo descriptor, object val)
-        {
-            switch (descriptor.Kind)
-            {
-                case "Primitive":
-                    bw.Write((byte)descriptor.PrimitiveTypeId);
-                    switch (descriptor.PrimitiveTypeId)
-                    {
-                        case 0:
-                            bw.Write((bool)val);
-                            break;
-                        case 1:
-                            bw.Write((byte)val);
-                            break;
-                        case 2:
-                            bw.Write((sbyte)val);
-                            break;
-                        case 3:
-                            bw.Write((char)val);
-                            break;
-                        case 4:
-                            bw.Write((short)val);
-                            break;
-                        case 5:
-                            bw.Write((ushort)val);
-                            break;
-                        case 6:
-                            bw.Write((int)val);
-                            break;
-                        case 7:
-                            bw.Write((uint)val);
-                            break;
-                        case 8:
-                            bw.Write((float)val);
-                            break;
-                    }
-
-                    break;
-
-                case "Array":
-                    if (val == null)
-                    {
-                        bw.Write(0); // null array length
-                        break;
-                    }
-
-                    var array = (Array)val;
-                    bw.Write(array.Length);
-                        for (int i = 0; i < array.Length; i++)
-                        {
-                            SerializeValue(bw, descriptors[descriptor.ElementDescriptorId], array.GetValue(i));
-                        }
-
-                    break;
-
-                case "Struct":
-                    var structValue = val;
-                    foreach (var structField in descriptor.Fields)
-                    {
-                        var fieldValue = structValue.GetType().GetField(structField.Name)?.GetValue(structValue);
-                        if (fieldValue != null)
-                        {
-                            SerializeValue(bw, descriptors[structField.DescriptorId], fieldValue);
-                        }
-                    }
-
-                    break;
-
-                case "String":
-                    if (val == null)
-                    {
-                        bw.Write(0);
-                        break;
-                    }
-
-                    var str = (string)val;
-                    var strBytes = Encoding.UTF8.GetBytes(str);
-                    bw.Write(strBytes.Length);
-                    bw.Write(strBytes);
-                    break;
-
-                default:
-                    throw new Exception($"Unsupported descriptor kind for serialization: {descriptor.Kind}");
-            }
-        }
-
-        private object DeserializeValue(BinaryReader br, DescriptorInfo descriptor)
-            {
-                switch (descriptor.Kind)
-                {
-                    case "Primitive":
-                        switch (descriptor.PrimitiveTypeId)
-                        {
-                            case 0:
-                                return br.ReadBoolean();
-                            case 1:
-                                return br.ReadByte();
-                            case 2:
-                                return br.ReadSByte();
-                            case 3:
-                                return br.ReadChar();
-                            case 4:
-                                return br.ReadInt16();
-                            case 5:
-                                return br.ReadUInt16();
-                            case 6:
-                                return br.ReadInt32();
-                            case 7:
-                                return br.ReadUInt32();
-                            case 8:
-                                return br.ReadSingle();
-                            default:
-                                throw new Exception($"Unsupported primitive type ID: {descriptor.PrimitiveTypeId}");
-                        }
-
-                    case "Array":
-                        var arrayLength = br.ReadInt32();
-                        // For recursive array deserialization, we need the field type context
-                        // This is a simplified version - in practice we'd need more context
-                        throw new NotImplementedException("Nested array deserialization not fully implemented");
-
-                    case "Struct":
-                        // For struct deserialization, we need the struct type context
-                        throw new NotImplementedException("Struct deserialization not fully implemented in helper");
-
-                    case "String":
-                        var strLength = br.ReadInt32();
-                        var strBytes = br.ReadBytes(strLength);
-                        return Encoding.UTF8.GetString(strBytes);
-
-                    default:
-                        throw new Exception($"Unsupported descriptor kind: {descriptor.Kind}");
-                }
         }
 
         public virtual void RunDIVER()
@@ -311,47 +316,7 @@ namespace CartActivator
                 
                 // Console.WriteLine(json);
 
-                var cartInfo = JsonConvert.DeserializeObject<dynamic>(json);
-                var fieldsData = cartInfo.fields; 
-                var descriptorsData = cartInfo.descriptors;
-
-                descriptors.Clear();
-                foreach (var descData in descriptorsData)
-                {
-                    var descriptor = new DescriptorInfo
-                    {
-                        Id = (int)descData.Id,
-                        Kind = (string)descData.Kind,
-                        PrimitiveTypeId = (int)descData.PrimitiveTypeId,
-                        ElementDescriptorId = (int)descData.ElementDescriptorId,
-                        StructDataOffset = (int)descData.StructDataOffset,
-                        ClassId = (int)descData.ClassId,
-                        Fields = descData.Fields != null ?
-                            ((IEnumerable<dynamic>)descData.Fields).Select(f => new StructFieldInfo
-                            {
-                                Name = (string)f.Name,
-                                Offset = (int)f.Offset,
-                                DescriptorId = (int)f.DescriptorId
-                            }).ToArray() : new StructFieldInfo[0]
-                    };
-                    descriptors[descriptor.Id] = descriptor;
-                }
-
-                var fields = new PField[fieldsData.Count];
-                for (int i = 0; i < fieldsData.Count; i++)
-                {
-                    var fieldData = fieldsData[i];
-                    var descriptor = descriptors[(int)fieldData.DescriptorId];
-                    fields[i] = new PField
-                    {
-                        field = (string)fieldData.FieldName,
-                        offset = (int)fieldData.Offset,
-                        descriptorId = (int)fieldData.DescriptorId,
-                        descriptor = descriptor,
-                        typeid = descriptor.Kind == "Primitive" ? descriptor.PrimitiveTypeId : -1
-                    };
-                }
-
+                var fields = JsonConvert.DeserializeObject<PField[]>(json);
                 if (mcu_logics.ContainsKey(attr.mcuUri))
                     throw new Exception($"Already have logic for {attr.mcuUri}: LadderLogic {logic.Name}");
                 mcu_logics[attr.mcuUri] = new LogicInfo() { fields = fields, name = logic.Name };
@@ -361,7 +326,7 @@ namespace CartActivator
                     if (pField.fi == null)
                         throw new Exception($"field {pField.field} doesn't exist in cart object?");
                     pField.isUpper = pField.fi.IsDefined(typeof(AsUpperIO));
-                    // Now we have descriptor information for type checking
+                    // todo: check type.
                 }
                 SetMCUProgram(attr.mcuUri, asmBytes);
             }
@@ -374,26 +339,6 @@ namespace CartActivator
             public FieldInfo fi;
             public bool isUpper;
             public int typeid, offset;
-            public int descriptorId;
-            public DescriptorInfo descriptor;
-        }
-
-        class DescriptorInfo
-        {
-            public int Id;
-            public string Kind; // "Primitive", "Array", "Struct", "String"
-            public int PrimitiveTypeId;
-            public int ElementDescriptorId;
-            public int StructDataOffset;
-            public int ClassId;
-            public StructFieldInfo[] Fields;
-        }
-
-        class StructFieldInfo
-        {
-            public string Name;
-            public int Offset;
-            public int DescriptorId;
         }
 
         class LogicInfo
@@ -403,7 +348,6 @@ namespace CartActivator
             public int iterations;
         }
         private Dictionary<string, LogicInfo> mcu_logics = new();
-        private Dictionary<int, DescriptorInfo> descriptors = new();
     }
 
 
@@ -428,7 +372,7 @@ namespace CartActivator
 
         public override void SendUpperData(string mcu_device_url, byte[] data)
         {
-            //todo: this is for VM data exchange, contains upperIO/lowerIO modifications.
+            // data must be an ArrayHeader-wrapped byte array built by caller.
             MCUTestRunner.DebugSendUpper(data);
         }
 
