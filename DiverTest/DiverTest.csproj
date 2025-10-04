@@ -33,6 +33,10 @@
 		<WeaverFiles Include="DiverCompiler.exe" />
 	</ItemGroup>
 
+	<Target Name="RebuildDiverCompiler" BeforeTargets="PreBuildEvent">
+		<MSBuild Projects="..\DiverCompiler\DiverCompiler.csproj" Targets="Rebuild" />
+	</Target>
+
 	<UsingTask TaskName="CppCompile" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.CppTasks.Common.dll" />
 
 	<Target Name="PreBuild" BeforeTargets="PreBuildEvent">

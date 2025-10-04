@@ -31,38 +31,44 @@ public class StringInterpolationHandler
     {
         _module = module;
         bmw = moduleWeaver;
-        
-        //bmw.WriteWarning("StringInterpolationHandler constructor called");
-        
-        // Get references to String.Format methods
-        var stringType = module.ImportReference(typeof(string)).Resolve();
-        var objectType = module.ImportReference(typeof(object));
-        var objectArrayType = module.ImportReference(typeof(object[]));
 
+        // Resolve core types via TypeSystem to avoid resolver issues under FodyIsolated
+        var stringTypeRef = module.TypeSystem.String;
+        var stringTypeDef = stringTypeRef.Resolve();
+
+        if (stringTypeDef == null)
+        {
+            // Could not resolve System.String; disable processing gracefully
+            _stringFormat1 = null;
+            _stringFormat2 = null;
+            _stringFormat3 = null;
+            _stringFormatArray = null;
+            return;
+        }
+
+        // Find String.Format overloads and import into this module
         _stringFormat1 = module.ImportReference(
-            stringType.Methods.First(m => m.Name == "Format" && m.Parameters.Count == 2 && 
-                                        m.Parameters[0].ParameterType.FullName == "System.String" &&
-                                        m.Parameters[1].ParameterType.FullName == "System.Object"));
+            stringTypeDef.Methods.First(m => m.Name == "Format" && m.Parameters.Count == 2 &&
+                                             m.Parameters[0].ParameterType.FullName == "System.String" &&
+                                             m.Parameters[1].ParameterType.FullName == "System.Object"));
 
         _stringFormat2 = module.ImportReference(
-            stringType.Methods.First(m => m.Name == "Format" && m.Parameters.Count == 3 && 
-                                        m.Parameters[0].ParameterType.FullName == "System.String" &&
-                                        m.Parameters[1].ParameterType.FullName == "System.Object" && 
-                                        m.Parameters[2].ParameterType.FullName == "System.Object"));
+            stringTypeDef.Methods.First(m => m.Name == "Format" && m.Parameters.Count == 3 &&
+                                             m.Parameters[0].ParameterType.FullName == "System.String" &&
+                                             m.Parameters[1].ParameterType.FullName == "System.Object" &&
+                                             m.Parameters[2].ParameterType.FullName == "System.Object"));
 
         _stringFormat3 = module.ImportReference(
-            stringType.Methods.First(m => m.Name == "Format" && m.Parameters.Count == 4 && 
-                                        m.Parameters[0].ParameterType.FullName == "System.String" &&
-                                        m.Parameters[1].ParameterType.FullName == "System.Object" &&
-                                        m.Parameters[2].ParameterType.FullName == "System.Object" &&
-                                        m.Parameters[3].ParameterType.FullName == "System.Object"));
+            stringTypeDef.Methods.First(m => m.Name == "Format" && m.Parameters.Count == 4 &&
+                                             m.Parameters[0].ParameterType.FullName == "System.String" &&
+                                             m.Parameters[1].ParameterType.FullName == "System.Object" &&
+                                             m.Parameters[2].ParameterType.FullName == "System.Object" &&
+                                             m.Parameters[3].ParameterType.FullName == "System.Object"));
 
         _stringFormatArray = module.ImportReference(
-            stringType.Methods.First(m => m.Name == "Format" && m.Parameters.Count == 2 && 
-                                        m.Parameters[0].ParameterType.FullName == "System.String" &&
-                                        m.Parameters[1].ParameterType.FullName == "System.Object[]")); 
-        
-        //bmw.WriteWarning("String.Format references imported successfully");
+            stringTypeDef.Methods.First(m => m.Name == "Format" && m.Parameters.Count == 2 &&
+                                             m.Parameters[0].ParameterType.FullName == "System.String" &&
+                                             m.Parameters[1].ParameterType.FullName == "System.Object[]"));
     }
 
     /// <summary>
@@ -77,6 +83,10 @@ public class StringInterpolationHandler
         
         // Dump all instructions for debugging
         DumpMethodInstructions(method);
+
+        // If we failed to resolve String.Format, skip processing gracefully
+        if (_stringFormatArray == null)
+            return;
 
         // Get the IL processor for the method
         processor = method.Body.GetILProcessor();

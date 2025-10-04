@@ -1,0 +1,303 @@
+warning: in the working copy of 'DiverCompiler/Processor.Builtin.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'DiverCompiler/native/compile_native_binary.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'DiverTest/DIVER/DIVERInterface.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'DiverTest/additional_builtins.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'DiverTest/native/code.c', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ImplementationNoteForAI.md', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/DIVER.sln b/DIVER.sln[m
+[1mindex 5bf9033..3cbdb45 100644[m
+[1m--- a/DIVER.sln[m
+[1m+++ b/DIVER.sln[m
+[36m@@ -16,6 +16,9 @@[m [mEndProject[m
+ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "MCURuntime", "MCURuntime\MCURuntime.vcxproj", "{809EC741-D1A8-4522-8DE4-A9D1F4687DD1}"[m
+ EndProject[m
+ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DiverTest", "DiverTest\DiverTest.csproj", "{7A78D970-5AD3-44C6-A04B-21EF79CB1BEF}"[m
+[32m+[m	[32mProjectSection(ProjectDependencies) = postProject[m
+[32m+[m		[32m{F9E5081B-0F60-4C0C-9794-B2EB9E6947E1} = {F9E5081B-0F60-4C0C-9794-B2EB9E6947E1}[m
+[32m+[m	[32mEndProjectSection[m
+ EndProject[m
+ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "3rd-party", "3rd-party", "{FFF7E424-7982-4A87-92A6-351CF85A459F}"[m
+ EndProject[m
+[1mdiff --git a/DiverCompiler/ModuleWeaver.cs b/DiverCompiler/ModuleWeaver.cs[m
+[1mindex 2bc07eb..089ef6b 100644[m
+[1m--- a/DiverCompiler/ModuleWeaver.cs[m
+[1m+++ b/DiverCompiler/ModuleWeaver.cs[m
+[36m@@ -12,9 +12,11 @@[m [mnamespace CartActivator;[m
+ [m
+ public class ModuleWeaver : BaseModuleWeaver [m
+ {  [m
+[31m-    public override void Execute()   [m
+[31m-    {     [m
+[31m-        WriteWarning($"RunOnMCU Processor"); [m
+[32m+[m[32m    public override void Execute()[m
+[32m+[m[32m    {[m
+[32m+[m[32m        const string ver = "v0.36e";[m
+[32m+[m
+[32m+[m[32m        WriteWarning($"RunOnMCU Processor {ver}");[m[41m [m
+ [m
+         // Load additional built-in methods[m
+         var extraMethodsPath = "extra_methods.txt";[m
+[36m@@ -22,7 +24,7 @@[m [mpublic class ModuleWeaver : BaseModuleWeaver[m
+         {[m
+             var extraMethods = File.ReadAllLines(extraMethodsPath);[m
+             WriteWarning($"Loading {extraMethods.Length} additional built-in methods");[m
+[31m-            Processor.BuiltIn.AddRange(extraMethods); [m
+[32m+[m[32m            Processor.BuiltInMethods.AddRange(extraMethods);[m[41m [m
+         }[m
+         else[m
+         {[m
+[36m@@ -58,18 +60,6 @@[m [mpublic class ModuleWeaver : BaseModuleWeaver[m
+ [m
+                 // foreach (var mm in type.Methods)[m
+                 // {[m
+[31m-                //     if (mm.HasBody)[m
+[31m-                //     {[m
+[31m-                //         WriteWarning($"Processing string interpolation in `{type.Name}::{mm.Name}`");[m
+[31m-                //         try[m
+[31m-                //         {[m
+[31m-                //             var stringInterpolationHandler = new StringInterpolationHandler(module, this); [m
+[31m-                //             stringInterpolationHandler.ProcessMethod(mm);[m
+[31m-                //         }[m
+[31m-                //         catch (Exception ex)[m
+[31m-                //         {[m
+[31m-                //             WriteWarning($"Failed to process string interpolation in {mm.FullName}: {ex.Message}");[m
+[31m-                //         }[m
+                 //     }[m
+                 // }[m
+ [m
+[36m@@ -87,19 +77,52 @@[m [mpublic class ModuleWeaver : BaseModuleWeaver[m
+                 //     $"Custom functions:\r\n{string.Join("\r\n", processor.SI.methods.Keys.Select(p => $"  => {p}"))}");[m
+                 var dll = ei.dll;[m
+                 WriteWarning([m
+[31m-                    $"mcu program sz={dll.bytes.Length}, interval={myinterval}, interface variables sequence=[{string.Join(",", dll.IOs.Select(p => $"{p.FieldName}({p.typeid})@{p.offset}"))}]");[m
+[32m+[m[32m                    $"mcu program sz={dll.bytes.Length}, interval={myinterval}, interface variables sequence=[{string.Join(",", dll.CartFields.Select(p => $"{p.FieldName}(desc:{p.DescriptorId})@{p.Offset}"))}]");[m
+[32m+[m[32m                foreach (var desc in dll.CartDescriptors)[m
+[32m+[m[32m                {[m
+[32m+[m[32m                    WriteWarning($"descriptor id={desc.Id} kind={desc.Kind} primitive={desc.PrimitiveTypeId} element={desc.ElementDescriptorId} class={desc.ClassId} fields={desc.Fields.Length}");[m
+[32m+[m[32m                }[m
+ [m
+                 // File.WriteAllBytes($"{type.Name}.bin", dll.bytes);[m
+ [m
+                 module.Resources.Add(new EmbeddedResource($"{type.Name}.bin", ManifestResourceAttributes.Public, dll.bytes));[m
+[32m+[m[32m                // Manually build JSON string using string interpolation[m
+[32m+[m[32m                var fieldsJson = string.Join(",",[m
+[32m+[m[32m                    dll.CartFields.Select(f =>[m
+[32m+[m[32m                        $"{{\"FieldName\":\"{f.FieldName}\",\"Offset\":{f.Offset},\"TypeTag\":{f.TypeTag},\"DescriptorId\":{f.DescriptorId}}}"[m
+[32m+[m[32m                    )[m
+[32m+[m[32m                );[m
+[32m+[m
+[32m+[m[32m                var descriptorsJson = string.Join(",",[m
+[32m+[m[32m                    dll.CartDescriptors.Select(d =>[m
+[32m+[m[32m                        $"{{" +[m
+[32m+[m[32m                        $"\"Id\":{d.Id}," +[m
+[32m+[m[32m                        $"\"Kind\":\"{d.Kind}\"," +[m
+[32m+[m[32m                        $"\"PrimitiveTypeId\":{d.PrimitiveTypeId}," +[m
+[32m+[m[32m                        $"\"ElementDescriptorId\":{d.ElementDescriptorId}," +[m
+[32m+[m[32m                        $"\"StructDataOffset\":{d.StructDataOffset}," +[m
+[32m+[m[32m                        $"\"ClassId\":{d.ClassId}," +[m
+[32m+[m[32m                        $"\"Fields\":[" +[m
+[32m+[m[32m                        string.Join(",",[m
+[32m+[m[32m                            d.Fields.Select(sf =>[m
+[32m+[m[32m                                $"{{\"Name\":\"{sf.Name}\",\"Offset\":{sf.Offset},\"DescriptorId\":{sf.DescriptorId}}}"[m
+[32m+[m[32m                            )[m
+[32m+[m[32m                        ) +[m
+[32m+[m[32m                        $"]" +[m
+[32m+[m[32m                        $"}}"[m
+[32m+[m[32m                    )[m
+[32m+[m[32m                );[m
+[32m+[m
+[32m+[m[32m                var json = "{\n" +[m
+[32m+[m[32m                           $"  \"fields\": [{fieldsJson}],\n" +[m
+[32m+[m[32m                           $"  \"descriptors\": [{descriptorsJson}]\n" +[m
+[32m+[m[32m                           "}";[m
+                 module.Resources.Add(new EmbeddedResource($"{type.Name}.bin.json", ManifestResourceAttributes.Public,[m
+[31m-                    Encoding.UTF8.GetBytes("[" + string.Join(",",[m
+[31m-                        dll.IOs.Select(p =>[m
+[31m-                            $"{{\"field\":\"{p.FieldName}\", \"typeid\":{p.typeid}, \"offset\":{p.offset}}}")) + "]")));[m
+[32m+[m[32m                    Encoding.UTF8.GetBytes(json)));[m
+             }[m
+         }  [m
+          [m
+[31m-        WriteWarning($"RunOnMCU Processor v0.35a finished");[m
+[32m+[m[32m        WriteWarning($"RunOnMCU Processor {ver} finished");[m
+     }[m
+ [m
+     public override IEnumerable<string> GetAssembliesForScanning()[m
+[1mdiff --git a/DiverCompiler/Processor.Builtin.cs b/DiverCompiler/Processor.Builtin.cs[m
+[1mindex fb96699..74ec148 100644[m
+[1m--- a/DiverCompiler/Processor.Builtin.cs[m
+[1m+++ b/DiverCompiler/Processor.Builtin.cs[m
+[36m@@ -4,7 +4,17 @@[m [mnamespace MCURoutineCompiler;[m
+ [m
+ internal partial class Processor[m
+ {[m
+[31m-    internal static List<string> BuiltIn =[m
+[32m+[m[32m    internal static List<string> BuildInClasses =[m
+[32m+[m[32m    [[m
+[32m+[m[32m        // Instanceable container classes (generic arity preserved)[m
+[32m+[m[32m        "System.Collections.Generic.List`1",[m
+[32m+[m[32m        "System.Collections.Generic.Dictionary`2",[m
+[32m+[m[32m        "System.Collections.Generic.Queue`1",[m
+[32m+[m[32m        "System.Collections.Generic.Stack`1",[m
+[32m+[m[32m        "System.Collections.Generic.HashSet`1",[m
+[32m+[m[32m    ];[m
+[32m+[m
+[32m+[m[32m    internal static List<string> BuiltInMethods =[m
+     [[m
+         "System.Object..ctor()",      //0[m
+         "System.Math.Abs(Decimal)",      //1[m
+[36m@@ -147,6 +157,25 @@[m [minternal partial class Processor[m
+         "System.String.Join(String, IEnumerable`1)",      //125[m
+         "System.String.Join(String, Object[])",      //126[m
+         "System.Linq.Enumerable.Select(IEnumerable`1, Func`2)",      //127[m
+[32m+[m
+[32m+[m[32m        // List<T> support[m
+[32m+[m[32m        "System.Collections.Generic.List`1..ctor()",      //128[m
+[32m+[m[32m        "System.Collections.Generic.List`1.Add(T)",      //129[m
+[32m+[m[32m        "System.Collections.Generic.List`1.get_Count()",  //130[m
+[32m+[m[32m        "System.Collections.Generic.List`1.get_Item(Int32)", //131[m
+[32m+[m[32m        "System.Collections.Generic.List`1.set_Item(Int32, T)", //132[m
+[32m+[m[32m        "System.Collections.Generic.List`1.RemoveAt(Int32)", //133[m
+[32m+[m[32m        "System.Collections.Generic.List`1.Clear()", //134[m
+[32m+[m[32m        "System.Collections.Generic.List`1.Contains(T)", //135[m
+[32m+[m[32m        "System.Collections.Generic.List`1.IndexOf(T)", //136[m
+[32m+[m[32m        "System.Collections.Generic.List`1.InsertRange(Int32, IEnumerable`1)", //137[m
+[32m+[m[32m        "System.Linq.Enumerable.ToList(IEnumerable`1)", //138[m
+[32m+[m[32m        "System.Linq.Enumerable.Where(IEnumerable`1, Func`2)",      //139[m
+[32m+[m[32m        "System.Linq.Enumerable.Sum(IEnumerable`1)",                //140[m
+[32m+[m[32m        "System.Linq.Enumerable.Max(IEnumerable`1)",                //141[m
+[32m+[m[32m        "System.Linq.Enumerable.Min(IEnumerable`1)",                //142[m
+[32m+[m[32m        "System.Linq.Enumerable.DefaultIfEmpty(IEnumerable`1, TSource)", //143[m
+[32m+[m[32m        "System.Linq.Enumerable.ToArray(IEnumerable`1)", //144[m
+     ];[m
+ [m
+ }[m
+\ No newline at end of file[m
+[1mdiff --git a/DiverCompiler/Processor.cs b/DiverCompiler/Processor.cs[m
+[1mindex 6a4a8fb..d1f7fe6 100644[m
+[1m--- a/DiverCompiler/Processor.cs[m
+[1m+++ b/DiverCompiler/Processor.cs[m
+[36m@@ -25,7 +25,43 @@[m [minternal partial class Processor[m
+     public class ResultDLL[m
+     {[m
+         public byte[] bytes;[m
+[31m-        public (string FieldName, int offset, byte typeid)[] IOs;[m
+[32m+[m[32m        public CartFieldInfo[] CartFields;[m
+[32m+[m[32m        public CartDescriptorInfo[] CartDescriptors;[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    public enum CartDescriptorKind : byte[m
+[32m+[m[32m    {[m
+[32m+[m[32m        Primitive = 0,[m
+[32m+[m[32m        Array = 1,[m
+[32m+[m[32m        Struct = 2,[m
+[32m+[m[32m        String = 3,[m
+[32m+[m[32m        Reference = 4,[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    public class CartFieldInfo[m
+[32m+[m[32m    {[m
+[32m+[m[32m        public string FieldName { get; set; }[m
+[32m+[m[32m        public int Offset { get; set; }[m
+[32m+[m[32m        public byte TypeTag { get; set; }[m
+[32m+[m[32m        public ushort DescriptorId { get; set; }[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    public class CartDescriptorInfo[m
+[32m+[m[32m    {[m
+[32m+[m[32m        public ushort Id { get; set; }[m
+[32m+[m[32m        public CartDescriptorKind Kind { get; set; }[m
+[32m+[m[32m        public byte PrimitiveTypeId { get; set; }[m
+[32m+[m[32m        public ushort ElementDescriptorId { get; set; }[m
+[32m+[m[32m        public ushort StructDataOffset { get; set; }[m
+[32m+[m[32m        public CartStructFieldInfo[] Fields { get; set; } = Array.Empty<CartStructFieldInfo>();[m
+[32m+[m[32m        public ushort ClassId { get; set; }[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    public class CartStructFieldInfo[m
+[32m+[m[32m    {[m
+[32m+[m[32m        public string Name { get; set; }[m
+[32m+[m[32m        public ushort Offset { get; set; }[m
+[32m+[m[32m        public ushort DescriptorId { get; set; }[m
+     }[m
+ [m
+     public class StackInitVals[m
+[36m@@ -57,18 +93,24 @@[m [minternal partial class Processor[m
+         internal Dictionary<string, MethodEntry> methods = new();[m
+ [m
+         internal Dictionary<string, (TypeReference tr, FieldReference fr)> referenced_typefield = []; //name::fieldname[m
+[32m+[m[32m        internal HashSet<TypeReference> referenced_types = new(new TypeReferenceEqualityComparer());[m
+ [m
+         internal class class_fields[m
+         {[m
+             public TypeReference tr;[m
+[32m+[m[32m            public TypeReference baseType;[m
+             public Dictionary<string, (int offset, TypeReference tr, byte typeid, TypeReference dtr)> field_offset = new(); // field name[m
+             public int size = 0;[m
+[32m+[m[32m            public bool baseInitialized;[m
+         }[m
+ [m
+         internal Dictionary<string, class_fields> class_ifield_offset = new(); //key:typereference.fullname[m
+         internal class_fields sfield_offset = new();[m
+         internal List<string> instanceable_classes = [];[m
+[31m-        internal List<string> cart_io_list = [];[m
+[32m+[m[32m        internal List<(string field, TypeReference tr, byte typeId, int offset, ushort descriptorId)> cart_io_layout = [];[m
+[32m+[m[32m        internal List<CartDescriptorInfo> cart_descriptors = new();[m
+[32m+[m[32m        internal Dictionary<TypeReference, ushort> descriptorLookup = new(new TypeReferenceEqualityComparer());[m
+[32m+[m
+         internal List<Action> linking_actions = [];[m
+ [m
+         internal Dictionary<string, (TypeReference tr, MethodReference mr)> RT_types = [];[m
+[36m@@ -89,7 +131,7 @@[m [minternal partial class Processor[m
+         SI = p.SI;[m
+     } [m
+ [m
+[31m-    static bool IsDerivedFrom(TypeDefinition type, string baseTypeFullName)[m
+[32m+[m[32m        static bool IsDerivedFrom(TypeDefinition type, string baseTypeFullName)[m
+     {[m
+         if (type == null)[m
+             return false;[m
+[36m@@ -100,12 +142,159 @@[m [minternal partial class Processor[m
+         return IsDerivedFrom(type.BaseType?.Resolve(), baseTypeFullName);[m
+     }[m
+ [m
+[32m+[m[32m        ushort EnsureDescriptor(TypeReference type)[m
+[32m+[m[32m        {[m
+[32m+[m[32m            if (type == null) return 0;[m
+[32m+[m[32m            if (SI.descriptorLookup.TryGetValue(type, out var existing)) return existing;[m
+[32m+[m
+[32m+[m[32m            ushort id = (ushort)SI.cart_descriptors.Count;[m
+[32m+[m
+[32m+[m[32m            if (type.IsByReference)[m
+[32m+[m[32m                type = ((ByReferenceType)type).ElementType;[m
+[32m+[m
+[32m+[m[32m            if (type.IsPointer)[m
+[32m+[m[32m                type = ((PointerType)type).ElementType;[m
+[32m+[m
+[32m+[m[32m            if (type.IsValueType && type.Resolve()?.IsEnum == true)[m
+[32m+[m[32m            {[m
+[32m+[m[32m                var enumType = type.Resolve();[m
+[32m+[m[32m                // Find the underlying type by looking for the 'value__' field[m
+[32m+[m[32m                var valueField = enumType.Fields.FirstOrDefault(f => f.Name == "value__");[m
+[32m+[m[32m                if (valueField != null)[m
+[32m+[m[32m                {[m
+[32m+[m[32m                    type = valueField.FieldType;[m
+[32m+[m[32m                }[m
+[32m+[m[32m                else[m
+[32m+[m[32m                {[m
+[32m+[m[32m                    // Fallback to Int32 if we can't find the value field[m
+[32m+[m[32m                    type = enumType.Module.TypeSystem.Int32;[m
+[32m+[m[32m                }[m
+[32m+[m[32m            }[m
+[32m+[m
+[32m+[m[32m            var descriptor = new CartDescriptorInfo { Id = id };[m
+[32m+[m
+[32m+[m[32m            if (tMapDict.TryGetValue(type.Name, out var primitive))[m
+[32m+[m[32m            {[m
+[32m+[m[32m                descriptor.Kind = CartDescriptorKind.Primitive;[m
+[32m+[m[32m                descriptor.PrimitiveTypeId = primitive.typeid;[m
+[32m+[m[32m            }[m
+[32m+[m[32m            else if (type.FullName == "System.String")[m
+[32m+[m[32m            {[m
+[32m+[m[32m                descriptor.Kind = CartDescriptorKind.String;[m
+[32m+[m[32m 

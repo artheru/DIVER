@@ -23,8 +23,4 @@ call %VC_CMD%
 echo %PROCESSOR_ARCHITECTURE% == %OutputPath%
 
 REM Step 4: C++ compilation(DEBUG)
-cl /LD /MDd /I"." /Zi /EHsc ../MCURuntime/mcu_runtime.c /Fe:%OutputPath%mcuruntime.dll /link /DEBUG
-
-
-REM Step 4: C++ compilation(DEBUG)
-REM cl /LD /MD /I"." /EHsc ../MCURuntime/mcu_runtime.c /Fe:%OutputPath%mcuruntime.dll /link
+cl /W0 /LD /MDd /I"." /Zi /EHsc ../MCURuntime/mcu_runtime.c /Fe:%OutputPath%mcuruntime.dll /link /DEBUG

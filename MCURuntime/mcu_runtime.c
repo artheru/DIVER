@@ -309,7 +309,8 @@ uchar get_val_sz(uchar typeid)
 }
 
 // builtin class fields, each fields...
-uchar builtin_cls_delegate[] = { 2, ReferenceID, Int32 };
+uchar builtin_cls_delegate[] = { 2, ReferenceID, Int32 }; //number of fields, type of field1, type of field2....
+// other type of class can be appended...
 
 uchar* builtin_cls[] = {
 	builtin_cls_delegate, //Action
@@ -4436,6 +4437,80 @@ void builtin_Enumerable_Select(uchar** reptr) {
 	PUSH_STACK_REFERENCEID(result_arr_id);
 }
 
+// List<T> builtin methods
+void builtin_List_ctor(uchar** reptr) {
+	// todo.
+}
+
+void builtin_List_Add(uchar** reptr) {
+	// todo
+}
+
+void builtin_List_get_Count(uchar** reptr) {
+	// todo
+}
+
+void builtin_List_get_Item(uchar** reptr) {
+	// todo
+}
+
+void builtin_List_set_Item(uchar** reptr) {
+	// todo
+}
+
+void builtin_List_RemoveAt(uchar** reptr) {
+	// todo
+}
+
+void builtin_List_Clear(uchar** reptr) {
+	// todo
+}
+
+void builtin_List_Contains(uchar** reptr) {
+	// todo
+}
+
+void builtin_List_IndexOf(uchar** reptr) {
+	// todo
+}
+
+void builtin_List_InsertRange(uchar** reptr) {
+	// todo
+}
+
+void builtin_Enumerable_ToList(uchar** reptr) {
+	// todo
+}
+
+void builtin_Enumerable_ToArray(uchar** reptr) {
+	// todo
+}
+
+// Implementation of Enumerable.Where
+void builtin_Enumerable_Where(uchar** reptr) {
+	// todo
+}
+
+// Implementation of Enumerable.Sum for Int32 sequences
+void builtin_Enumerable_Sum(uchar** reptr) {
+	// todo
+}
+
+// Implementation of Enumerable.Max for Int32 sequences
+void builtin_Enumerable_Max(uchar** reptr) {
+	// todo
+}
+
+// Implementation of Enumerable.Min for Int32 sequences
+void builtin_Enumerable_Min(uchar** reptr) {
+	// todo
+}
+
+// Implementation of Enumerable.DefaultIfEmpty for Int32 sequences
+void builtin_Enumerable_DefaultIfEmpty(uchar** reptr) {
+	// todo
+}
+
 // Helper function to set up the built-in method table
 void setup_builtin_methods() {
 	bn = 0;  // Reset counter
@@ -4580,8 +4655,26 @@ void setup_builtin_methods() {
 	builtin_methods[bn++] = builtin_String_Join_ObjectArray; //126
 	builtin_methods[bn++] = builtin_Enumerable_Select; //127
 
+	// List<T> support
+	builtin_methods[bn++] = builtin_List_ctor; //128
+	builtin_methods[bn++] = builtin_List_Add; //129
+	builtin_methods[bn++] = builtin_List_get_Count; //130
+	builtin_methods[bn++] = builtin_List_get_Item; //131
+	builtin_methods[bn++] = builtin_List_set_Item; //132
+	builtin_methods[bn++] = builtin_List_RemoveAt; //133
+	builtin_methods[bn++] = builtin_List_Clear; //134
+	builtin_methods[bn++] = builtin_List_Contains; //135
+	builtin_methods[bn++] = builtin_List_IndexOf; //136
+	builtin_methods[bn++] = builtin_List_InsertRange; //137
+	builtin_methods[bn++] = builtin_Enumerable_ToList; //138
+
 	// batch 2 builtins:
-	
+	builtin_methods[bn++] = builtin_Enumerable_Where; //139
+	builtin_methods[bn++] = builtin_Enumerable_Sum; //140
+	builtin_methods[bn++] = builtin_Enumerable_Max; //141
+	builtin_methods[bn++] = builtin_Enumerable_Min; //142
+	builtin_methods[bn++] = builtin_Enumerable_DefaultIfEmpty; //143
+	builtin_methods[bn++] = builtin_Enumerable_ToArray; //144
 
 	INFO("System builtin methods n=%d", bn);
 	add_additional_builtins();

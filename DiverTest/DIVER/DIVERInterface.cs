@@ -1,6 +1,8 @@
 ﻿using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Linq;
+using System.Collections.Generic;
 using DiverTest.DIVER.CoralinkerAdaption;
 using Newtonsoft.Json;
 
@@ -16,6 +18,7 @@ namespace CartActivator
         public abstract void SendUpperData(string mcuUri, byte[] data);
         public virtual void NotifyLog(string mcuUri, string message) { 
         }
+
         /// ////////////////////////////// INTERFACES ////////////////////////////////////////////
 
         // whenever a lower io data is uploaded, call this.
@@ -25,53 +28,102 @@ namespace CartActivator
             using var br = new BinaryReader(ms);
             if (mcu_logics.TryGetValue(mcuUri, out var tup))
             {
-                Console.WriteLine($"recv iter {br.ReadInt32()} lowerIO data from {mcuUri}, operation {tup.name}", $"DIVER-{tup.name}");
+                Console.WriteLine($"recv iter {br.ReadInt32()} lowerIO data from {mcuUri}, operation {tup.name}");
                 while (ms.Position < lowerIOData.Length)
                 {
                     var cid = br.ReadInt16();
                     if (cid < 0 || cid > tup.fields.Length) throw new Exception("invalid Cartfield id!");
                     // if it's upperio skip, otherwise write data.
-                    var typeid = br.ReadByte();
-                    if (tup.fields[cid].typeid != typeid)
-                        throw new Exception($"??? typeid not match for {tup.fields[cid].field}({cid}), expected {tup.fields[cid].typeid} got {typeid}");
-                    
+
+                    var field = tup.fields[cid];
+                    var descriptor = field.descriptor;
+
                     object value;
-                    switch (tup.fields[cid].typeid)
+                    switch (descriptor.Kind)
                     {
-                        case 0:
-                            value = br.ReadBoolean();
+                        case "Primitive":
+                            switch (descriptor.PrimitiveTypeId)
+                            {
+                                case 0:
+                                    value = br.ReadBoolean();
+                                    break;
+                                case 1:
+                                    value = br.ReadByte();
+                                    break;
+                                case 2:
+                                    value = br.ReadSByte();
+                                    break;
+                                case 3:
+                                    value = br.ReadChar();
+                                    break;
+                                case 4:
+                                    value = br.ReadInt16();
+                                    break;
+                                case 5:
+                                    value = br.ReadUInt16();
+                                    break;
+                                case 6:
+                                    value = br.ReadInt32();
+                                    break;
+                                case 7:
+                                    value = br.ReadUInt32();
+                                    break;
+                                case 8:
+                                    value = br.ReadSingle();
+                                    break;
+                                default:
+                                    throw new Exception($"Unsupported primitive type ID: {descriptor.PrimitiveTypeId}");
+                            }
+
                             break;
-                        case 1:
-                            value = br.ReadByte();
+
+                        case "Array":
+                            // Format: length (int32) + elements
+                            var length = br.ReadInt32();
+                            var elementType = field.fi.FieldType.GetElementType();
+                            var array = Array.CreateInstance(elementType, length);
+
+                            for (int i = 0; i < length; i++)
+                            {
+                                var elementDescriptor = descriptors[descriptor.ElementDescriptorId];
+                                var elementValue = DeserializeValue(br, elementDescriptor);
+                                array.SetValue(elementValue, i);
+                            }
+
+                            value = array;
                             break;
-                        case 2:
-                            value = br.ReadSByte();
+
+                        case "Struct":
+                            // Deserialize struct fields based on descriptor
+                            var structValue = Activator.CreateInstance(field.fi.FieldType);
+                            foreach (var structField in descriptor.Fields)
+                            {
+                                var fieldDescriptor = descriptors[structField.DescriptorId];
+                                var fieldValue = DeserializeValue(br, fieldDescriptor);
+                                var structFieldInfo = field.fi.FieldType.GetField(structField.Name);
+                                if (structFieldInfo != null)
+                                {
+                                    structFieldInfo.SetValue(structValue, fieldValue);
+                                }
+                            }
+
+                            value = structValue;
                             break;
-                        case 3:
-                            value = br.ReadChar();
+
+                        case "String":
+                            var strLength = br.ReadInt32();
+                            var strBytes = br.ReadBytes(strLength);
+                            value = Encoding.UTF8.GetString(strBytes);
                             break;
-                        case 4:
-                            value = br.ReadInt16();
-                            break;
-                        case 5:
-                            value = br.ReadUInt16();
-                            break;
-                        case 6:
-                            value = br.ReadInt32();
-                            break;
-                        case 7:
-                            value = br.ReadUInt32();
-                            break;
-                        case 8:
-                            value = br.ReadSingle();
-                            break;
+
                         default:
-                            throw new Exception($"Unsupported type ID: {tup.fields[cid].typeid}");
+                            throw new Exception($"Unsupported descriptor kind: {descriptor.Kind}");
                     }
-                    
-                    if (tup.fields[cid].isUpper) continue;
-                    tup.fields[cid].fi.SetValue(this, value);
+
+                    if (field.isUpper) continue;
+                    field.fi.SetValue(this, value);
                 }
+
 
                 // ok to send current data.
                 using var sends = new MemoryStream();
@@ -80,9 +132,26 @@ namespace CartActivator
                 for (var cid = 0; cid < tup.fields.Length; cid++)
                 {
                     bw.Write((short)cid);
-                    bw.Write((byte)tup.fields[cid].typeid);
-                    var val = tup.fields[cid].fi.GetValue(this);
-                    switch (tup.fields[cid].typeid)
+                    var field = tup.fields[cid];
+                    var descriptor = field.descriptor;
+                    var val = field.fi.GetValue(this);
+
+                    SerializeValue(bw, descriptor, val);
+                }
+
+                SendUpperData(mcuUri, sends.ToArray());
+            }
+            else
+                Console.WriteLine($"warning: {mcuUri} received lowerIOData but not registered");
+        }
+
+        private void SerializeValue(BinaryWriter bw, DescriptorInfo descriptor, object val)
+        {
+            switch (descriptor.Kind)
+            {
+                case "Primitive":
+                    bw.Write((byte)descriptor.PrimitiveTypeId);
+                    switch (descriptor.PrimitiveTypeId)
                     {
                         case 0:
                             bw.Write((bool)val);
@@ -112,13 +181,103 @@ namespace CartActivator
                             bw.Write((float)val);
                             break;
                     }
-                }
 
-                SendUpperData(mcuUri, sends.ToArray());
+                    break;
+
+                case "Array":
+                    if (val == null)
+                    {
+                        bw.Write(0); // null array length
+                        break;
+                    }
+
+                    var array = (Array)val;
+                    bw.Write(array.Length);
+                        for (int i = 0; i < array.Length; i++)
+                        {
+                            SerializeValue(bw, descriptors[descriptor.ElementDescriptorId], array.GetValue(i));
+                        }
+
+                    break;
+
+                case "Struct":
+                    var structValue = val;
+                    foreach (var structField in descriptor.Fields)
+                    {
+                        var fieldValue = structValue.GetType().GetField(structField.Name)?.GetValue(structValue);
+                        if (fieldValue != null)
+                        {
+                            SerializeValue(bw, descriptors[structField.DescriptorId], fieldValue);
+                        }
+                    }
+
+                    break;
+
+                case "String":
+                    if (val == null)
+                    {
+                        bw.Write(0);
+                        break;
+                    }
+
+                    var str = (string)val;
+                    var strBytes = Encoding.UTF8.GetBytes(str);
+                    bw.Write(strBytes.Length);
+                    bw.Write(strBytes);
+                    break;
+
+                default:
+                    throw new Exception($"Unsupported descriptor kind for serialization: {descriptor.Kind}");
             }
-            else
-                Console.WriteLine($"warning: {mcuUri} received lowerIOData but not registered", $"DIVER-{tup.name}");
+        }
 
+        private object DeserializeValue(BinaryReader br, DescriptorInfo descriptor)
+            {
+                switch (descriptor.Kind)
+                {
+                    case "Primitive":
+                        switch (descriptor.PrimitiveTypeId)
+                        {
+                            case 0:
+                                return br.ReadBoolean();
+                            case 1:
+                                return br.ReadByte();
+                            case 2:
+                                return br.ReadSByte();
+                            case 3:
+                                return br.ReadChar();
+                            case 4:
+                                return br.ReadInt16();
+                            case 5:
+                                return br.ReadUInt16();
+                            case 6:
+                                return br.ReadInt32();
+                            case 7:
+                                return br.ReadUInt32();
+                            case 8:
+                                return br.ReadSingle();
+                            default:
+                                throw new Exception($"Unsupported primitive type ID: {descriptor.PrimitiveTypeId}");
+                        }
+
+                    case "Array":
+                        var arrayLength = br.ReadInt32();
+                        // For recursive array deserialization, we need the field type context
+                        // This is a simplified version - in practice we'd need more context
+                        throw new NotImplementedException("Nested array deserialization not fully implemented");
+
+                    case "Struct":
+                        // For struct deserialization, we need the struct type context
+                        throw new NotImplementedException("Struct deserialization not fully implemented in helper");
+
+                    case "String":
+                        var strLength = br.ReadInt32();
+                        var strBytes = br.ReadBytes(strLength);
+                        return Encoding.UTF8.GetString(strBytes);
+
+                    default:
+                        throw new Exception($"Unsupported descriptor kind: {descriptor.Kind}");
+                }
         }
 
         public virtual void RunDIVER()
@@ -152,7 +311,47 @@ namespace CartActivator
                 
                 // Console.WriteLine(json);
 
-                var fields = JsonConvert.DeserializeObject<PField[]>(json);
+                var cartInfo = JsonConvert.DeserializeObject<dynamic>(json);
+                var fieldsData = cartInfo.fields; 
+                var descriptorsData = cartInfo.descriptors;
+
+                descriptors.Clear();
+                foreach (var descData in descriptorsData)
+                {
+                    var descriptor = new DescriptorInfo
+                    {
+                        Id = (int)descData.Id,
+                        Kind = (string)descData.Kind,
+                        PrimitiveTypeId = (int)descData.PrimitiveTypeId,
+                        ElementDescriptorId = (int)descData.ElementDescriptorId,
+                        StructDataOffset = (int)descData.StructDataOffset,
+                        ClassId = (int)descData.ClassId,
+                        Fields = descData.Fields != null ?
+                            ((IEnumerable<dynamic>)descData.Fields).Select(f => new StructFieldInfo
+                            {
+                                Name = (string)f.Name,
+                                Offset = (int)f.Offset,
+                                DescriptorId = (int)f.DescriptorId
+                            }).ToArray() : new StructFieldInfo[0]
+                    };
+                    descriptors[descriptor.Id] = descriptor;
+                }
+
+                var fields = new PField[fieldsData.Count];
+                for (int i = 0; i < fieldsData.Count; i++)
+                {
+                    var fieldData = fieldsData[i];
+                    var descriptor = descriptors[(int)fieldData.DescriptorId];
+                    fields[i] = new PField
+                    {
+                        field = (string)fieldData.FieldName,
+                        offset = (int)fieldData.Offset,
+                        descriptorId = (int)fieldData.DescriptorId,
+                        descriptor = descriptor,
+                        typeid = descriptor.Kind == "Primitive" ? descriptor.PrimitiveTypeId : -1
+                    };
+                }
+
                 if (mcu_logics.ContainsKey(attr.mcuUri))
                     throw new Exception($"Already have logic for {attr.mcuUri}: LadderLogic {logic.Name}");
                 mcu_logics[attr.mcuUri] = new LogicInfo() { fields = fields, name = logic.Name };
@@ -162,7 +361,7 @@ namespace CartActivator
                     if (pField.fi == null)
                         throw new Exception($"field {pField.field} doesn't exist in cart object?");
                     pField.isUpper = pField.fi.IsDefined(typeof(AsUpperIO));
-                    // todo: check type.
+                    // Now we have descriptor information for type checking
                 }
                 SetMCUProgram(attr.mcuUri, asmBytes);
             }
@@ -175,6 +374,26 @@ namespace CartActivator
             public FieldInfo fi;
             public bool isUpper;
             public int typeid, offset;
+            public int descriptorId;
+            public DescriptorInfo descriptor;
+        }
+
+        class DescriptorInfo
+        {
+            public int Id;
+            public string Kind; // "Primitive", "Array", "Struct", "String"
+            public int PrimitiveTypeId;
+            public int ElementDescriptorId;
+            public int StructDataOffset;
+            public int ClassId;
+            public StructFieldInfo[] Fields;
+        }
+
+        class StructFieldInfo
+        {
+            public string Name;
+            public int Offset;
+            public int DescriptorId;
         }
 
         class LogicInfo
@@ -184,6 +403,7 @@ namespace CartActivator
             public int iterations;
         }
         private Dictionary<string, LogicInfo> mcu_logics = new();
+        private Dictionary<int, DescriptorInfo> descriptors = new();
     }
 
 

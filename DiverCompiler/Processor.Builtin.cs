@@ -4,7 +4,17 @@ namespace MCURoutineCompiler;
 
 internal partial class Processor
 {
-    internal static List<string> BuiltIn =
+    internal static List<string> BuildInClasses =
+    [
+        // Instanceable container classes (generic arity preserved)
+        "System.Collections.Generic.List`1",
+        "System.Collections.Generic.Dictionary`2",
+        "System.Collections.Generic.Queue`1",
+        "System.Collections.Generic.Stack`1",
+        "System.Collections.Generic.HashSet`1",
+    ];
+
+    internal static List<string> BuiltInMethods =
     [
         "System.Object..ctor()",      //0
         "System.Math.Abs(Decimal)",      //1
@@ -147,6 +157,25 @@ internal partial class Processor
         "System.String.Join(String, IEnumerable`1)",      //125
         "System.String.Join(String, Object[])",      //126
         "System.Linq.Enumerable.Select(IEnumerable`1, Func`2)",      //127
+
+        // List<T> support
+        "System.Collections.Generic.List`1..ctor()",      //128
+        "System.Collections.Generic.List`1.Add(T)",      //129
+        "System.Collections.Generic.List`1.get_Count()",  //130
+        "System.Collections.Generic.List`1.get_Item(Int32)", //131
+        "System.Collections.Generic.List`1.set_Item(Int32, T)", //132
+        "System.Collections.Generic.List`1.RemoveAt(Int32)", //133
+        "System.Collections.Generic.List`1.Clear()", //134
+        "System.Collections.Generic.List`1.Contains(T)", //135
+        "System.Collections.Generic.List`1.IndexOf(T)", //136
+        "System.Collections.Generic.List`1.InsertRange(Int32, IEnumerable`1)", //137
+        "System.Linq.Enumerable.ToList(IEnumerable`1)", //138
+        "System.Linq.Enumerable.Where(IEnumerable`1, Func`2)",      //139
+        "System.Linq.Enumerable.Sum(IEnumerable`1)",                //140
+        "System.Linq.Enumerable.Max(IEnumerable`1)",                //141
+        "System.Linq.Enumerable.Min(IEnumerable`1)",                //142
+        "System.Linq.Enumerable.DefaultIfEmpty(IEnumerable`1, TSource)", //143
+        "System.Linq.Enumerable.ToArray(IEnumerable`1)", //144
     ];
 
 }

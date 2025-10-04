@@ -13,7 +13,9 @@ namespace DiverCompiler
     {
         static void Main(string[] args)
         {
-            Console.WriteLine("Dotnet integrated vehicle embedded runtime");
+            Console.WriteLine(@"Dotnet integrated vehicle embedded runtime: 
+-g to generate extramethods handler: It read ExtraMethods.cs(or you can specify one) and generate: txt and h file for weaver, and a dll for reference import(use it in MCU C# project).
+-c to put me into weaverfile of the MCU C# project: Run in csproj folder. You also need to manually add FodyWeaver to your MCU C# project.");
 
             // Handle command-line arguments
             if (args.Length > 0)

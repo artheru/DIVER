@@ -68,16 +68,19 @@ def compile_and_link(c_files, output_elf):
     global arm_embedded_toolchain_prefix
 
     try:
-        # 构建编译命令
+        # 构建编译命令 (Build compilation command)
+        # Generate position-independent code for address-relative function calls
+        # Add -fPIC for position independent code
+        # Add -nostartfiles to avoid standard library initialization
         compile_command = [
             arm_embedded_toolchain_prefix + 'gcc',
             '-o', output_elf,
             '-g', '-O3', '-Os',
-            '-fPIC',
-            '-ffreestanding', '-nostdlib', '-lnosys', '-nolibc', '-nodefaultlibs', '-nostartfiles',
-            '--specs=nosys.specs',
+            '-fPIC',  # Position Independent Code for relocatable functions
+            '-ffreestanding', '-nostdlib', '-nodefaultlibs', '-nostartfiles',
             '-mcpu=cortex-m4', '-mthumb', '-mfloat-abi=hard', '-mfpu=fpv4-sp-d16',
-            '-Tarm_ram_overlay.ld'
+            '-Tarm_ram_overlay.ld',
+            '-lm',  # Link math library for math.h functions
         ] + c_files
 
         # 编译和链接
@@ -178,8 +181,10 @@ def extract_functions(elf_file):
             if match:
                 address = int(match.group(1), 16)  # 将地址转换为整数
                 function_name = match.group(2)
-                functions.append(
-                    {'name': function_name, 'entry_point': address})
+                # Skip standard library functions and internal symbols
+                if not function_name.startswith('_') and function_name in ['cfun0', 'cfun1', 'cfun2']:
+                    functions.append(
+                        {'name': function_name, 'entry_point': address})
 
         return {'functions': functions, 'alignment': 8}
 
