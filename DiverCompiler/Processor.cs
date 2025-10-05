@@ -19,6 +19,8 @@ namespace MCURoutineCompiler;
 
 internal partial class Processor
 {
+    private const bool debugAnalyze = true;
+
     public BaseModuleWeaver bmw;
 
 
@@ -28,6 +30,11 @@ internal partial class Processor
         public (string FieldName, int offset, byte typeid)[] IOs;
         public byte[] diver_src;
         public byte[] diver_map;
+    }
+
+    string GetNameNonGeneric(MethodReference methodRef)
+    {
+        return $"{methodRef.DeclaringType.FullName}.{methodRef.Name}({string.Join(", ", methodRef.Parameters.Select(p => p.ParameterType.Name))})";
     }
 
     public class StackInitVals
@@ -428,7 +435,8 @@ internal partial class Processor
 
             if (analyzeStack)
             {
-                // _p.bmw.WriteWarning($"{curI}: st=[{string.Join(",", startingStack.ToArray().Select(p=>p.var_name))}]");
+                if (debugAnalyze)
+                    _p.bmw.WriteWarning($"{curI}: st=[{string.Join(",", startingStack.ToArray().Select(p=>p.var_name))}]");
                 var type = push_type;
                 if (push_type == "_stack0") 
                     type = startingStack.Last().type;
@@ -1689,30 +1697,28 @@ internal partial class Processor
                 if (IsDerivedFrom(bc, "CartActivator.CartDefinition"))
                     throw new WeavingException("Must not new CartActivator.CartDefinition object!");
 
-                // Use builtin class instantiation via BuildInClasses.
-                if (mref.Name == ".ctor" && mref.Parameters.Count == 0)
+                byte[] ret = [0x7A, 0, 0, ..HandleMethodCall(mref)]; //automatically handles builtin class creation.
+                // detect builtin ctor and set class id if provided
+                var ctorName = GetNameNonGeneric(mref.Resolve());
+                var bmIndex = BuiltInMethods.FindIndex(p => p.name == ctorName);
+                var is_builtin = false;
+                if (bmIndex >= 0)
                 {
-                    var decType = mref.DeclaringType;
-                    var fullTypeName = decType.Resolve().FullName;
-                    if (BuildInClasses.Contains(fullTypeName))
+                    var clsid = BuiltInMethods[bmIndex].ctor_clsid;
+                    if (clsid != 0)
                     {
-                        // Use builtin method id for ctor in BuiltInMethods
-                        var ctorSig = $"{fullTypeName}..ctor()";
-                        var id = BuiltInMethods.IndexOf(ctorSig);
-                        if (id >= 0)
-                        {
-                            // Emit a builtin call directly (A7)
-                            return [0xA7, (byte)(id & 0xff), (byte)(id >> 8)];
-                        }
+                        is_builtin = true;
+                        ret[1] = (byte)(clsid & 0xff);
+                        ret[2] = (byte)(clsid >> 8);
                     }
                 }
-                byte[] ret = [0x7A, 0, 0, ..HandleMethodCall(mref)];
                 SI.linking_actions.Add(() =>
                 {
+                    if (is_builtin) return;
                     var id = SI.instanceable_classes.IndexOf(mref.DeclaringType.FullName);
                     if (id == -1)
                     {
-                        // just reference.
+                        // just reference???
                         ret[1] = ret[2] = 0xff;
                     }
                     else
@@ -1840,7 +1846,7 @@ internal partial class Processor
                         var offset = (instanced && !iscart ? SI.class_ifield_offset[cname] : SI.sfield_offset).field_offset[fr.Resolve().Name].offset;
                         ret[2] = (byte)(offset & 0xff);
                         ret[3] = (byte)(offset >> 8);
-                        bmw.WriteWarning($"FLD encode: op={(int)code:X2} decl={cname} field={fr.Resolve().FullName} inst={instanced} iscart={iscart} off={offset}");
+                        // bmw.WriteWarning($"FLD encode: op={(int)code:X2} decl={cname} field={fr.Resolve().FullName} inst={instanced} iscart={iscart} off={offset}");
                     });
                     SI.linking_actions.Add(() =>
                     {
@@ -1853,7 +1859,7 @@ internal partial class Processor
 
                             ret[4] = (byte)(id & 0xff);
                             ret[5] = (byte)(id >> 8);
-                            bmw.WriteWarning($"FLD encode: classid {id} for {cname}");
+                            // bmw.WriteWarning($"FLD encode: classid {id} for {cname}");
                         }
 
                         if (iscart)
@@ -2134,7 +2140,7 @@ internal partial class Processor
             //var sname = GetGenericResolvedName(methodDefinition, methodRef); //why bother?
             var sname = GetNameNonGeneric(methodDefinition);
             
-            if (BuiltInMethods.Contains(sname))
+            if (BuiltInMethods.Any(p => p.name == sname))
             { 
                 // check if it's ..ctor?
                 if (sname.Contains(".ctor"))
@@ -2142,25 +2148,22 @@ internal partial class Processor
                     SI.RT_types[GetGenericResolvedName(methodRef.Resolve(), methodRef)] =
                         (methodRef.DeclaringType, methodRef);
                 } 
-                var id = BuiltInMethods.IndexOf(sname);
+                var id = BuiltInMethods.FindIndex(p => p.name == sname);
                 if (id == -1)
                 {
                     bmw.WriteError($"Runtime library doesn't support ctor `{sname}`!");
                     return null;
                 }
 
-                // Handle C builtin methods
-                if (sname == "System.Object..ctor()")
+                // Builtin methods: special-case constructors to consume only ctor args (no 'this')
+                if (sname.Contains(".ctor"))
                 {
-                    cc.Append(_ => "", 1);
-                }
-                else if (sname.StartsWith("System.Action") || sname.StartsWith("System.Func"))
-                {
-                    // Delegates and other system generics don't need special handling
-                    cc.Append(_ => "", 1);
+                    // Consume ctor parameters so C-side stack stays balanced; runtime handles object via builtin_arg0
+                    cc.Append(_ => "", methodDefinition.Parameters.Count + (methodDefinition.HasThis ? 1 : 0));
                 }
                 else
                 {
+                    // Handle C builtin methods (math, etc.)
                     var iscbuiltin = CCoder.Cbuiltins.Any(p => p.sname == sname);
                     if (iscbuiltin)
                     {
@@ -2169,8 +2172,8 @@ internal partial class Processor
                     }
                     else
                     {
-                        // Other builtins may not be C-transpilable
-                        cc.Error($"C library doesn't support newobj `{sname}`");
+                        // Non-ctor builtins that aren't C-transpilable are still allowed (handled in VM)
+                        cc.Append(_ => "", methodDefinition.Parameters.Count + (methodDefinition.HasThis ? 1 : 0));
                     }
                 }
                 
@@ -2208,6 +2211,16 @@ internal partial class Processor
 
             var ird = en.registry;
             return [0xA6, (byte)(ird & 0xff), (byte)(ird >> 8)];
+        }
+
+        // Fallback: try to match by reference name for built-ins (e.g., String.Format)
+        var srefname = GetNameNonGeneric(methodRef);
+        var bid = BuiltInMethods.FindIndex(p => p.name == srefname);
+        if (bid >= 0)
+        {
+            // consume args (+ this if present)
+            cc.Append(_ => "", methodRef.Parameters.Count + (methodRef.HasThis ? 1 : 0));
+            return [0xA7, (byte)(bid & 0xff), (byte)(bid >> 8)];
         }
 
         bmw.WriteWarning($"Cannot resolve method reference: {methodRef.FullName}");
@@ -2334,7 +2347,10 @@ internal partial class Processor
                     }
 
                 this.stackDepth[instruction] = stackDepth;
-                //bmw.WriteWarning($"ins={instruction}");
+                
+                // if (debugAnalyze)
+                    // bmw.WriteWarning($"ins={instruction}");
+
                 cc.AnalyzeFrom(previous); 
                 
                 ConvertToBytecode(instruction, method); 

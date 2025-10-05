@@ -31,44 +31,21 @@ public class StringInterpolationHandler
     {
         _module = module;
         bmw = moduleWeaver;
+        
+        //bmw.WriteWarning("StringInterpolationHandler constructor called");
+        
+        // Get references to String.Format methods (use reflection to avoid resolver issues)
+        var mi1 = typeof(string).GetMethod("Format", new[] { typeof(string), typeof(object) });
+        var mi2 = typeof(string).GetMethod("Format", new[] { typeof(string), typeof(object), typeof(object) });
+        var mi3 = typeof(string).GetMethod("Format", new[] { typeof(string), typeof(object), typeof(object), typeof(object) });
+        var miArr = typeof(string).GetMethod("Format", new[] { typeof(string), typeof(object[]) });
 
-        // Resolve core types via TypeSystem to avoid resolver issues under FodyIsolated
-        var stringTypeRef = module.TypeSystem.String;
-        var stringTypeDef = stringTypeRef.Resolve();
-
-        if (stringTypeDef == null)
-        {
-            // Could not resolve System.String; disable processing gracefully
-            _stringFormat1 = null;
-            _stringFormat2 = null;
-            _stringFormat3 = null;
-            _stringFormatArray = null;
-            return;
-        }
-
-        // Find String.Format overloads and import into this module
-        _stringFormat1 = module.ImportReference(
-            stringTypeDef.Methods.First(m => m.Name == "Format" && m.Parameters.Count == 2 &&
-                                             m.Parameters[0].ParameterType.FullName == "System.String" &&
-                                             m.Parameters[1].ParameterType.FullName == "System.Object"));
-
-        _stringFormat2 = module.ImportReference(
-            stringTypeDef.Methods.First(m => m.Name == "Format" && m.Parameters.Count == 3 &&
-                                             m.Parameters[0].ParameterType.FullName == "System.String" &&
-                                             m.Parameters[1].ParameterType.FullName == "System.Object" &&
-                                             m.Parameters[2].ParameterType.FullName == "System.Object"));
-
-        _stringFormat3 = module.ImportReference(
-            stringTypeDef.Methods.First(m => m.Name == "Format" && m.Parameters.Count == 4 &&
-                                             m.Parameters[0].ParameterType.FullName == "System.String" &&
-                                             m.Parameters[1].ParameterType.FullName == "System.Object" &&
-                                             m.Parameters[2].ParameterType.FullName == "System.Object" &&
-                                             m.Parameters[3].ParameterType.FullName == "System.Object"));
-
-        _stringFormatArray = module.ImportReference(
-            stringTypeDef.Methods.First(m => m.Name == "Format" && m.Parameters.Count == 2 &&
-                                             m.Parameters[0].ParameterType.FullName == "System.String" &&
-                                             m.Parameters[1].ParameterType.FullName == "System.Object[]"));
+        _stringFormat1 = module.ImportReference(mi1);
+        _stringFormat2 = module.ImportReference(mi2);
+        _stringFormat3 = module.ImportReference(mi3);
+        _stringFormatArray = module.ImportReference(miArr); 
+        
+        //bmw.WriteWarning("String.Format references imported successfully");
     }
 
     /// <summary>
@@ -79,41 +56,51 @@ public class StringInterpolationHandler
         if (!method.HasBody)
             return;
 
-        //bmw.WriteWarning($"Processing method: {method.FullName}");
+        bmw.WriteWarning($"[SI] Processing method: {method.FullName}");
         
         // Dump all instructions for debugging
         DumpMethodInstructions(method);
-
-        // If we failed to resolve String.Format, skip processing gracefully
-        if (_stringFormatArray == null)
-            return;
 
         // Get the IL processor for the method
         processor = method.Body.GetILProcessor();
         
         // First, identify all complete string interpolation blocks
         var interpolationBlocks = FindInterpolationBlocks(method);
+        bmw.WriteWarning($"[SI] Primary scan found {interpolationBlocks.Count} blocks");
         
         // If we didn't find any blocks using the primary method, try the alternate approach
         if (interpolationBlocks.Count == 0)
         {
-            //bmw.WriteWarning("No interpolation blocks found with primary method, trying alternate approach");
+            bmw.WriteWarning("[SI] No blocks found with primary, trying alternate approach");
             interpolationBlocks = FindInterpolationBlocksAlternate(method);
+            bmw.WriteWarning($"[SI] Alternate scan found {interpolationBlocks.Count} blocks");
         }
         
-        //bmw.WriteWarning($"Found {interpolationBlocks.Count} complete interpolation blocks");
+        bmw.WriteWarning($"[SI] Total interpolation blocks: {interpolationBlocks.Count}");
         
         // Process each block in reverse order (to avoid offset issues)
         foreach (var block in interpolationBlocks.OrderByDescending(b => b.StartIndex))
         {
-            //bmw.WriteWarning($"Processing interpolation block: {block.StartIndex} to {block.EndIndex}");
+            bmw.WriteWarning($"[SI] Processing block: {block.StartIndex}->{block.EndIndex}");
             ReplaceInterpolation(method, processor, method.Body.Instructions.ToList(), block.StartIndex, block.EndIndex);
         }
         
         // Replace DefaultInterpolatedStringHandler variables with int variables
         ReplaceStringHandlerVariables(method);
         
-        //bmw.WriteWarning($"Method {method.Name} processed. Replaced {interpolationBlocks.Count} interpolations");
+        // Ensure sufficient MaxStack after modifications
+        try
+        {
+            var body = method.Body;
+            var current = body.MaxStackSize;
+            var desired = current < 16 ? 16 : current;
+            body.MaxStackSize = desired;
+            body.InitLocals = true;
+            bmw.WriteWarning($"[SI] Method {method.Name} processed. Replaced {interpolationBlocks.Count} interpolations, MaxStack={body.MaxStackSize}");
+            bmw.WriteWarning("[SI] IL dump AFTER rewrite:");
+            DumpMethodInstructions(method);
+        }
+        catch { }
     }
 
     // Replace DefaultInterpolatedStringHandler variables with int variables
@@ -137,7 +124,7 @@ public class StringInterpolationHandler
             }
         }
         
-        //bmw.WriteWarning($"  Replaced {replacedCount} DefaultInterpolatedStringHandler variables with int variables");
+        bmw.WriteWarning($"[SI] Replaced {replacedCount} DefaultInterpolatedStringHandler locals with int");
     }
 
     private class InterpolationBlock
@@ -171,7 +158,7 @@ public class StringInterpolationHandler
                         declaringType.Contains("DefaultInterpolatedStringHandler"))
                     {
                         ctorIndices.Add(i);
-                        //bmw.WriteWarning($"Found DefaultInterpolatedStringHandler constructor at index {i}");
+                        bmw.WriteWarning($"[SI] Found DISH .ctor @ {i}");
                     }
                 }
             }
@@ -215,7 +202,7 @@ public class StringInterpolationHandler
                             StartIndex = startIndex,
                             EndIndex = i
                         });
-                        //bmw.WriteWarning($"Found complete interpolation block from {startIndex} to {i}");
+                        bmw.WriteWarning($"[SI] Block {startIndex}-{i} confirmed");
                         break;
                     }
                 }
@@ -254,7 +241,7 @@ public class StringInterpolationHandler
                     if (methodRef.Name == ".ctor" && typeName.Contains("DefaultInterpolatedStringHandler"))
                     {
                         int startIndex = i;
-                        //bmw.WriteWarning($"Found potential interpolation start at index {startIndex}");
+                        bmw.WriteWarning($"[SI] Alt: potential start @ {startIndex}");
                         
                         // Now find the corresponding ToStringAndClear call
                         for (int j = startIndex + 3; j < instructions.Count; j++)
@@ -272,7 +259,7 @@ public class StringInterpolationHandler
                                         StartIndex = startIndex,
                                         EndIndex = j
                                     });
-                                    //bmw.WriteWarning($"Found complete interpolation block from {startIndex} to {j} (alternate method)");
+                                    bmw.WriteWarning($"[SI] Alt: block {startIndex}-{j}");
                                     
                                     // Skip to the end of this block
                                     i = j;
@@ -312,7 +299,7 @@ public class StringInterpolationHandler
         // Extract information about literal parts and formatted expressions
         var interpolationInfo = AnalyzeInterpolation(instructions, startIndex, endIndex);
         
-        //bmw.WriteWarning($"  Analyzed interpolation: {interpolationInfo.Literals.Count} literals, {interpolationInfo.FormatItems.Count} format items");
+        bmw.WriteWarning($"[SI] Analyze: {interpolationInfo.Literals.Count} literals, {interpolationInfo.FormatItems.Count} items");
         for (int i = 0; i < interpolationInfo.Literals.Count; i++)
         {
             //bmw.WriteWarning($"    Literal {i}: '{interpolationInfo.Literals[i]}'");
@@ -325,7 +312,7 @@ public class StringInterpolationHandler
         // Validate the interpolation info before proceeding
         if (!ValidateInterpolationInfo(interpolationInfo))
         {
-            //bmw.WriteWarning("  SKIPPED replacement - invalid interpolation data");
+            bmw.WriteWarning("[SI] SKIP: invalid interpolation data");
             return;
         }
         
@@ -335,10 +322,25 @@ public class StringInterpolationHandler
         
         // Find the next instruction after the ToStringAndClear call to insert our replacement
         var nextInstruction = endIndex < instructions.Count - 1 ? instructions[endIndex + 1] : null;
+
+        // Expand removal to include ctor argument setup (ldloca.s, ldc.i4.*) preceding the .ctor
+        int removalStart = startIndex;
+        int probe = startIndex - 1;
+        while (probe >= 0)
+        {
+            var opc = instructions[probe].OpCode.Code;
+            if (opc == Code.Ldloca || opc == Code.Ldloca_S || IsLoadConstantOpCode(instructions[probe].OpCode) || opc == Code.Nop)
+            {
+                removalStart = probe;
+                probe--;
+                continue;
+            }
+            break;
+        }
         
         if (nextInstruction == null)
         {
-            //bmw.WriteWarning("  SKIPPED replacement - cannot find insertion point");
+            bmw.WriteWarning("[SI] SKIP: cannot find insertion point");
             return;
         }
         
@@ -347,24 +349,24 @@ public class StringInterpolationHandler
             // If there are no format items, just replace with a simple string
             var formatString = string.Join("", interpolationInfo.Literals);
             
-            //bmw.WriteWarning($"  Replacing with literal string: '{formatString}'");
+            bmw.WriteWarning($"[SI] Replace with literal: '{formatString}'");
             
             try {
                 // Create the new instruction
                 var newInstruction = processor.Create(OpCodes.Ldstr, formatString);
                 
                 // Remove all the interpolation instructions
-                for (int i = endIndex; i >= startIndex; i--)
+                for (int i = endIndex; i >= removalStart; i--)
                 {
                     processor.Remove(instructions[i]);
                 }
                 
                 // Insert the new instruction
                 processor.InsertBefore(nextInstruction, newInstruction);
-                //bmw.WriteWarning("  Successfully replaced with literal string");
+                bmw.WriteWarning("[SI] Replaced with literal");
             }
             catch (Exception ex) {
-                //bmw.WriteWarning($"  ERROR replacing with literal string: {ex.Message}\n{ex.StackTrace}");
+                bmw.WriteWarning($"[SI] ERROR literal replace: {ex.Message}");
             }
             return;
         }
@@ -377,18 +379,18 @@ public class StringInterpolationHandler
             if (interpolationInfo.FormatItems.Count <= 3)
             {
                 // Use the specific String.Format overloads for 1, 2, or 3 arguments
-                //bmw.WriteWarning($"  Building specific String.Format call with {interpolationInfo.FormatItems.Count} arguments");
+                bmw.WriteWarning($"[SI] Build specific String.Format x{interpolationInfo.FormatItems.Count}");
                 BuildSpecificFormatCall(newInstructions, processor, interpolationInfo);
             }
             else
             {
                 // Use the String.Format with object[] for more than 3 arguments
-                //bmw.WriteWarning($"  Building array String.Format call with {interpolationInfo.FormatItems.Count} arguments");
+                bmw.WriteWarning($"[SI] Build array String.Format x{interpolationInfo.FormatItems.Count}");
                 BuildArrayFormatCall(newInstructions, processor, interpolationInfo);
             }
             
             // Remove all the interpolation instructions
-            for (int i = endIndex; i >= startIndex; i--)
+            for (int i = endIndex; i >= removalStart; i--)
             {
                 processor.Remove(instructions[i]);
             }
@@ -399,10 +401,10 @@ public class StringInterpolationHandler
                 processor.InsertBefore(nextInstruction, instr);
             }
             
-            //bmw.WriteWarning("  Successfully replaced with String.Format");
+            bmw.WriteWarning("[SI] Replaced with String.Format");
         }
         catch (Exception ex) {
-            //bmw.WriteWarning($"  ERROR replacing with String.Format: {ex.Message}\n{ex.StackTrace}");
+            bmw.WriteWarning($"[SI] ERROR String.Format replace: {ex.Message}");
         }
     }
     
@@ -416,7 +418,7 @@ public class StringInterpolationHandler
         {
             if (local.VariableType.FullName == objectType.FullName)
             {
-                //bmw.WriteWarning($"  Method already has object local at index {local.Index}");
+                bmw.WriteWarning($"[SI] Has object local at {local.Index}");
                 return;
             }
         }
@@ -424,7 +426,7 @@ public class StringInterpolationHandler
         // Add a new local variable of type System.Object
         var newLocal = new VariableDefinition(objectType);
         method.Body.Variables.Add(newLocal);
-        //bmw.WriteWarning($"  Added new object local at index {newLocal.Index}");
+        bmw.WriteWarning($"[SI] Added object local at {newLocal.Index}");
     }
     
     private bool ValidateInterpolationInfo(InterpolationInfo info)
@@ -432,13 +434,13 @@ public class StringInterpolationHandler
         // Check if we have enough data to create a valid replacement
         if (info.Literals.Count == 0)
         {
-            //bmw.WriteWarning("  Validation failed: No literals found");
+            bmw.WriteWarning("[SI] Validate fail: no literals");
             return false;
         }
         
         if (info.FormatItems.Count > 0 && info.Literals.Count < info.FormatItems.Count + 1)
         {
-            //bmw.WriteWarning($"  Validation failed: Not enough literals ({info.Literals.Count}) for format items ({info.FormatItems.Count})");
+            bmw.WriteWarning($"[SI] Validate fail: literals {info.Literals.Count} < items {info.FormatItems.Count}");
             return false;
         }
         
@@ -447,7 +449,7 @@ public class StringInterpolationHandler
         {
             if (info.FormatItems[i].ValueInstruction == null)
             {
-                //bmw.WriteWarning($"  Validation failed: Format item {i} has no value instruction");
+                bmw.WriteWarning($"[SI] Validate fail: item {i} missing value instruction");
                 return false;
             }
         }
@@ -474,7 +476,7 @@ public class StringInterpolationHandler
     {
         var result = new InterpolationInfo();
         
-        //bmw.WriteWarning($"  Analyzing interpolation from index {startIndex} to {endIndex}");
+        bmw.WriteWarning($"[SI] Analyze block {startIndex}->{endIndex}");
         
         // First, let's print all instructions in the block to help with debugging
         //bmw.WriteWarning("  Detailed instruction dump for interpolation block:");
@@ -523,18 +525,18 @@ public class StringInterpolationHandler
                             if (literalValue != null)
                             {
                                 result.Literals.Add(literalValue);
-                                    //bmw.WriteWarning($"      Found literal: '{literalValue}'");
+                                    bmw.WriteWarning($"[SI]     Literal: '{literalValue}'");
                                 }
                                 else
                                 {
-                                    //bmw.WriteWarning($"      Found ldstr but operand is not a string");
+                                    bmw.WriteWarning($"[SI]     ldstr operand not string");
                                     // Add empty literal as a fallback
                                     result.Literals.Add(string.Empty);
                                 }
                             }
                             else
                             {
-                                //bmw.WriteWarning($"      Could not find ldstr for AppendLiteral");
+                                bmw.WriteWarning($"[SI]     No ldstr for AppendLiteral");
                                 // Add empty literal as a fallback
                                 result.Literals.Add(string.Empty);
                         }
@@ -543,16 +545,16 @@ public class StringInterpolationHandler
                              methodRef.DeclaringType?.FullName?.Contains("DefaultInterpolatedStringHandler") == true)
                     {
                         // This is a formatted expression
-                            //bmw.WriteWarning($"      Found AppendFormatted call");
+                            bmw.WriteWarning($"[SI]     AppendFormatted call");
                         var formatItem = ExtractFormatItem(instructions, i);
                         if (formatItem != null)
                         {
                             result.FormatItems.Add(formatItem);
-                                //bmw.WriteWarning($"      Extracted format item: Type={formatItem.Type?.FullName ?? "unknown"}, Format={formatItem.FormatClause ?? "none"}");
+                                bmw.WriteWarning($"[SI]     Item: Type={formatItem.Type?.FullName ?? "unknown"}, Format={formatItem.FormatClause ?? "none"}");
                             }
                             else
                             {
-                                //bmw.WriteWarning($"      Failed to extract format item");
+                                bmw.WriteWarning($"[SI]     Failed to extract item");
                             }
                         }
                     }
@@ -564,19 +566,19 @@ public class StringInterpolationHandler
             {
                 // Add an empty literal at the beginning
                 result.Literals.Add(string.Empty);
-                //bmw.WriteWarning($"    Added empty literal at the beginning for string with only format items");
+                bmw.WriteWarning($"[SI]   Added leading empty literal");
             }
             
             // Make sure we have a literal after the last format item
             if (result.FormatItems.Count >= result.Literals.Count)
             {
                 result.Literals.Add(string.Empty);
-                //bmw.WriteWarning("    Added empty literal at the end");
+                bmw.WriteWarning("[SI]   Added trailing empty literal");
             }
         }
         catch (Exception ex)
         {
-            //bmw.WriteWarning($"  ERROR while analyzing interpolation: {ex.Message}\n{ex.StackTrace}");
+            bmw.WriteWarning($"[SI] ERROR analyze: {ex.Message}");
         }
         
         return result;
@@ -824,7 +826,7 @@ public class StringInterpolationHandler
         }
         
         var formatString = formatBuilder.ToString();
-        //bmw.WriteWarning($"    Built format string: '{formatString}'");
+        bmw.WriteWarning($"[SI]    Built format string: '{formatString}'");
         
         try
         {
@@ -844,7 +846,20 @@ public class StringInterpolationHandler
                     // Copy the original value-loading instructions to preserve behavior
                     CopyInstructionSequence(instructions, processor, formatItem.LoadInstructions);
                     
-                    // No boxing needed - String.Format accepts objects directly
+                    // Box value types for String.Format(object, ...)
+                    var valueType = formatItem.Type;
+                    if (valueType is ByReferenceType brt)
+                        valueType = brt.ElementType;
+                    if (valueType != null)
+                    {
+                        var resolved = valueType.Resolve();
+                        if (resolved != null && resolved.IsValueType)
+                        {
+                            var boxType = _module.ImportReference(valueType);
+                            instructions.Add(processor.Create(OpCodes.Box, boxType));
+                            bmw.WriteWarning($"[SI]    Boxed value type: {valueType.FullName}");
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -871,11 +886,11 @@ public class StringInterpolationHandler
             }
             
             instructions.Add(processor.Create(OpCodes.Call, formatMethod));
-            //bmw.WriteWarning($"    Added call to String.Format with {info.FormatItems.Count} arguments");
+            bmw.WriteWarning($"[SI]    Added call to String.Format with {info.FormatItems.Count} arguments");
         }
         catch (Exception ex)
         {
-            //bmw.WriteWarning($"    ERROR in BuildSpecificFormatCall: {ex.Message}\n{ex.StackTrace}");
+            bmw.WriteWarning($"[SI]    ERROR in BuildSpecificFormatCall: {ex.Message}");
             throw;
         }
     }
@@ -909,7 +924,7 @@ public class StringInterpolationHandler
         }
         
         var formatString = formatBuilder.ToString();
-        //bmw.WriteWarning($"    Built format string: '{formatString}'");
+        bmw.WriteWarning($"[SI]    Built format string: '{formatString}'");
         
         try
         {
@@ -946,7 +961,20 @@ public class StringInterpolationHandler
                         //bmw.WriteWarning($"    Array item {i}: Added {loadInstr.OpCode}");
                     }
                     
-                    // No boxing - let the runtime handle it
+                    // Box value types before storing into object[]
+                    var valueType = formatItem.Type;
+                    if (valueType is ByReferenceType brt)
+                        valueType = brt.ElementType;
+                    if (valueType != null)
+                    {
+                        var resolved = valueType.Resolve();
+                        if (resolved != null && resolved.IsValueType)
+                        {
+                            var boxType = _module.ImportReference(valueType);
+                            instructions.Add(processor.Create(OpCodes.Box, boxType));
+                            bmw.WriteWarning($"[SI]    Boxed array item {i}: {valueType.FullName}");
+                        }
+                    }
                     
                     // Store in the array as object reference
                     instructions.Add(processor.Create(OpCodes.Stelem_Ref));
@@ -961,11 +989,11 @@ public class StringInterpolationHandler
             
             // Call String.Format with the array
             instructions.Add(processor.Create(OpCodes.Call, _stringFormatArray));
-            //bmw.WriteWarning($"    Added call to String.Format with object array of {info.FormatItems.Count} arguments");
+            bmw.WriteWarning($"[SI]    Added call to String.Format with object array of {info.FormatItems.Count} arguments");
         }
         catch (Exception ex)
         {
-            //bmw.WriteWarning($"    ERROR in BuildArrayFormatCall: {ex.Message}\n{ex.StackTrace}");
+            bmw.WriteWarning($"[SI]    ERROR in BuildArrayFormatCall: {ex.Message}");
             throw;
         }
     }
@@ -1208,7 +1236,7 @@ public class StringInterpolationHandler
         if (!method.HasBody)
             return;
         
-        //bmw.WriteWarning($"IL dump for method {method.FullName}:");
+        bmw.WriteWarning($"[SI] IL dump for method {method.FullName}:");
         var instructions = method.Body.Instructions.ToList();
         
         for (int i = 0; i < instructions.Count; i++)
@@ -1228,7 +1256,7 @@ public class StringInterpolationHandler
                     operandStr = instr.Operand.ToString();
             }
             
-            //bmw.WriteWarning($"[{i}] {instr.OpCode.Code} - {operandStr}");
+            bmw.WriteWarning($"[SI] [{i}] IL_{instr.Offset:x4} {instr.OpCode.Code} - {operandStr}");
         }
     }
 } 

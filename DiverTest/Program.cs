@@ -12,7 +12,6 @@ namespace DiverTest
     {
         static void Main(string[] args)
         {
-
             Console.WriteLine(">>> Genuine Dotnet Implementation:");
             var x = new TestLogic();
             x.cart = new TestVehicle();

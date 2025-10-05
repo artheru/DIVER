@@ -34,7 +34,7 @@ int cur_il_offset;
 #define INLINE static inline
 
 // swith on this variable to allow verbose output.
-//#define _VERBOSE
+// #define _VERBOSE
 
 #ifdef _VERBOSE
 #define DBG printf
@@ -63,26 +63,6 @@ char err_tmp[256];
 #define DOOM(...) { int sz = snprintf(err_tmp,sizeof(err_tmp),__VA_ARGS__); report_error(__FILE__, __LINE__, err_tmp, sz);}
 #define DIEIF(expr) if (0)
 
-#endif
-
-#ifdef _MSC_VER
-void print_stacktrace(void) {
-	void* stack[64];
-	HANDLE process = GetCurrentProcess();
-	SymInitialize(process, NULL, TRUE);
-
-	USHORT frames = CaptureStackBackTrace(0, 64, stack, NULL);
-	SYMBOL_INFO* symbol = (SYMBOL_INFO*)calloc(sizeof(SYMBOL_INFO) + 256 * sizeof(char), 1);
-	symbol->MaxNameLen = 255;
-	symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
-
-	for (USHORT i = 0; i < frames; i++) {
-		SymFromAddr(process, (DWORD64)(stack[i]), 0, symbol);
-		printf("%02d: %s - 0x%0llX\n", i, symbol->Name, (unsigned long long)symbol->Address);
-	}
-
-	free(symbol);
-}
 #endif
 
 /*
@@ -123,7 +103,6 @@ static int bn = 0;  // Builtin number counter
 
 // Array of built-in method function pointers
 builtin_method_t builtin_methods[NUM_BUILTIN_METHODS];
-int builtin_arg0; //this pointer.
 
 
 #define ReadInt *((int*)ptr); ptr += 4
@@ -388,44 +367,7 @@ uchar* builtin_cls[] = {
 	builtin_cls_hashset   // HashSet`1
 };
 
-
-struct object_val* monitor_obj = 0;
-
-int new_builtin_obj(short clsid)
-{
-	int bidx = clsid - BUILTIN_CLSID_BASE;
-	if (bidx < 0 || bidx >= (int)(sizeof(builtin_cls) / sizeof(builtin_cls[0])))
-		DOOM("Unknown builtin clsid %d\n", clsid);
-
-	uchar* layout = builtin_cls[bidx];
-	int field_count = layout[0];
-	int payload_size = 0;
-	for (int i = 0; i < field_count; ++i)
-		payload_size += get_val_sz(layout[i + 1]);
-
-	int reference_id = heap_newobj_id;
-	uchar* tail = reference_id == 1 ? heap_tail : heap_obj[reference_id - 1].pointer;
-	int mysz = payload_size + ObjectHeaderSize;
-	struct object_val* obj_ptr = (struct object_val*)(tail - mysz);
-	if (new_stack_depth > 0 && (uchar*)obj_ptr < stack_ptr[new_stack_depth - 1]->evaluation_pointer)
-		DOOM("Not enough space allocating %d bytes for builtin obj(%d)", mysz, clsid);
-
-	heap_obj[reference_id] = (struct heap_obj_slot){ .pointer = (uchar*)obj_ptr };
-	obj_ptr->header = ObjectHeader;
-	obj_ptr->clsid = clsid;
-	memset(&obj_ptr->payload, 0, payload_size);
-
-	int offset = 0;
-	for (int i = 0; i < field_count; ++i)
-	{
-		uchar typeid = layout[i + 1];
-		(&obj_ptr->payload)[offset] = typeid;
-		offset += get_val_sz(typeid);
-	}
-
-	heap_newobj_id++;
-	return reference_id;
-}
+int builtin_arg0; //this pointer for builtin class ctor.
 
 INLINE int builtin_field_offset_by_index(int clsidx, int field_idx)
 {
@@ -651,10 +593,14 @@ INLINE uchar* hset_storage_bytes(struct object_val* s, struct array_val** out_ar
 // use heap_newobj_id-1 to get obj_id.
 int newobj(int clsid)
 {
+	if (clsid == -1) DOOM("bad clsid:-1");
 	int reference_id = heap_newobj_id;
 	heap_newobj_id++;
 	uchar* tail = reference_id == 1 ? heap_tail : heap_obj[reference_id - 1].pointer;
-	int mysz = instanceable_class_layout_ptr[clsid].tot_size + ObjectHeaderSize;
+	short is_builtin = (clsid & 0xf000);
+	int mysz = ( is_builtin ? 
+		builtin_cls[(short)(clsid - 0xf000)][0] * 5 : // todo: this require builtin class to be all 5 padding fields.
+		instanceable_class_layout_ptr[clsid].tot_size) + ObjectHeaderSize;
 	struct object_val* my_ptr = tail - mysz;
 	if (new_stack_depth > 0 && (uchar*)my_ptr < stack_ptr[new_stack_depth - 1]->evaluation_pointer)
 		DOOM("Not enough space allocating %d bytes for obj(%d), heap available=%d, ttl=%d", mysz, clsid, (int)(tail - stack_ptr[new_stack_depth - 1]->evaluation_pointer), (int)(tail - mem0));
@@ -666,17 +612,30 @@ int newobj(int clsid)
 	// set to zero as default value.
 	memset(&my_ptr->payload, 0, mysz - ObjectHeaderSize);
 
-	struct per_field* my_layout = instanceable_class_per_layout_ptr + instanceable_class_layout_ptr[clsid].layout_offset;
-
-	for (int i = 0; i < instanceable_class_layout_ptr[clsid].n_of_fields; ++i) {
-		(&my_ptr->payload)[my_layout[i].offset] = my_layout[i].typeid;
-		if (my_layout[i].aux != -1 && my_layout[i].typeid == ReferenceID)
+	if (is_builtin)
+	{
+		uchar* ftype = builtin_cls[(short)(clsid - 0xf000)];
+		uchar* ptr = &my_ptr->payload;
+		for (int j = 0; j < *ftype; ++j)
 		{
-			*((int*)(&my_ptr->payload + my_layout[i].offset + 1)) = newobj(my_layout[i].aux);
+			*ptr = ftype[j + 1];
+			ptr += 5;
+		}
+		// instantiate will be done in builtin ctor functions... we just set type here.
+	}
+	else {
+		struct per_field* my_layout = instanceable_class_per_layout_ptr + instanceable_class_layout_ptr[clsid].layout_offset;
+
+		for (int i = 0; i < instanceable_class_layout_ptr[clsid].n_of_fields; ++i) {
+			(&my_ptr->payload)[my_layout[i].offset] = my_layout[i].typeid;
+			if (my_layout[i].aux != -1 && my_layout[i].typeid == ReferenceID) //struct need to instantiate immediately.
+			{
+				*((int*)(&my_ptr->payload + my_layout[i].offset + 1)) = newobj(my_layout[i].aux);
+			}
 		}
 	}
 
-	DBG("created obj_%d(cls_%d) @ %x\n", reference_id, clsid, my_ptr);
+	INFO("created obj_%d(cls_%d) @ %x\n", reference_id, clsid, my_ptr);
 
 	return reference_id;
 }
@@ -4106,6 +4065,7 @@ void builtin_RunOnMCU_GetSecondsFromStart(uchar** reptr) {
 }
 
 // ValueTuple constructors, it's generic so do type check.
+// ValueTuple is struct, so may call newobj or just call.
 void builtin_ValueTuple2_ctor(uchar** reptr) {
 
 	struct stack_frame_header* my_stack = stack_ptr[new_stack_depth - 1];
@@ -4375,17 +4335,18 @@ void builtin_UInt32_ToString(uchar** reptr) {
 	PUSH_STACK_REFERENCEID(result_str_id);
 }
 
-void delegate_ctor(uchar** reptr, short clsid)
+void delegate_ctor(uchar** reptr, unsigned short clsid)
 {
-	POP;
-	if (**reptr != MethodPointer) DOOM("require a method pointer!");
-	struct method_pointer* mp = *reptr + 1;
+    // Expect stack: target(object or 0), method pointer (top)
+    POP; // bring top-of-stack into view
+    if (**reptr != MethodPointer) DOOM("require a method pointer!");
+    struct method_pointer* mp = (struct method_pointer*)(*reptr + 1);
 	if (mp->type == 1 && mp->id >= methods_N) {
 		DOOM("invalid custom method id_%d\n", mp->id);
 	}
 	else if (mp->type == 0)
 		DOOM("builtin method as action not supported");
-	int obj_id = pop_reference(reptr);
+    int obj_id = pop_reference(reptr);
 
     // If target object is null (static delegate to instance method singleton), try to instantiate from method metadata
     if (obj_id == 0) {
@@ -4404,19 +4365,23 @@ void delegate_ctor(uchar** reptr, short clsid)
 	// Set the fields of the Action
 	struct object_val* del = (struct object_val*)heap_obj[builtin_arg0].pointer;
 	uchar* heap = (&del->payload);
-	del->clsid = clsid; // identifier for Action/Func.
+	if (del->clsid != clsid) DOOM("wrong type of clsid, expect %x, got %x", clsid, del->clsid); // check clsid identifier.
 	HEAP_WRITE_REFERENCEID(obj_id);
 	HEAP_WRITE_INT(mp->id);
 }
 
 void delegate_ivk(uchar** reptr, unsigned short clsid, int argN)
 {
-	// stack layout: action this pointer|arg0
-	for (int i = 0; i < argN; ++i)
-		POP;
-	uchar* evptr = *reptr;
-	int refid = pop_reference(reptr);
-	struct object_val* action = (struct object_val*)heap_obj[refid].pointer;
+    // Stack layout before: [..., delegate_ref, arg0, arg1, ... argN-1]
+    // We transform in-place to [..., this_ref, arg0, arg1, ...]
+    if (argN < 0) DOOM("delegate ivk: bad argN");
+    uchar* top = *reptr - STACK_STRIDE; // argN-1 (or delegate if argN==0)
+    uchar* lower = argN > 0 ? (*reptr - (argN + 1) * STACK_STRIDE) : (*reptr - STACK_STRIDE);
+    // lower currently holds the delegate reference
+    if (lower < stack_ptr[new_stack_depth - 1]->evaluation_st_ptr) DOOM("delegate ivk stack underflow");
+    if (lower[0] != ReferenceID) DOOM("delegate ivk expects delegate ref on stack, got %d", lower[0]);
+    int refid = *(int*)(lower + 1);
+    struct object_val* action = (struct object_val*)heap_obj[refid].pointer;
 	if (action->clsid != clsid)
 		DOOM("not an required delegate type:%d\n", clsid);
 
@@ -4424,12 +4389,14 @@ void delegate_ivk(uchar** reptr, unsigned short clsid, int argN)
 	int this_id = *(int*)(&action->payload + 1);
 	int method_id = *(int*)(&action->payload + get_val_sz(Int32) + 1);
 
-	// Push the object (this pointer) and argument
-	PUSH_STACK_REFERENCEID(this_id); //we just replaced "this" pointer.
-	*reptr = evptr;
+    // Replace the delegate slot with the target object reference (this)
+    lower[0] = ReferenceID;
+    *(int*)(lower + 1) = this_id;
 
-	DBG("delegate obj_%d invoke method_%d\n", refid, method_id);
-	vm_push_stack(method_id, -1, reptr);
+    DBG("delegate obj_%d invoke method_%d\n", refid, method_id);
+    // Sync caller frame evaluation pointer before invoking
+    stack_ptr[new_stack_depth - 1]->evaluation_pointer = *reptr;
+    vm_push_stack(method_id, -1, reptr);
 
 	// any ret val don't need to process here.
 }
@@ -4685,8 +4652,8 @@ void builtin_String_Join_IEnumerable(uchar** reptr) {
 	int total_length = 0;
 	int valid_items = 0;
 
-	for (int i = 0; i < arr->len; i++) {
-		if (arr->typeid == ReferenceID) {
+    for (int i = 0; i < arr->len; i++) {
+        if (arr->typeid == ReferenceID) {
 			int* elem_ptr = (int*)(&arr->payload + i * get_type_sz(ReferenceID));
 			int item_id = *elem_ptr;
 
@@ -4703,12 +4670,12 @@ void builtin_String_Join_IEnumerable(uchar** reptr) {
 					valid_items++;
 				}
 			}
-		}
-		else {
-			// For non-reference types, assume a default string representation
-			total_length += 10;
-			valid_items++;
-		}
+        }
+        else {
+            // For numeric/value arrays, estimate decimal string length (worst-case for Int32)
+            total_length += 11; // sign + 10 digits
+            valid_items++;
+        }
 	}
 
 	// Add separators length
@@ -4726,8 +4693,8 @@ void builtin_String_Join_IEnumerable(uchar** reptr) {
 	int offset = 0;
 	int items_added = 0;
 
-	for (int i = 0; i < arr->len && offset < 255; i++) {
-		if (arr->typeid == ReferenceID) {
+    for (int i = 0; i < arr->len && offset < 255; i++) {
+        if (arr->typeid == ReferenceID) {
 			int* elem_ptr = (int*)(&arr->payload + i * get_type_sz(ReferenceID));
 			int item_id = *elem_ptr;
 
@@ -4761,25 +4728,35 @@ void builtin_String_Join_IEnumerable(uchar** reptr) {
 					items_added++;
 				}
 			}
-		}
-		else {
-			// Add separator if not the first item
-			if (items_added > 0 && separator->str_len > 0) {
-				int sep_len = separator->str_len;
-				if (offset + sep_len > 255) sep_len = 255 - offset;
-				memcpy(result + offset, &separator->payload, sep_len);
-				offset += sep_len;
-				if (offset >= 255) break;
-			}
+        }
+        else {
+            // Add separator if not the first item
+            if (items_added > 0 && separator->str_len > 0) {
+                int sep_len = separator->str_len;
+                if (offset + sep_len > 255) sep_len = 255 - offset;
+                memcpy(result + offset, &separator->payload, sep_len);
+                offset += sep_len;
+                if (offset >= 255) break;
+            }
 
-			// Handle value types with a placeholder
-			const char* placeholder = "[Value]";
-			int plc_len = 7;
-			if (offset + plc_len > 255) plc_len = 255 - offset;
-			memcpy(result + offset, placeholder, plc_len);
-			offset += plc_len;
-			items_added++;
-		}
+            // Convert primitive value to string (support Int32 for now)
+            if (arr->typeid == Int32) {
+                int value = *(int*)(&arr->payload + i * get_type_sz(Int32));
+                char buf[16];
+                int len = snprintf(buf, sizeof(buf), "%d", value);
+                if (len < 0) len = 0; if (len > 255 - offset) len = 255 - offset;
+                memcpy(result + offset, buf, len);
+                offset += len;
+            } else {
+                // Fallback placeholder for unsupported primitives
+                const char* placeholder = "[Value]";
+                int plc_len = 7;
+                if (offset + plc_len > 255) plc_len = 255 - offset;
+                memcpy(result + offset, placeholder, plc_len);
+                offset += plc_len;
+            }
+            items_added++;
+        }
 	}
 
 	result[offset] = '\0';
@@ -4987,9 +4964,8 @@ void builtin_Enumerable_Select(uchar** reptr) {
 
 // List<T> builtin methods
 void builtin_List_ctor(uchar** reptr) {
-	// stack: this(List`1)
-	int this_id = pop_reference(reptr);
-	struct object_val* list_obj = expect_builtin_obj(this_id, BUILTIN_CLSIDX_LIST, "List.ctor");
+	// newobj passes object via builtin_arg0; do not pop 'this' here
+	struct object_val* list_obj = expect_builtin_obj(builtin_arg0, BUILTIN_CLSIDX_LIST, "List.ctor");
 	// initialize with small byte-array storage; element type is unknown until first Add/Item set
 	int storage_id = newarr(LIST_INITIAL_CAPACITY * STACK_STRIDE, Byte);
 	list_set_storage_ref(list_obj, storage_id);
@@ -5180,8 +5156,8 @@ void builtin_List_InsertRange(uchar** reptr) {
 
 // Queue<T> builtin methods
 void builtin_Queue_ctor(uchar** reptr) {
-	int this_id = pop_reference(reptr);
-	struct object_val* q = expect_builtin_obj(this_id, BUILTIN_CLSIDX_QUEUE, "Queue.ctor");
+	// newobj passes object via builtin_arg0; do not pop 'this' here
+	struct object_val* q = expect_builtin_obj(builtin_arg0, BUILTIN_CLSIDX_QUEUE, "Queue.ctor");
 	int storage_id = newarr(LIST_INITIAL_CAPACITY * STACK_STRIDE, Byte);
 	queue_set_storage_ref(q, storage_id);
 	queue_set_head(q, 0);
@@ -5260,8 +5236,8 @@ void builtin_Queue_get_Count(uchar** reptr) {
 
 // Stack<T> builtin methods
 void builtin_Stack_ctor(uchar** reptr) {
-	int this_id = pop_reference(reptr);
-	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_STACK, "Stack.ctor");
+	// newobj passes object via builtin_arg0; do not pop 'this' here
+	struct object_val* s = expect_builtin_obj(builtin_arg0, BUILTIN_CLSIDX_STACK, "Stack.ctor");
 	int storage_id = newarr(LIST_INITIAL_CAPACITY * STACK_STRIDE, Byte);
 	stack_set_storage_ref(s, storage_id);
 	stack_set_count(s, 0);
@@ -5331,8 +5307,8 @@ static int dict_find_index(struct object_val* d, uchar* storage, int count, cons
 }
 
 void builtin_Dictionary_ctor(uchar** reptr) {
-	int this_id = pop_reference(reptr);
-	struct object_val* d = expect_builtin_obj(this_id, BUILTIN_CLSIDX_DICTIONARY, "Dictionary.ctor");
+	// newobj passes object via builtin_arg0; do not pop 'this' here
+	struct object_val* d = expect_builtin_obj(builtin_arg0, BUILTIN_CLSIDX_DICTIONARY, "Dictionary.ctor");
 	int storage_id = newarr(LIST_INITIAL_CAPACITY * 2 * STACK_STRIDE, Byte);
 	dict_set_storage_ref(d, storage_id);
 	dict_set_count(d, 0);
@@ -5455,8 +5431,8 @@ static int hset_find_index(struct object_val* s, uchar* storage, int count, cons
 }
 
 void builtin_HashSet_ctor(uchar** reptr) {
-	int this_id = pop_reference(reptr);
-	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_HASHSET, "HashSet.ctor");
+    // newobj passes object via builtin_arg0; do not pop 'this' here
+    struct object_val* s = expect_builtin_obj(builtin_arg0, BUILTIN_CLSIDX_HASHSET, "HashSet.ctor");
 	int storage_id = newarr(LIST_INITIAL_CAPACITY * STACK_STRIDE, Byte);
 	hset_set_storage_ref(s, storage_id);
 	hset_set_count(s, 0);
@@ -5570,8 +5546,8 @@ void builtin_Enumerable_Where(uchar** reptr) {
     int elem_sz = get_type_sz(src_type);
 
     for (int i = 0; i < src_len; i++) {
-        uchar* current_stack_ptr = *reptr;
-        if (pred_this_id > 0) PUSH_STACK_REFERENCEID(pred_this_id);
+        // Prepare stack for delegate invoke: [.., delegate_ref, arg]
+        PUSH_STACK_REFERENCEID(predicate_id);
         if (!is_list) {
             if (src_type == ReferenceID) {
                 int element_id = *(int*)(&source_arr->payload + i * elem_sz);
@@ -5585,7 +5561,8 @@ void builtin_Enumerable_Where(uchar** reptr) {
             struct array_val* storage_arr; uchar* storage = list_storage_bytes(list_obj, &storage_arr);
             push_stack_value(reptr, (stack_value_t*)(storage + i * STACK_STRIDE));
         }
-        vm_push_stack(pred_method_id, -1, reptr);
+        // Invoke Func<T,bool>
+        delegate_ivk(reptr, 0xf003, 1);
         // Expect boolean-like result: accept Boolean or integral 0/1
         POP;
         uchar rtype = **reptr;
@@ -5597,7 +5574,6 @@ void builtin_Enumerable_Where(uchar** reptr) {
         } else {
             DOOM("Where predicate must return Boolean, got %d", rtype);
         }
-        *reptr = current_stack_ptr;
         if (keep) {
             if (src_type == ReferenceID) {
                 if (!is_list) {
@@ -5619,7 +5595,9 @@ void builtin_Enumerable_Where(uchar** reptr) {
         }
     }
 
-    if (out_idx == src_len) { PUSH_STACK_REFERENCEID(source_id); return; }
+    // If no elements were filtered out, we can return the original array as-is;
+    // but for List sources we must still materialize an array for ToArray downstream.
+    if (!is_list && out_idx == src_len) { PUSH_STACK_REFERENCEID(source_id); return; }
     int result_arr_id = newarr(out_idx, src_type);
     struct array_val* result_arr = (struct array_val*)heap_obj[result_arr_id].pointer;
     memcpy(&result_arr->payload, &tmp_arr->payload, out_idx * elem_sz);
@@ -5928,6 +5906,32 @@ __declspec(dllexport) void set_error_report_cb(NotifyErr cb)
 	err_cb = cb;
 }
 
+void print_stacktrace(void) {
+	void* stack[64];
+	HANDLE proc = GetCurrentProcess();
+	SymSetOptions(SYMOPT_LOAD_LINES);       // enable line lookup
+	SymInitialize(proc, NULL, TRUE);
+
+	USHORT n = CaptureStackBackTrace(0, 64, stack, NULL);
+	SYMBOL_INFO* sym = calloc(1, sizeof(SYMBOL_INFO) + 256);
+	sym->MaxNameLen = 255;
+	sym->SizeOfStruct = sizeof(SYMBOL_INFO);
+
+	IMAGEHLP_LINE64 line;
+	DWORD disp;
+	printf("== STACKTRACE of MCU_RUNTIME ===\n");
+	for (USHORT i = 0; i < n; ++i) {
+		DWORD64 addr = (DWORD64)stack[i];
+		if (SymFromAddr(proc, addr, 0, sym)) {
+			printf("%02u: %s ", i, sym->Name);
+			if (SymGetLineFromAddr64(proc, addr, &disp, &line))
+				printf(" (%s:%lu)", line.FileName, line.LineNumber);
+			printf("\n");
+		}
+	}
+	free(sym);
+}
+
 void report_error(int il_offset, uchar* error_str) { 
 	err_cb(il_offset, error_str, strlen(error_str));
 	print_stacktrace();
@@ -5977,12 +5981,13 @@ __declspec(dllexport) void test(uchar* bin, int len)
 
 		uchar* mem = vm_get_lower_memory();
 		int len = vm_get_lower_memory_size();
+		printf(">>> %d finished, mem swap...\n", i);
+		print_hex(vm_get_lower_memory(), vm_get_lower_memory_size());
+
 		if (stateCallback != 0)
 			stateCallback(mem, len);
-		// printf("====%d finished====\r\n", i);
 
 		// system("pause");
-		// print_hex(vm_get_lower_memory(), vm_get_lower_memory_size());
 	}
 }
 #endif

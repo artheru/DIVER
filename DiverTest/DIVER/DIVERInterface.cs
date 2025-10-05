@@ -45,7 +45,7 @@ namespace CartActivator
             using var br = new BinaryReader(ms);
             if (mcu_logics.TryGetValue(mcuUri, out var tup))
             {
-                Console.WriteLine($"recv iter {br.ReadInt32()} lowerIO data from {mcuUri}, operation {tup.name}", $"DIVER-{tup.name}");
+                //Console.WriteLine($"recv iter {br.ReadInt32()} lowerIO data from {mcuUri}, operation {tup.name}", $"DIVER-{tup.name}");
 
                 for (int cid = 0; cid < tup.fields.Length; cid++)
                 {
@@ -475,10 +475,11 @@ namespace CartActivator
             {
                 NotifyLowerData("default", bs);
                 // debug output all fields of cart object.
+                Console.WriteLine("Lower Data notified");
                 foreach (var field in GetType().GetFields())
                 {
                     var value = field.GetValue(this);
-                    Console.WriteLine($"{field.Name}: {value}");
+                    Console.WriteLine($"    {field.Name}: {value}");
                 }
 
             }); // note: apply NotifyLowerData on data received.

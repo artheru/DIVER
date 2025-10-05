@@ -24,7 +24,9 @@ public class ModuleWeaver : BaseModuleWeaver
         {
             var extraMethods = File.ReadAllLines(extraMethodsPath);
             WriteWarning($"Loading {extraMethods.Length} additional built-in methods");
-            Processor.BuiltInMethods.AddRange(extraMethods); 
+            // default ctor clsid = 0 unless specified elsewhere
+            foreach (var m in extraMethods)
+                Processor.BuiltInMethods.Add((m, (ushort)0)); 
         }
         else
         {
