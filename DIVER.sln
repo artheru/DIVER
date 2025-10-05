@@ -16,9 +16,6 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "MCURuntime", "MCURuntime\MCURuntime.vcxproj", "{809EC741-D1A8-4522-8DE4-A9D1F4687DD1}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DiverTest", "DiverTest\DiverTest.csproj", "{7A78D970-5AD3-44C6-A04B-21EF79CB1BEF}"
-	ProjectSection(ProjectDependencies) = postProject
-		{F9E5081B-0F60-4C0C-9794-B2EB9E6947E1} = {F9E5081B-0F60-4C0C-9794-B2EB9E6947E1}
-	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "3rd-party", "3rd-party", "{FFF7E424-7982-4A87-92A6-351CF85A459F}"
 EndProject

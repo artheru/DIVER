@@ -281,6 +281,13 @@ internal partial class Processor
     internal class CCoder
     {
         public static int ccid = 0;
+
+        public int myid = 0;
+        public CCoder()
+        {
+            myid = ccid;
+            ccid += 1;
+        }
         public string CError = "none";
         
         public static string[] CCTyping =
@@ -507,7 +514,6 @@ internal partial class Processor
         }
 
         public Processor _p;
-        public int clinked_name;
 
         public void CGenMode()
         {
@@ -755,10 +761,12 @@ internal partial class Processor
                     {
                         if (rmd != null)
                         {
+                            if (rmd.IsAbstract) // abstract method has no body.
+                                continue;
                             if (!SI.methods.TryGetValue(GetGenericResolvedName(rmd, null), out var en)) 
                             {
                                 // added processor.
-                                bmw.WriteWarning($"{cname}::{rmd} implements {md}, process");
+                                bmw.WriteWarning($"{cname}::{rmd} actually implements {md}, process");
                                 en = new Processor(this) { bmw = bmw }.Process(rmd);
                                 if (en == null) throw new WeavingException("HALT before linking..."); 
                                 goto re_link;
@@ -978,9 +986,29 @@ internal partial class Processor
                             #define ptr void*
 
                             // function begins
-
-
+                            
                             """;
+            // todo: add forward declarations.
+            foreach (var m in all_methods)
+            {
+                if (m.ccoder.CError == "none")
+                {
+                    var retN = "void*";
+                    if (m.ret_name == "Void" || m.md.IsConstructor)
+                    {
+                        retN = "void";
+                    }
+                    else if (m.retBytes[0] < 10)
+                    {
+                        retN = CCoder.CCTyping[m.retBytes[0]];
+                    }
+                    var fcname = m.ccoder.myid;
+                    allCCodes += $"{retN} cfun{fcname}(u1* args);\n";
+                }
+            }
+
+            allCCodes += "\n";
+
             foreach (var m in all_methods) 
             {
                 if (m.ccoder.CError == "none")
@@ -999,8 +1027,7 @@ internal partial class Processor
                         retN = CCoder.CCTyping[m.retBytes[0]]; 
                     }
                       
-                    var fcname = CCoder.ccid++;
-                    m.ccoder.clinked_name = fcname; 
+                    var fcname = m.ccoder.myid;
 
                     var arg_set = $"int argN=0;\n{
                         string.Join("\n", m.argumentList.Select((p, ai) => $"{CCoder.CCTyping[p.typeID]} arg{ai} = *({CCoder.CCTyping[p.typeID]}*)&args[(argN++)*4];"))}{
@@ -2160,7 +2187,21 @@ internal partial class Processor
                 cc.Error("calling method not C transpilable.");
             if (en == null) return null;
 
-            //todo: consider how to call C transpiled functions.
+            // Emit C-call glue for transpiled methods so cfun's can call each other
+            int args_count = methodDefinition.Parameters.Count + (methodDefinition.HasThis ? 1 : 0);
+            string rettype_str = null;
+            if (!(methodDefinition.ReturnType.FullName == "System.Void" || methodDefinition.IsConstructor))
+            {
+                if (tMapDict.TryGetValue(methodDefinition.ReturnType.Name, out var typing) && typing.typeid < 10)
+                {
+                    rettype_str = CCoder.CCTyping[typing.typeid];
+                }
+                else
+                {
+                    cc.Error("invalid return type for C, only primitives allowed.");
+                }
+            }
+            cc.Append(me => $"cfun{en.ccoder.myid}({string.Join(",", me)})", args_count, rettype_str);
 
             var ird = en.registry;
             return [0xA6, (byte)(ird & 0xff), (byte)(ird >> 8)];
@@ -2211,7 +2252,7 @@ internal partial class Processor
 
         // Check base types (for class inheritance)
         var baseType = type.BaseType?.Resolve();
-        if (baseType != null && baseType!=methodDefinition.DeclaringType)
+        if (baseType != null)
         {
             var baseResult = ImplementsMethod(baseType, methodDefinition);
             if (baseResult.Item1)
@@ -2225,7 +2266,31 @@ internal partial class Processor
 
     private bool MethodsAreEquivalent(MethodDefinition method1, MethodDefinition method2)
     {
-        return method1.Overrides.Any(p => p.Resolve() == method2);
+        if (method1 == null || method2 == null) return false;
+
+        // Prefer explicit override metadata
+        if (method1.HasOverrides && method1.Overrides.Any(p => p.Resolve() == method2))
+            return true;
+
+        // Fallback: signature-based match for virtual/override across inheritance
+        if (!string.Equals(method1.Name, method2.Name, StringComparison.Ordinal))
+            return false;
+
+        if (method1.Parameters.Count != method2.Parameters.Count)
+            return false;
+
+        for (int i = 0; i < method1.Parameters.Count; i++)
+        {
+            var p1 = method1.Parameters[i].ParameterType;
+            var p2 = method2.Parameters[i].ParameterType;
+            if (!string.Equals(p1.FullName, p2.FullName, StringComparison.Ordinal))
+                return false;
+        }
+
+        if (!string.Equals(method1.ReturnType.FullName, method2.ReturnType.FullName, StringComparison.Ordinal))
+            return false;
+
+        return true;
     }
 
     Dictionary<Instruction, int> stackDepth = new Dictionary<Instruction, int>();
@@ -2266,9 +2331,9 @@ internal partial class Processor
                     }
 
                 this.stackDepth[instruction] = stackDepth;
+                //bmw.WriteWarning($"ins={instruction}");
                 cc.AnalyzeFrom(previous); 
                 
-                // bmw.WriteWarning($"ins={instruction}");
                 ConvertToBytecode(instruction, method); 
 
                 stackDepth = UpdateStackDepth(instruction, stackDepth);
