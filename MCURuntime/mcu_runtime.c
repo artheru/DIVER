@@ -678,7 +678,7 @@ int get_virt_method_actual_methodID(int vmethod_id, int cls_id)
 {
 	uchar* ptr = virt_table + *((short*)(virt_ptr + 2) + vmethod_id);
 	uchar ncls = *ptr;
-	uchar paramCnt = *ptr + 1;
+	uchar paramCnt = *(ptr + 1);
 	struct { short clsid; short methodid; } *vm_s = ptr + 2;
 	for (int i = 0; i < ncls; ++i, vm_s++)
 		if (vm_s->clsid == cls_id) return vm_s->methodid;
@@ -764,7 +764,10 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
 #define PUSH_STACK_INDIRECT(addr) {*(int*)eptr=*(int*)addr; ((int*)eptr)[1]=((int*)addr)[1]; eptr+=8;}
 
 #define POP {eptr-=STACK_STRIDE;\
-    DIEIF (eptr<my_stack->evaluation_st_ptr) DOOM("POP exceeds range!"); }
+    if (eptr < my_stack->evaluation_st_ptr) {\
+        WARN("POP underflow: method=%d depth=%d eval_ptr=%p st_ptr=%p\n", my_stack->method_id, my_stack->stack_depth, (void*)eptr, (void*)my_stack->evaluation_st_ptr);\
+        DOOM("POP exceeds range!");\
+    } }
 
 void vm_push_stack(int method_id, int new_obj_id, uchar** reptr);
 
@@ -901,6 +904,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 	new_stack_depth += 1;
 	struct stack_frame_header* my_stack = my_stack_depth == 0 ? stack0 : stack_ptr[my_stack_depth - 1]->evaluation_pointer;
 	stack_ptr[my_stack_depth] = my_stack;
+	WARN("vm_push_stack: method=%d depth=%d new_obj=%d\n", method_id, my_stack_depth, new_obj_id);
 	uchar* st_ptr = method_detail_pointer + methods_table[method_id].code_offset;
 	*my_stack = (struct stack_frame_header){
 		.method_id = method_id,
@@ -919,6 +923,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 	// put args:
 	my_stack->args = sptr;
 	short n_args = ReadShort;
+	WARN("vm_push_stack: method=%d n_args=%d\n", method_id, n_args);
 
 	short cls_id[16];
 	uchar* auxptr[16];
@@ -942,23 +947,17 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 	}
 	else {
 		// validate previous stack frame.
-		struct stack_frame_header* my_stack = stack_ptr[new_stack_depth - 1];
-		uchar* eptr = my_stack; // previous stack_ep.
+		struct stack_frame_header* caller_stack = stack_ptr[my_stack_depth - 1];
+		uchar* eptr = caller_stack->evaluation_pointer;
 
 		for (int i = n_args - 1; i >= (new_obj_id > 0 ? 1 : 0); --i)
 		{
-			uchar typeid = ptr[i * 3]; // actually it's reverse order.
-			POP;
-			// 20250522: we do type check on actual copy.
-			// if (typeid == 0 && *eptr == Int32 || typeid == JumpAddress && *eptr == ReferenceID)
-			// {
-			// 	// it's ok
-			// 	continue;
-			// }
-			// else if (*eptr != typeid)
-			// {
-			// 	DOOM("call method-%d, but arg-%d is given typeid %d, required=%d\n", method_id, i, *eptr, typeid);
-			// }
+			eptr -= STACK_STRIDE;
+			if (eptr < caller_stack->evaluation_st_ptr)
+			{
+				WARN("vm_push_stack underflow: method=%d n_args=%d i=%d caller_depth=%d eval_ptr=%p st_ptr=%p\n", method_id, n_args, i, my_stack_depth, (void*)eptr, (void*)caller_stack->evaluation_st_ptr);
+				DOOM("POP exceeds range!");
+			}
 		}
 
 		uchar* septr = eptr; // stack vals pointer.
@@ -968,8 +967,8 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			uchar this_typeid = ReadByte;
 			short aux = ReadShort;
 			DIEIF(this_typeid != ReferenceID)
-				DOOM("newobj call but this pointer is %d\n", this_typeid)
-				* sptr = ReferenceID;
+				DOOM("newobj call but this pointer is %d\n", this_typeid);
+			*sptr = ReferenceID;
 			As(sptr + 1, int) = new_obj_id;
 			sptr += get_val_sz(ReferenceID);
 		}
@@ -1003,23 +1002,10 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			copy_val(sptr, septr);
 			sptr += sz;
 			septr += STACK_STRIDE;
-
-			// if (typeid == 0 && *septr == Int32)
-			// {
-			// 	//load int as boolean.
-			// 	sptr[0] = 0; //boolean type.
-			// 	sptr[1] = septr[1];
-			// 	sptr += get_val_sz(Boolean);
-			// 	septr += STACK_STRIDE;
-			// }
-			// else {
-			// 	if (typeid != *septr) DOOM("WTF?");
-			// 	memcpy(sptr, septr, sz);
-			// 	sptr += sz;
-			// 	septr += STACK_STRIDE;
-			// }
 		}
-		*reptr = eptr; //pop arguments for previous stack.
+
+		caller_stack->evaluation_pointer = eptr;
+		if (reptr) *reptr = eptr; //pop arguments for previous stack.
 	}
 	// initialize vars:
 	my_stack->vars = sptr;
@@ -1308,6 +1294,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			case 0x36: condition = (val1 != 0);
 				break; // Brtrue
 			}
+			WARN("branch op=0x%02X val_type=%d val_raw=%d cond=%d offset=%d\n", ic, *val1p, As(val1p + 1, int), condition, offset);
 			if (condition)
 			{
 				ptr = my_stack->entry_il + offset;
@@ -2082,6 +2069,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 					if (ic == 0x7B)
 					{
 						PUSH_STACK_INDIRECT(field_ptr);
+						WARN("ldfld inst push type=%d ref=%d obj=%d cls=%d ofs=%d\n", *field_ptr, As(field_ptr + 1, int), ref_id, aux, offset);
 						DBG
 						("ldfld from %d(cls:%d, ofst:%d), type_%d\n", ref_id, aux, offset, *field_ptr);
 					}
@@ -2247,7 +2235,8 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			int actual_method_id;
 			uchar* ptr = virt_table + *((short*)(virt_ptr + 2) + vmethod_id);
 			uchar ncls = *ptr;
-			uchar paramCnt = *ptr + 1;
+			uchar paramCnt = *(ptr + 1);
+			WARN("callvirt abstract: ncls=%d paramCnt=%d stackDepth=%d\n", ncls, paramCnt, my_stack->stack_depth);
 			uchar* o_eptr = eptr;
 			for (int i = 0; i < paramCnt; ++i)
 				POP;
@@ -2329,6 +2318,14 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 		{
 			DBG
 			("IL_Callvirt instanced\n");
+			if (eptr <= my_stack->evaluation_st_ptr)
+			{
+				WARN("callvirt: stack empty before dispatch (method=%d depth=%d)\n", my_stack->method_id, my_stack->stack_depth);
+			}
+			else
+			{
+				WARN("callvirt: stack top type=%d ref=%d\n", (int)*(eptr - STACK_STRIDE), As(eptr - STACK_STRIDE + 1, int));
+			}
 			ic = ReadByte;
 			switch (ic)
 			{
