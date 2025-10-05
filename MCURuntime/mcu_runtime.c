@@ -23,6 +23,7 @@
 //hint: all structs are 1 bytes aligned.
 #pragma pack(push, 1)
 
+int cur_il_offset;
 
 #ifdef _DEBUG
 #define INLINE static inline
@@ -40,14 +41,8 @@
 // printf
 #define WARN printf
 
-void debugger_break()
-{
-	exit(0);
-	// system("pause");
-}
-
 #define DIEIF(expr) if (expr)
-#define DOOM(...) {printf(__VA_ARGS__); debugger_break();}
+#define DOOM(...) { char sprintf_format[100] = { 0 }; sprintf(sprintf_format, __VA_ARGS__); report_error(cur_il_offset, sprintf_format);}
 
 #else
 
@@ -1085,6 +1080,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 	while (1)
 	{
 		uchar* ptr = my_stack->PC; // pointer to program code
+		cur_il_offset = ptr - mem0;
 		uchar* eptr = my_stack->evaluation_pointer; // pointer to evaluation stack.
 
 		uchar ic = ReadByte;
@@ -5051,7 +5047,17 @@ void write_snapshot(uchar* buffer, int size)
 void write_stream(int streamID, uchar* buffer, int size) {} // called to write bytes into serial.
 void write_event(int portID, int eventID, uchar* buffer, int size) {} // called to write bytes into CAN/modbus similar ports.
 
-void report_error(uchar* error_str) { DOOM("%s\n", error_str); }
+
+typedef void(*NotifyErr)(int il_offset, unsigned char* error_msg, int length);
+NotifyErr err_cb = 0;
+__declspec(dllexport) void set_error_report_cb(NotifyErr cb)
+{
+	err_cb = cb;
+}
+
+void report_error(int il_offset, uchar* error_str) { 
+	err_cb(il_offset, error_str, strlen(error_str));
+}
 void print_line(uchar* error_str) { printf("%s\n", error_str); }; // should upload text info.
 
 inline void enter_critical() {};

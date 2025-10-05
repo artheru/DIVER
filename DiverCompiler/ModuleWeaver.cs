@@ -79,7 +79,7 @@ public class ModuleWeaver : BaseModuleWeaver
                 WriteWarning(
                     $"mcu program sz={dll.bytes.Length}, interval={myinterval}, interface variables sequence=[{string.Join(",", dll.IOs.Select(p => $"{p.FieldName}({p.typeid})@{p.offset}"))}]");
 
-                // File.WriteAllBytes($"{type.Name}.bin", dll.bytes);
+                File.WriteAllBytes($"{type.Name}.diver", dll.diver_src);
 
                 module.Resources.Add(new EmbeddedResource($"{type.Name}.bin", ManifestResourceAttributes.Public, dll.bytes));
                 module.Resources.Add(new EmbeddedResource($"{type.Name}.bin.json", ManifestResourceAttributes.Public,

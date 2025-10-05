@@ -388,14 +388,7 @@ namespace CartActivator
             public delegate void NotifyLowerDelegate(byte* changedStates, int length);
             [DllImport("MCURuntime.dll", CallingConvention = CallingConvention.Cdecl)]
             public static extern void set_lowerio_cb(NotifyLowerDelegate callback);
-
             private static NotifyLowerDelegate DNotifyStateChanged = StateChanged;
-
-            [DllImport("MCURuntime.dll")]
-            static extern void test(byte* bin, int len);
-            [DllImport("MCURuntime.dll")]
-            static extern void put_upper(byte* bin, int len);
-
             private static Action<byte[]> lo_notifier;
             private static void StateChanged(byte* changedstates, int length)
             {
@@ -403,6 +396,23 @@ namespace CartActivator
                 Marshal.Copy((IntPtr)changedstates, byteArray, 0, length);
                 lo_notifier(byteArray);
             }
+
+            public delegate void NotifyErrorDelegate(int il_offset, byte* changedStates, int length);
+            [DllImport("MCURuntime.dll", CallingConvention = CallingConvention.Cdecl)]
+            public static extern void set_error_report_cb(NotifyErrorDelegate callback);
+            private static NotifyErrorDelegate DNotifyError = Error;
+            private static void Error(int il_offset, byte* err, int length)
+            {
+                byte[] byteArray = new byte[length];
+                Marshal.Copy((IntPtr)err, byteArray, 0, length);
+                //todo...
+            }
+
+            [DllImport("MCURuntime.dll")]
+            static extern void test(byte* bin, int len);
+            [DllImport("MCURuntime.dll")]
+            static extern void put_upper(byte* bin, int len);
+
 
             public static void DebugSendUpper(byte[] data)
             {
@@ -415,6 +425,7 @@ namespace CartActivator
             {
                 lo_notifier = notifier;
                 set_lowerio_cb(DNotifyStateChanged);
+                set_error_report_cb(DNotifyError);
                 new Thread(() =>
                 {
                     var allb = new byte[102400]; //100K runtime
