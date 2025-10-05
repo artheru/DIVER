@@ -6,6 +6,26 @@ using Newtonsoft.Json;
 
 namespace CartActivator
 {
+    static class DiverDebugStore
+    {
+        private static readonly Dictionary<string, (string diver, string map, string logic)> store = new();
+        public static void Set(string uri, string diver, string map, string logic)
+        {
+            lock (store) store[uri] = (diver, map, logic);
+        }
+        public static bool TryGet(string uri, out (string diver, string map, string logic) v)
+        {
+            lock (store) return store.TryGetValue(uri, out v);
+        }
+        public static bool TryGetAny(out (string diver, string map, string logic) v)
+        {
+            lock (store)
+            {
+                foreach (var kv in store) { v = kv.Value; return true; }
+                v = default; return false;
+            }
+        }
+    }
     // todo: currently use this ladderlogic to act interaction with Medulla. 
     // todo: directly integrate into CartActivator.
 
@@ -313,13 +333,16 @@ namespace CartActivator
 
                 var asmBytes = ReadAllBytes(asm.GetManifestResourceStream($"{logic.Name}.bin"));
                 var json = UTF8Encoding.UTF8.GetString(ReadAllBytes(asm.GetManifestResourceStream($"{logic.Name}.bin.json")));
+                var diverSrc = UTF8Encoding.UTF8.GetString(ReadAllBytes(asm.GetManifestResourceStream($"{logic.Name}.diver")));
+                var diverMap = UTF8Encoding.UTF8.GetString(ReadAllBytes(asm.GetManifestResourceStream($"{logic.Name}.diver.map.json")));
                 
                 // Console.WriteLine(json);
 
                 var fields = JsonConvert.DeserializeObject<PField[]>(json);
                 if (mcu_logics.ContainsKey(attr.mcuUri))
                     throw new Exception($"Already have logic for {attr.mcuUri}: LadderLogic {logic.Name}");
-                mcu_logics[attr.mcuUri] = new LogicInfo() { fields = fields, name = logic.Name };
+                mcu_logics[attr.mcuUri] = new LogicInfo() { fields = fields, name = logic.Name, diver = diverSrc, map = diverMap };
+                DiverDebugStore.Set(attr.mcuUri, diverSrc, diverMap, logic.Name);
                 foreach (var pField in fields)
                 {
                     pField.fi = GetType().GetField(pField.field);
@@ -328,6 +351,7 @@ namespace CartActivator
                     pField.isUpper = pField.fi.IsDefined(typeof(AsUpperIO));
                     // todo: check type.
                 }
+                _outerRef = new WeakReference(this);
                 SetMCUProgram(attr.mcuUri, asmBytes);
             }
         }
@@ -346,8 +370,111 @@ namespace CartActivator
             public string name;
             public PField[] fields;
             public int iterations;
+            public string diver;
+            public string map;
         }
         private Dictionary<string, LogicInfo> mcu_logics = new();
+
+        /// ///////////////////////////////// Debugging /////////////////////////////////////
+
+        private static DIVERVehicle _outer => _outerRef.Target as DIVERVehicle;
+        private static WeakReference _outerRef = new WeakReference(null);
+
+        internal static void BindOuter(DIVERVehicle v)
+        {
+            
+        }
+
+
+        private static (string method, int line, int winStart, int winEnd) ResolveByOffset(string mapJson, int abs)
+        {
+            // Map is a JSON array of entries: {a:abs, m:methodId, mi:instIndex, l:line, n:name}
+            int best = -1;
+            int bestDelta = int.MaxValue;
+            string bestName = "?";
+            int bestMi = -1;
+            int bestLine = 0;
+
+            // naive scan (small JSON)
+            int i = 0;
+            while (i < mapJson.Length)
+            {
+                int aIdx = mapJson.IndexOf("\"a\":", i);
+                if (aIdx == -1) break;
+                int comma = mapJson.IndexOf(',', aIdx + 4);
+                if (comma == -1) break;
+                if (int.TryParse(mapJson.Substring(aIdx + 4, comma - (aIdx + 4)), out int aVal))
+                {
+                    int d = abs - aVal;
+                    if (d >= 0 && d < bestDelta)
+                    {
+                        bestDelta = d; best = aVal;
+                        // parse l
+                        int lIdx = mapJson.IndexOf("\"l\":", comma + 1);
+                        if (lIdx != -1)
+                        {
+                            int lEnd = mapJson.IndexOf(',', lIdx + 4);
+                            int lEndAlt = mapJson.IndexOf('}', lIdx + 4);
+                            int lEndUse = (lEnd == -1 || (lEndAlt != -1 && lEndAlt < lEnd)) ? lEndAlt : lEnd;
+                            int.TryParse(mapJson.Substring(lIdx + 4, lEndUse - (lIdx + 4)), out bestLine);
+                        }
+                        // parse n
+                        int nIdx = mapJson.IndexOf("\"n\":\"", comma + 1);
+                        if (nIdx != -1)
+                        {
+                            int nEnd = mapJson.IndexOf('"', nIdx + 5);
+                            if (nEnd != -1)
+                            {
+                                bestName = mapJson.Substring(nIdx + 5, nEnd - (nIdx + 5)).Replace("\\\"", "\"").Replace("\\\\", "\\");
+                            }
+                        }
+                    }
+                }
+                i = comma + 1;
+            }
+
+            int ws = Math.Max(1, bestLine - 5);
+            int we = bestLine + 5;
+            return (bestName, bestLine, ws, we);
+        }
+
+        private static void PrintWindow(string diver, int start, int end)
+        {
+            using (var sr = new StringReader(diver))
+            {
+                int ln = 0;
+                while (true)
+                {
+                    var line = sr.ReadLine();
+                    if (line == null) break;
+                    ln++;
+                    if (ln < start) continue;
+                    if (ln > end) break;
+                    Console.WriteLine(line);
+                }
+            }
+        }
+
+        public static void PrintDebugInfo(int il_offset, string msg)
+        {
+            try
+            {
+                if (!DiverDebugStore.TryGetAny(out var any))
+                {
+                    return;
+                }
+
+                var (method, line, windowStart, windowEnd) = ResolveByOffset(any.map, il_offset);
+
+                Console.WriteLine($"[DIVER] Fault in method {method} @0x{il_offset:X} (.diver line {line}): {msg}");
+
+                PrintWindow(any.diver, windowStart, windowEnd);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DIVER] Error handling fault: {ex.Message}");
+            }
+        }
     }
 
 
@@ -401,12 +528,15 @@ namespace CartActivator
             [DllImport("MCURuntime.dll", CallingConvention = CallingConvention.Cdecl)]
             public static extern void set_error_report_cb(NotifyErrorDelegate callback);
             private static NotifyErrorDelegate DNotifyError = Error;
+
             private static void Error(int il_offset, byte* err, int length)
             {
                 byte[] byteArray = new byte[length];
                 Marshal.Copy((IntPtr)err, byteArray, 0, length);
-                //todo...
+                var msg = Encoding.ASCII.GetString(byteArray);
+                DIVERVehicle.PrintDebugInfo(il_offset, msg);
             }
+
 
             [DllImport("MCURuntime.dll")]
             static extern void test(byte* bin, int len);

@@ -26,6 +26,8 @@ internal partial class Processor
     {
         public byte[] bytes;
         public (string FieldName, int offset, byte typeid)[] IOs;
+        public byte[] diver_src;
+        public byte[] diver_map;
     }
 
     public class StackInitVals
@@ -1037,6 +1039,8 @@ internal partial class Processor
             
             int c_offset = 0;
             int entry_offset = 0;
+            List<int> methodMetaOffsets = new();
+            List<int> methodCodeOffsets = new();
             for (var j = 0; j < codes.Length; j++)
             {
                 var (main, meta, code) = codes[j];
@@ -1049,6 +1053,8 @@ internal partial class Processor
                 c_offset += code.Length;
 
                 bmw.WriteWarning($"method:{all_methods[j].name}, meta/code_offset={a}/{b}");
+                methodMetaOffsets.Add(a);
+                methodCodeOffsets.Add(b);
             }
 
             byte[] code_chunk = [..code_table, ..codes.SelectMany(p => p.meta.Concat(p.code).ToArray())];
@@ -1142,12 +1148,93 @@ internal partial class Processor
                 ..BitConverter.GetBytes(this_clsID), // this.
                 ..program_desc, ..code_chunk, ..virts, ..statics_descriptor];
 
-            ret.dll = new ResultDLL()
+            // Build .diver source and map
+            try
             {
-                bytes = dll,
-                IOs = SI.cart_io_list.Select(p => (p, SI.sfield_offset.field_offset[p].offset, SI.sfield_offset.field_offset[p].typeid))
-                    .ToArray()
-            }; 
+                int headerLen = 7 * 4;
+                int methodsN = all_methods.Length;
+                int methodDetailBase = headerLen + program_desc.Length + 2 + methodsN * 8;
+
+                var diver = new StringBuilder();
+                var map = new StringBuilder();
+                map.Append('[');
+                bool first = true;
+
+                var sourceCache = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+
+                int globalLine = 1;
+                for (int j = 0; j < all_methods.Length; j++)
+                {
+                    var m = all_methods[j];
+                    diver.AppendLine($"=== Method `{m.name}` ===");
+
+                    var ilList = m.md.Body.Instructions;
+                    int instCount = Math.Min(ilList.Count, m.buffer.Count);
+                    for (int k = 0; k < instCount; k++)
+                    {
+                        var il = ilList[k];
+                        string csLine = "";
+                        try
+                        {
+                            var ins = il;
+                            SequencePoint sp;
+                            do
+                            {
+                                sp = m.md.DebugInformation.GetSequencePoint(ins);
+                                ins = ins?.Previous;
+                            } while ((sp == null || sp.StartLine == 0xfeefee) && ins != null);
+
+                            if (sp != null && !string.IsNullOrEmpty(sp.Document?.Url) && File.Exists(sp.Document.Url))
+                            {
+                                if (!sourceCache.TryGetValue(sp.Document.Url, out var lines))
+                                {
+                                    lines = File.ReadAllLines(sp.Document.Url);
+                                    sourceCache[sp.Document.Url] = lines;
+                                }
+                                if (sp.StartLine >= 1 && sp.StartLine <= lines.Length)
+                                {
+                                    csLine = lines[sp.StartLine - 1].Trim();
+                                }
+                            }
+                        }
+                        catch { }
+
+                        int abs = methodDetailBase + methodCodeOffsets[j] + m.buffer[k].offset;
+                        string ilText = il.ToString();
+                        diver.AppendLine($"{globalLine}:    {ilText}{(csLine.Length > 0 ? "  // " + csLine : "")}");
+
+                        if (!first) map.Append(',');
+                        first = false;
+
+                        string escName = m.name.Replace("\\", "\\\\").Replace("\"", "\\\"");
+                        map.Append("{\"a\":").Append(abs)
+                           .Append(",\"m\":").Append(j)
+                           .Append(",\"l\":").Append(globalLine)
+                           .Append(",\"n\":\"").Append(escName).Append("\"}");
+
+                        globalLine++;
+                    }
+                }
+
+                map.Append(']');
+                ret.dll = new ResultDLL()
+                {
+                    bytes = dll,
+                    IOs = SI.cart_io_list.Select(p => (p, SI.sfield_offset.field_offset[p].offset, SI.sfield_offset.field_offset[p].typeid)).ToArray(),
+                    diver_src = Encoding.UTF8.GetBytes(diver.ToString()),
+                    diver_map = Encoding.UTF8.GetBytes(map.ToString())
+                };
+            }
+            catch
+            {
+                ret.dll = new ResultDLL()
+                {
+                    bytes = dll,
+                    IOs = SI.cart_io_list.Select(p => (p, SI.sfield_offset.field_offset[p].offset, SI.sfield_offset.field_offset[p].typeid)).ToArray(),
+                    diver_src = Encoding.UTF8.GetBytes(string.Empty),
+                    diver_map = Encoding.UTF8.GetBytes("[]")
+                };
+            }
              
             // foreach (var m in all_methods)
             // {

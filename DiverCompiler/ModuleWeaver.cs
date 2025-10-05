@@ -80,12 +80,15 @@ public class ModuleWeaver : BaseModuleWeaver
                     $"mcu program sz={dll.bytes.Length}, interval={myinterval}, interface variables sequence=[{string.Join(",", dll.IOs.Select(p => $"{p.FieldName}({p.typeid})@{p.offset}"))}]");
 
                 File.WriteAllBytes($"{type.Name}.diver", dll.diver_src);
+                File.WriteAllBytes($"{type.Name}.diver.map.json", dll.diver_map);
 
                 module.Resources.Add(new EmbeddedResource($"{type.Name}.bin", ManifestResourceAttributes.Public, dll.bytes));
                 module.Resources.Add(new EmbeddedResource($"{type.Name}.bin.json", ManifestResourceAttributes.Public,
                     Encoding.UTF8.GetBytes("[" + string.Join(",",
                         dll.IOs.Select(p =>
                             $"{{\"field\":\"{p.FieldName}\", \"typeid\":{p.typeid}, \"offset\":{p.offset}}}")) + "]")));
+                module.Resources.Add(new EmbeddedResource($"{type.Name}.diver", ManifestResourceAttributes.Public, dll.diver_src));
+                module.Resources.Add(new EmbeddedResource($"{type.Name}.diver.map.json", ManifestResourceAttributes.Public, dll.diver_map));
             }
         }  
          

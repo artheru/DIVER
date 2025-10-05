@@ -29,7 +29,7 @@ int cur_il_offset;
 #define INLINE static inline
 
 // swith on this variable to allow verbose output.
-#define _VERBOSE
+//#define _VERBOSE
 
 #ifdef _VERBOSE
 #define DBG printf
@@ -5057,6 +5057,7 @@ __declspec(dllexport) void set_error_report_cb(NotifyErr cb)
 
 void report_error(int il_offset, uchar* error_str) { 
 	err_cb(il_offset, error_str, strlen(error_str));
+	exit(2);
 }
 void print_line(uchar* error_str) { printf("%s\n", error_str); }; // should upload text info.
 
