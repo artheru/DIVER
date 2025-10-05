@@ -374,3 +374,5 @@ tmp_ref/
 /DiverTest/mcuruntime.lib
 /DiverTest/mcuruntime.pdb
 /DiverTest/native/code.c
+/DiverTest/TestLogic.diver
+/DiverTest/TestLogic.diver.map.json
