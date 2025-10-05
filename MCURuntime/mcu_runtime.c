@@ -34,12 +34,12 @@ int cur_il_offset;
 #ifdef _VERBOSE
 #define DBG printf
 #define INFO printf
+#define WARN printf
 #else
 #define DBG ;
 #define INFO ;
+#define WARN ;
 #endif
-// printf
-#define WARN printf
 
 #define DIEIF(expr) if (expr)
 #define DOOM(...) { char sprintf_format[100] = { 0 }; sprintf(sprintf_format, __VA_ARGS__); report_error(cur_il_offset, sprintf_format);}

@@ -985,7 +985,7 @@ internal partial class Processor
             {
                 if (m.ccoder.CError == "none")
                 { 
-                    bmw.WriteWarning($"======== Generated C Code of '{m.name}' @ {m.registry}: ===========");
+                    bmw.WriteWarning($"Generate C Code for '{m.name}' @ {m.registry}.");
 
                     var ccodes = m.ccoder.ccode.Select(p => p()).ToArray();
 
@@ -1008,12 +1008,13 @@ internal partial class Processor
                                 string.Join("\n", m.ccoder.additional_Args.Select(p => $"{p.argtype} {p.name} = *({p.argtype}*)&args[(argN++)*4];"))}")}";
 
                     var cCode =
+                        $"// {m.name}\n" +
                         $"{retN} cfun{fcname}(u1* args){{\n" +
                         $"//args:\n{arg_set}\n" +
                         $"//stack_vars:\n{string.Join(";\n", m.ccoder.stackVars)};\n " +
                         $"//local_vars:\n{string.Join(";\n", m.variableList.Select((p, ai) => $"{CCoder.CCTyping[p.typeID]} var{ai}"))};\n" +
                         $"//code:\n{string.Join("", ccodes)}}}\n\n";
-                    bmw.WriteWarning($"Full CCode of {m.name}:\n{cCode}");
+                    //bmw.WriteWarning($"Full CCode of {m.name}:\n{cCode}");
                     allCCodes += cCode;
                 } 
                 else
@@ -1087,7 +1088,7 @@ internal partial class Processor
 
 
                 bmw.WriteWarning(
-                    $"class {SI.instanceable_classes[j]} sz {p.size}(n={p.field_offset.Count}), offset_{ic_offset}");
+                    $"class_{j} {SI.instanceable_classes[j]} sz {p.size}(n={p.field_offset.Count}), meta offset:{ic_offset}");
                 ic_offset += iclass[j].Length;
             }
              
@@ -1112,6 +1113,8 @@ internal partial class Processor
                 })
             ]; 
 
+
+
             // virtual method calls:
             byte[][] virt_method_calls = SI.virtcallMethods.Select(p => 
                 new byte[]{(byte)virtCallDefs[p].Count, (byte)p.Parameters.Count}
@@ -1127,9 +1130,10 @@ internal partial class Processor
                 bmw.WriteWarning($"fuck debugger:{string.Join(" ", virt_method_calls[j].Select(p=>$"{p:X2}"))}");
                 vc_offset += virt_method_calls[j].Length;
             }
-             
             byte[] virts = [..virt_table, ..virt_method_calls.SelectMany(p => p)];
               
+
+
             var this_clsID = SI.instanceable_classes.IndexOf(method.DeclaringType.FullName);
             // if (this_clsID == -1)
             // {  
@@ -1965,13 +1969,12 @@ internal partial class Processor
 
                 if (mdr.IsAbstract)
                 {
-                    bmw.WriteWarning($"Abstract method call {methodRef.Name}, add to virt call list.");
-
                     var id = SI.virtcallMethods.IndexOf(mdr);
                     if (id == -1)
                     {
                         id = SI.virtcallMethods.Count;
                         SI.virtcallMethods.Add(mdr);
+                        bmw.WriteWarning($"Abstract method call {methodRef.Name}, add to virt call list => id={id}");
                     }
 
                     return [0xA0, (byte)(id & 0xff), (byte)(id >> 8)];
