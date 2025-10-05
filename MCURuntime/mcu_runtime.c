@@ -4022,11 +4022,77 @@ void builtin_ValueTuple2_ctor(uchar** reptr) {
 }
 
 void builtin_ValueTuple3_ctor(uchar** reptr) {
-	DOOM("Not implemented");
+	struct stack_frame_header* my_stack = stack_ptr[new_stack_depth - 1];
+	if (my_stack->evaluation_st_ptr > *reptr)
+		DOOM("ValueTuple3 ctor stack corrupted");
+
+	POP;
+	uchar* v3 = *reptr;
+	POP;
+	uchar* v2 = *reptr;
+	POP;
+	uchar* v1 = *reptr;
+
+	struct object_val* tuple;
+	if (!builtin_arg0) {
+		POP;
+		uchar* addr = *reptr;
+		if (*addr != Address) DOOM("ValueTuple3 ctor expects address for destination, got %d", *addr);
+		uchar* jmp = TypedAddrAsValPtr(addr);
+		if (*jmp != JumpAddress) DOOM("ValueTuple3 ctor expects jump address");
+		tuple = (struct object_val*)TypedAddrAsValPtr(jmp);
+	}
+	else
+	{
+		tuple = heap_obj[builtin_arg0].pointer;
+	}
+
+	uchar* t1 = &tuple->payload;
+	uchar* t2 = t1 + get_val_sz(*t1);
+	uchar* t3 = t2 + get_val_sz(*t2);
+
+	copy_val(t1, v1);
+	copy_val(t2, v2);
+	copy_val(t3, v3);
 }
 
 void builtin_ValueTuple4_ctor(uchar** reptr) {
-	DOOM("Not implemented");
+	struct stack_frame_header* my_stack = stack_ptr[new_stack_depth - 1];
+	if (my_stack->evaluation_st_ptr > *reptr)
+		DOOM("ValueTuple4 ctor stack corrupted");
+
+	POP;
+	uchar* v4 = *reptr;
+	POP;
+	uchar* v3 = *reptr;
+	POP;
+	uchar* v2 = *reptr;
+	POP;
+	uchar* v1 = *reptr;
+
+	struct object_val* tuple;
+	if (!builtin_arg0) {
+		POP;
+		uchar* addr = *reptr;
+		if (*addr != Address) DOOM("ValueTuple4 ctor expects address for destination, got %d", *addr);
+		uchar* jmp = TypedAddrAsValPtr(addr);
+		if (*jmp != JumpAddress) DOOM("ValueTuple4 ctor expects jump address");
+		tuple = (struct object_val*)TypedAddrAsValPtr(jmp);
+	}
+	else
+	{
+		tuple = heap_obj[builtin_arg0].pointer;
+	}
+
+	uchar* t1 = &tuple->payload;
+	uchar* t2 = t1 + get_val_sz(*t1);
+	uchar* t3 = t2 + get_val_sz(*t2);
+	uchar* t4 = t3 + get_val_sz(*t3);
+
+	copy_val(t1, v1);
+	copy_val(t2, v2);
+	copy_val(t3, v3);
+	copy_val(t4, v4);
 }
 
 void builtin_RuntimeHelpers_InitializeArray(uchar** reptr) {
