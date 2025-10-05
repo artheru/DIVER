@@ -28,7 +28,7 @@
 #define INLINE static inline
 
 // swith on this variable to allow verbose output.
-//#define _VERBOSE
+#define _VERBOSE
 
 #ifdef _VERBOSE
 #define DBG printf
@@ -309,26 +309,252 @@ uchar get_val_sz(uchar typeid)
 	return get_type_sz(typeid) + 1;
 }
 
+#define STACK_VALUE_SIZE STACK_STRIDE
+typedef struct { uchar bytes[STACK_VALUE_SIZE]; } stack_value_t;
+
+INLINE void stack_value_copy(stack_value_t* dst, const uchar* src) { memcpy(dst->bytes, src, STACK_VALUE_SIZE); }
+INLINE void stack_value_store(uchar* dst, const stack_value_t* value) { memcpy(dst, value->bytes, STACK_VALUE_SIZE); }
+INLINE uchar stack_value_type(const stack_value_t* value) { return value->bytes[0]; }
+INLINE void push_stack_value(uchar** reptr, const stack_value_t* value) { memcpy(*reptr, value->bytes, STACK_VALUE_SIZE); *reptr += STACK_STRIDE; }
+INLINE int stack_value_as_int(const stack_value_t* value) { return *(int*)(value->bytes + 1); }
+INLINE float stack_value_as_float(const stack_value_t* value) { return *(float*)(value->bytes + 1); }
+
 // builtin class fields, each fields...
-uchar builtin_cls_delegate[] = { 2, ReferenceID, Int32 }; //number of fields, type of field1, type of field2....
-// other type of class can be appended...
+uchar builtin_cls_delegate[] = { 2, ReferenceID, Int32 }; // number of fields, type of field1, type of field2....
+uchar builtin_cls_list[] = { 4, ReferenceID, Int32, Int32, Int32 }; // storage, count, capacity, element type id
+uchar builtin_cls_queue[] = { 6, ReferenceID, Int32, Int32, Int32, Int32, Int32 }; // storage, head, tail, count, capacity, element type id
+uchar builtin_cls_stack[] = { 4, ReferenceID, Int32, Int32, Int32 }; // storage, count, capacity, element type id
+uchar builtin_cls_dictionary[] = { 5, ReferenceID, Int32, Int32, Int32, Int32 }; // storage, count, capacity, key type, value type
+uchar builtin_cls_hashset[] = { 4, ReferenceID, Int32, Int32, Int32 }; // storage, count, capacity, element type id
+
+#define BUILTIN_CLSIDX_ACTION 0
+#define BUILTIN_CLSIDX_ACTION1 1
+#define BUILTIN_CLSIDX_FUNC1 2
+#define BUILTIN_CLSIDX_FUNC2 3
+#define BUILTIN_CLSIDX_ACTION2 4
+#define BUILTIN_CLSIDX_ACTION3 5
+#define BUILTIN_CLSIDX_ACTION4 6
+#define BUILTIN_CLSIDX_ACTION5 7
+#define BUILTIN_CLSIDX_FUNC3 8
+#define BUILTIN_CLSIDX_FUNC4 9
+#define BUILTIN_CLSIDX_FUNC5 10
+#define BUILTIN_CLSIDX_FUNC6 11
+#define BUILTIN_CLSIDX_LIST 12
+#define BUILTIN_CLSIDX_QUEUE 13
+#define BUILTIN_CLSIDX_STACK 14
+#define BUILTIN_CLSIDX_DICTIONARY 15
+#define BUILTIN_CLSIDX_HASHSET 16
+
+#define BUILTIN_CLSID_BASE 0xF000
+#define BUILTIN_CLSID(idx) (BUILTIN_CLSID_BASE + (idx))
 
 uchar* builtin_cls[] = {
-	builtin_cls_delegate, //Action
-	builtin_cls_delegate, //Action1
-	builtin_cls_delegate, //Func1
-	builtin_cls_delegate, //Func2
-	builtin_cls_delegate, //Action2
-	builtin_cls_delegate, //Action3
-	builtin_cls_delegate, //Action4
-	builtin_cls_delegate, //Action5
-	builtin_cls_delegate, //Func3
-	builtin_cls_delegate, //Func4
-	builtin_cls_delegate, //Func5
+	builtin_cls_delegate, // Action
+	builtin_cls_delegate, // Action1
+	builtin_cls_delegate, // Func1
+	builtin_cls_delegate, // Func2
+	builtin_cls_delegate, // Action2
+	builtin_cls_delegate, // Action3
+	builtin_cls_delegate, // Action4
+	builtin_cls_delegate, // Action5
+	builtin_cls_delegate, // Func3
+	builtin_cls_delegate, // Func4
+	builtin_cls_delegate, // Func5
+	builtin_cls_delegate, // Func6
+	builtin_cls_list,     // List`1
+	builtin_cls_queue,    // Queue`1
+	builtin_cls_stack,    // Stack`1
+	builtin_cls_dictionary, // Dictionary`2
+	builtin_cls_hashset   // HashSet`1
 };
 
 
 struct object_val* monitor_obj = 0;
+
+int new_builtin_obj(short clsid)
+{
+	int bidx = clsid - BUILTIN_CLSID_BASE;
+	if (bidx < 0 || bidx >= (int)(sizeof(builtin_cls) / sizeof(builtin_cls[0])))
+		DOOM("Unknown builtin clsid %d\n", clsid);
+
+	uchar* layout = builtin_cls[bidx];
+	int field_count = layout[0];
+	int payload_size = 0;
+	for (int i = 0; i < field_count; ++i)
+		payload_size += get_val_sz(layout[i + 1]);
+
+	int reference_id = heap_newobj_id;
+	uchar* tail = reference_id == 1 ? heap_tail : heap_obj[reference_id - 1].pointer;
+	int mysz = payload_size + ObjectHeaderSize;
+	struct object_val* obj_ptr = (struct object_val*)(tail - mysz);
+	if (new_stack_depth > 0 && (uchar*)obj_ptr < stack_ptr[new_stack_depth - 1]->evaluation_pointer)
+		DOOM("Not enough space allocating %d bytes for builtin obj(%d)", mysz, clsid);
+
+	heap_obj[reference_id] = (struct heap_obj_slot){ .pointer = (uchar*)obj_ptr };
+	obj_ptr->header = ObjectHeader;
+	obj_ptr->clsid = clsid;
+	memset(&obj_ptr->payload, 0, payload_size);
+
+	int offset = 0;
+	for (int i = 0; i < field_count; ++i)
+	{
+		uchar typeid = layout[i + 1];
+		(&obj_ptr->payload)[offset] = typeid;
+		offset += get_val_sz(typeid);
+	}
+
+	heap_newobj_id++;
+	return reference_id;
+}
+
+INLINE int builtin_field_offset_by_index(int clsidx, int field_idx)
+{
+	uchar* layout = builtin_cls[clsidx];
+	int offset = 0;
+	for (int i = 0; i < field_idx; ++i)
+		offset += get_val_sz(layout[i + 1]);
+	return offset;
+}
+
+INLINE uchar* builtin_field_ptr_by_index(struct object_val* obj, int clsidx, int field_idx)
+{
+	return &obj->payload + builtin_field_offset_by_index(clsidx, field_idx);
+}
+
+INLINE int* builtin_field_int_ptr(struct object_val* obj, int clsidx, int field_idx)
+{
+	uchar* field = builtin_field_ptr_by_index(obj, clsidx, field_idx);
+	if (field[0] != Int32)
+		DOOM("Field %d of clsidx %d is not Int32 (type=%d)\n", field_idx, clsidx, field[0]);
+	return (int*)(field + 1);
+}
+
+INLINE int builtin_field_get_reference(struct object_val* obj, int clsidx, int field_idx)
+{
+	uchar* field = builtin_field_ptr_by_index(obj, clsidx, field_idx);
+	if (field[0] != ReferenceID)
+		DOOM("Field %d of clsidx %d is not ReferenceID (type=%d)\n", field_idx, clsidx, field[0]);
+	return *(int*)(field + 1);
+}
+
+INLINE void builtin_field_set_reference(struct object_val* obj, int clsidx, int field_idx, int ref_id)
+{
+	uchar* field = builtin_field_ptr_by_index(obj, clsidx, field_idx);
+	if (field[0] != ReferenceID)
+		DOOM("Field %d of clsidx %d is not ReferenceID (type=%d)\n", field_idx, clsidx, field[0]);
+	*(int*)(field + 1) = ref_id;
+}
+
+INLINE int builtin_field_get_int(struct object_val* obj, int clsidx, int field_idx)
+{
+	return *builtin_field_int_ptr(obj, clsidx, field_idx);
+}
+
+INLINE void builtin_field_set_int(struct object_val* obj, int clsidx, int field_idx, int value)
+{
+	*builtin_field_int_ptr(obj, clsidx, field_idx) = value;
+}
+
+INLINE struct object_val* expect_builtin_obj(int ref_id, int clsidx, const char* where)
+{
+	if (ref_id <= 0 || ref_id >= heap_newobj_id)
+		DOOM("%s: invalid reference id %d\n", where, ref_id);
+	struct object_val* obj = (struct object_val*)heap_obj[ref_id].pointer;
+	if (obj == NULL || obj->header != ObjectHeader)
+		DOOM("%s: reference %d does not point to an object (header=%d)\n", where, ref_id, obj ? obj->header : -1);
+	if (obj->clsid != BUILTIN_CLSID(clsidx))
+		DOOM("%s: builtin object expected clsid %d but got %d\n", where, BUILTIN_CLSID(clsidx), obj->clsid);
+	return obj;
+}
+
+INLINE struct array_val* expect_array(int ref_id, uchar expected_type, const char* where)
+{
+	if (ref_id <= 0 || ref_id >= heap_newobj_id)
+		DOOM("%s: invalid array reference id %d\n", where, ref_id);
+	uchar* header = heap_obj[ref_id].pointer;
+	if (header == NULL || *header != ArrayHeader)
+		DOOM("%s: reference %d does not point to an array (header=%d)\n", where, ref_id, header ? *header : -1);
+	struct array_val* arr = (struct array_val*)header;
+	if (expected_type != 0xFF && arr->typeid != expected_type)
+		DOOM("%s: expected array type %d but got %d\n", where, expected_type, arr->typeid);
+	return arr;
+}
+
+INLINE void stack_value_clear(stack_value_t* value)
+{
+	memset(value->bytes, 0, STACK_VALUE_SIZE);
+}
+
+INLINE void stack_value_from_array_elem(stack_value_t* dst, struct array_val* arr, int index)
+{
+	uchar typeid = arr->typeid;
+	int elem_sz = get_type_sz(typeid);
+	stack_value_clear(dst);
+	dst->bytes[0] = typeid;
+	memcpy(dst->bytes + 1, &arr->payload + index * elem_sz, elem_sz);
+}
+
+INLINE void stack_value_from_storage(stack_value_t* dst, uchar* storage, int index)
+{
+	stack_value_copy(dst, storage + index * STACK_VALUE_SIZE);
+}
+
+#define LIST_FIELD_STORAGE 0
+#define LIST_FIELD_COUNT 1
+#define LIST_FIELD_CAPACITY 2
+#define LIST_FIELD_ELEMENTTYPE 3
+#define LIST_INITIAL_CAPACITY 4
+
+INLINE int list_get_count(struct object_val* list_obj)
+{
+	return builtin_field_get_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_COUNT);
+}
+
+INLINE int list_get_capacity(struct object_val* list_obj)
+{
+	return builtin_field_get_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_CAPACITY);
+}
+
+INLINE void list_set_count(struct object_val* list_obj, int count)
+{
+	builtin_field_set_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_COUNT, count);
+}
+
+INLINE void list_set_capacity(struct object_val* list_obj, int capacity)
+{
+	builtin_field_set_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_CAPACITY, capacity);
+}
+
+INLINE int list_get_element_type(struct object_val* list_obj)
+{
+	return builtin_field_get_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_ELEMENTTYPE);
+}
+
+INLINE void list_set_element_type(struct object_val* list_obj, int type_id)
+{
+	builtin_field_set_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_ELEMENTTYPE, type_id);
+}
+
+INLINE int list_get_storage_ref(struct object_val* list_obj)
+{
+	return builtin_field_get_reference(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_STORAGE);
+}
+
+INLINE void list_set_storage_ref(struct object_val* list_obj, int ref_id)
+{
+	builtin_field_set_reference(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_STORAGE, ref_id);
+}
+
+INLINE uchar* list_storage_bytes(struct object_val* list_obj, struct array_val** out_arr)
+{
+	int storage_ref = list_get_storage_ref(list_obj);
+	if (storage_ref == 0)
+		return NULL;
+	struct array_val* arr = expect_array(storage_ref, Byte, "List storage");
+	if (out_arr) *out_arr = arr;
+	return &arr->payload;
+}
+
 // use heap_newobj_id-1 to get obj_id.
 int newobj(int clsid)
 {
@@ -1826,8 +2052,29 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				else
 					DOOM("IL_Field requires Reference ID!\n");
 
-				DIEIF(obj->clsid != aux)
-					DOOM("Error: Object class ID mismatch\n");
+				short actual_clsid = obj->clsid;
+				short expected_clsid = aux;
+				if (expected_clsid >= 0 && actual_clsid != expected_clsid)
+				{
+					int actual_builtin = (actual_clsid & 0xF000) != 0;
+					int expected_builtin = (expected_clsid & 0xF000) != 0;
+					if (actual_builtin || expected_builtin)
+					{
+						DOOM("Object class mismatch (actual=%d, expected=%d)\n", actual_clsid, expected_clsid);
+					}
+					else
+					{
+						if (actual_clsid < 0 || actual_clsid >= instanceable_class_N || expected_clsid < 0 || expected_clsid >= instanceable_class_N)
+						{
+							DOOM("Object class id out of range (actual=%d, expected=%d, total=%d)\n", actual_clsid, expected_clsid, instanceable_class_N);
+						}
+						if (offset >= instanceable_class_layout_ptr[actual_clsid].tot_size)
+						{
+							DOOM("Field offset %d outside class %d size %d\n", offset, actual_clsid, instanceable_class_layout_ptr[actual_clsid].tot_size);
+						}
+					}
+				}
+
 				uchar* field_ptr = &obj->payload + offset;
 
 				// Handle instance field operations
