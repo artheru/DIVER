@@ -176,6 +176,32 @@ internal partial class Processor
         "System.Linq.Enumerable.Min(IEnumerable`1)",                //142
         "System.Linq.Enumerable.DefaultIfEmpty(IEnumerable`1, TSource)", //143
         "System.Linq.Enumerable.ToArray(IEnumerable`1)", //144
+        // Queue<T>
+        "System.Collections.Generic.Queue`1..ctor()", //145
+        "System.Collections.Generic.Queue`1.Enqueue(T)", //146
+        "System.Collections.Generic.Queue`1.Dequeue()", //147
+        "System.Collections.Generic.Queue`1.Peek()", //148
+        "System.Collections.Generic.Queue`1.get_Count()", //149
+        // Stack<T>
+        "System.Collections.Generic.Stack`1..ctor()", //150
+        "System.Collections.Generic.Stack`1.Push(T)", //151
+        "System.Collections.Generic.Stack`1.Pop()", //152
+        "System.Collections.Generic.Stack`1.Peek()", //153
+        "System.Collections.Generic.Stack`1.get_Count()", //154
+        // Dictionary<TKey,TValue>
+        "System.Collections.Generic.Dictionary`2..ctor()", //155
+        "System.Collections.Generic.Dictionary`2.Add(TKey, TValue)", //156
+        "System.Collections.Generic.Dictionary`2.get_Item(TKey)", //157
+        "System.Collections.Generic.Dictionary`2.set_Item(TKey, TValue)", //158
+        "System.Collections.Generic.Dictionary`2.Remove(TKey)", //159
+        "System.Collections.Generic.Dictionary`2.ContainsKey(TKey)", //160
+        "System.Collections.Generic.Dictionary`2.get_Count()", //161
+        // HashSet<T>
+        "System.Collections.Generic.HashSet`1..ctor()", //162
+        "System.Collections.Generic.HashSet`1.Add(T)", //163
+        "System.Collections.Generic.HashSet`1.Remove(T)", //164
+        "System.Collections.Generic.HashSet`1.Contains(T)", //165
+        "System.Collections.Generic.HashSet`1.get_Count()", //166
     ];
 
 }

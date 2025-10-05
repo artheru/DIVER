@@ -11,6 +11,11 @@
 #ifdef _MSC_VER
 #define _CRT_SECURE_NO_WARNINGS
 #define _CRT_NONSTDC_NO_DEPRECATE
+
+#include <windows.h>
+#include <dbghelp.h>
+
+#pragma comment(lib, "dbghelp.lib")
 #endif
 
 // the required library
@@ -58,6 +63,26 @@ char err_tmp[256];
 #define DOOM(...) { int sz = snprintf(err_tmp,sizeof(err_tmp),__VA_ARGS__); report_error(__FILE__, __LINE__, err_tmp, sz);}
 #define DIEIF(expr) if (0)
 
+#endif
+
+#ifdef _MSC_VER
+void print_stacktrace(void) {
+	void* stack[64];
+	HANDLE process = GetCurrentProcess();
+	SymInitialize(process, NULL, TRUE);
+
+	USHORT frames = CaptureStackBackTrace(0, 64, stack, NULL);
+	SYMBOL_INFO* symbol = (SYMBOL_INFO*)calloc(sizeof(SYMBOL_INFO) + 256 * sizeof(char), 1);
+	symbol->MaxNameLen = 255;
+	symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+
+	for (USHORT i = 0; i < frames; i++) {
+		SymFromAddr(process, (DWORD64)(stack[i]), 0, symbol);
+		printf("%02d: %s - 0x%0llX\n", i, symbol->Name, (unsigned long long)symbol->Address);
+	}
+
+	free(symbol);
+}
 #endif
 
 /*
@@ -549,6 +574,79 @@ INLINE uchar* list_storage_bytes(struct object_val* list_obj, struct array_val**
 	if (out_arr) *out_arr = arr;
 	return &arr->payload;
 }
+
+// Queue<T> helpers
+#define QUEUE_FIELD_STORAGE 0
+#define QUEUE_FIELD_HEAD 1
+#define QUEUE_FIELD_TAIL 2
+#define QUEUE_FIELD_COUNT 3
+#define QUEUE_FIELD_CAPACITY 4
+#define QUEUE_FIELD_ELEMENTTYPE 5
+
+INLINE int queue_get_head(struct object_val* q) { return builtin_field_get_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_HEAD); }
+INLINE int queue_get_tail(struct object_val* q) { return builtin_field_get_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_TAIL); }
+INLINE int queue_get_count(struct object_val* q) { return builtin_field_get_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_COUNT); }
+INLINE int queue_get_capacity(struct object_val* q) { return builtin_field_get_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_CAPACITY); }
+INLINE int queue_get_element_type(struct object_val* q) { return builtin_field_get_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_ELEMENTTYPE); }
+INLINE void queue_set_head(struct object_val* q, int v) { builtin_field_set_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_HEAD, v); }
+INLINE void queue_set_tail(struct object_val* q, int v) { builtin_field_set_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_TAIL, v); }
+INLINE void queue_set_count(struct object_val* q, int v) { builtin_field_set_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_COUNT, v); }
+INLINE void queue_set_capacity(struct object_val* q, int v) { builtin_field_set_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_CAPACITY, v); }
+INLINE void queue_set_element_type(struct object_val* q, int v) { builtin_field_set_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_ELEMENTTYPE, v); }
+INLINE int queue_get_storage_ref(struct object_val* q) { return builtin_field_get_reference(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_STORAGE); }
+INLINE void queue_set_storage_ref(struct object_val* q, int id) { builtin_field_set_reference(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_STORAGE, id); }
+INLINE uchar* queue_storage_bytes(struct object_val* q, struct array_val** out_arr) { int r = queue_get_storage_ref(q); if (r==0) return NULL; struct array_val* a=expect_array(r, Byte, "Queue storage"); if (out_arr) *out_arr=a; return &a->payload; }
+
+// Stack<T> helpers
+#define STACK_FIELD_STORAGE 0
+#define STACK_FIELD_COUNT 1
+#define STACK_FIELD_CAPACITY 2
+#define STACK_FIELD_ELEMENTTYPE 3
+
+INLINE int stack_get_count(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_COUNT); }
+INLINE int stack_get_capacity(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_CAPACITY); }
+INLINE int stack_get_element_type(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_ELEMENTTYPE); }
+INLINE void stack_set_count(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_COUNT, v); }
+INLINE void stack_set_capacity(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_CAPACITY, v); }
+INLINE void stack_set_element_type(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_ELEMENTTYPE, v); }
+INLINE int stack_get_storage_ref(struct object_val* s) { return builtin_field_get_reference(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_STORAGE); }
+INLINE void stack_set_storage_ref(struct object_val* s, int id) { builtin_field_set_reference(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_STORAGE, id); }
+INLINE uchar* stack_storage_bytes(struct object_val* s, struct array_val** out_arr) { int r = stack_get_storage_ref(s); if (r==0) return NULL; struct array_val* a=expect_array(r, Byte, "Stack storage"); if (out_arr) *out_arr=a; return &a->payload; }
+
+// Dictionary<TKey,TValue> helpers (linear-probe-like contiguous pairs)
+#define DICT_FIELD_STORAGE 0
+#define DICT_FIELD_COUNT 1
+#define DICT_FIELD_CAPACITY 2
+#define DICT_FIELD_KEYTYPE 3
+#define DICT_FIELD_VALUETYPE 4
+
+INLINE int dict_get_count(struct object_val* d) { return builtin_field_get_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_COUNT); }
+INLINE int dict_get_capacity(struct object_val* d) { return builtin_field_get_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_CAPACITY); }
+INLINE int dict_get_key_type(struct object_val* d) { return builtin_field_get_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_KEYTYPE); }
+INLINE int dict_get_value_type(struct object_val* d) { return builtin_field_get_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_VALUETYPE); }
+INLINE void dict_set_count(struct object_val* d, int v) { builtin_field_set_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_COUNT, v); }
+INLINE void dict_set_capacity(struct object_val* d, int v) { builtin_field_set_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_CAPACITY, v); }
+INLINE void dict_set_key_type(struct object_val* d, int v) { builtin_field_set_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_KEYTYPE, v); }
+INLINE void dict_set_value_type(struct object_val* d, int v) { builtin_field_set_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_VALUETYPE, v); }
+INLINE int dict_get_storage_ref(struct object_val* d) { return builtin_field_get_reference(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_STORAGE); }
+INLINE void dict_set_storage_ref(struct object_val* d, int id) { builtin_field_set_reference(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_STORAGE, id); }
+INLINE uchar* dict_storage_bytes(struct object_val* d, struct array_val** out_arr) { int r = dict_get_storage_ref(d); if (r==0) return NULL; struct array_val* a=expect_array(r, Byte, "Dict storage"); if (out_arr) *out_arr=a; return &a->payload; }
+
+// HashSet<T> helpers
+#define HSET_FIELD_STORAGE 0
+#define HSET_FIELD_COUNT 1
+#define HSET_FIELD_CAPACITY 2
+#define HSET_FIELD_ELEMENTTYPE 3
+
+INLINE int hset_get_count(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_COUNT); }
+INLINE int hset_get_capacity(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_CAPACITY); }
+INLINE int hset_get_element_type(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_ELEMENTTYPE); }
+INLINE void hset_set_count(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_COUNT, v); }
+INLINE void hset_set_capacity(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_CAPACITY, v); }
+INLINE void hset_set_element_type(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_ELEMENTTYPE, v); }
+INLINE int hset_get_storage_ref(struct object_val* s) { return builtin_field_get_reference(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_STORAGE); }
+INLINE void hset_set_storage_ref(struct object_val* s, int id) { builtin_field_set_reference(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_STORAGE, id); }
+INLINE uchar* hset_storage_bytes(struct object_val* s, struct array_val** out_arr) { int r = hset_get_storage_ref(s); if (r==0) return NULL; struct array_val* a=expect_array(r, Byte, "HashSet storage"); if (out_arr) *out_arr=a; return &a->payload; }
 
 // use heap_newobj_id-1 to get obj_id.
 int newobj(int clsid)
@@ -1867,14 +1965,20 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			("ConvR_un: %02X\n", ic);
 			break;
 		}
-		case 0x79: //initobj
+		case 0x78: // initobj (struct zero-init)
 		{
-			POP;
-
-			DBG
-			("initobj format?");
+			// Not supported in this runtime path; just consume operand if any in future
+			DBG("Initobj (noop)\n");
 			break;
-			//on heap.
+		}
+
+		case 0x79: // Castclass (stack shape unchanged)
+		{
+			// For now, treat castclass as a no-op that leaves the reference on the stack.
+			// The compiler validates statically when possible; runtime operand is not provided.
+			DBG
+			("Castclass (no-op)\n");
+			break;
 		}
 		case 0x7A: // Newobj
 		{
@@ -1928,6 +2032,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			uchar type = ReadByte;
 			short offset = ReadShort;
 			short aux = ReadShort;
+			WARN("fld op=%02X type=%d offset=%d aux=%d\n", ic, type, offset, aux);
 
 			uchar is_static = type & 1;
 			uchar is_cart_io = type & 2;
@@ -1994,6 +2099,9 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			else
 			{
 				uchar* valptr = 0;
+				WARN("fld-pre: top0_type=%d top1_type=%d\n",
+					(eptr > my_stack->evaluation_st_ptr) ? *(eptr - STACK_STRIDE) : -1,
+					(eptr > my_stack->evaluation_st_ptr + STACK_STRIDE) ? *(eptr - 2 * STACK_STRIDE) : -1);
 				if (ic == 0x7D)
 				{
 					POP;
@@ -2007,6 +2115,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				{
 					uchar* refval = TypedAddrAsValPtr(eptr);
 					uchar atype = TypedAddrGetType(eptr);
+					WARN("  stfld addr atype=%d refval_off=%d\n", (int)atype, As(refval, int));
 					if (atype == ReferenceID)
 					{
 						ref_id = As(refval, int);
@@ -2035,28 +2144,38 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				else
 					DOOM("IL_Field requires Reference ID!\n");
 
-				short actual_clsid = obj->clsid;
-				short expected_clsid = aux;
-				if (expected_clsid >= 0 && actual_clsid != expected_clsid)
-				{
-					int actual_builtin = (actual_clsid & 0xF000) != 0;
-					int expected_builtin = (expected_clsid & 0xF000) != 0;
-					if (actual_builtin || expected_builtin)
-					{
-						DOOM("Object class mismatch (actual=%d, expected=%d)\n", actual_clsid, expected_clsid);
-					}
-					else
-					{
-						if (actual_clsid < 0 || actual_clsid >= instanceable_class_N || expected_clsid < 0 || expected_clsid >= instanceable_class_N)
-						{
-							DOOM("Object class id out of range (actual=%d, expected=%d, total=%d)\n", actual_clsid, expected_clsid, instanceable_class_N);
-						}
-						if (offset >= instanceable_class_layout_ptr[actual_clsid].tot_size)
-						{
-							DOOM("Field offset %d outside class %d size %d\n", offset, actual_clsid, instanceable_class_layout_ptr[actual_clsid].tot_size);
-						}
-					}
-				}
+                short actual_clsid = obj->clsid;
+                short expected_clsid = aux;
+                WARN("  fld obj: ref=%d actual_cls=%d expected_cls=%d offset=%d size(actual)=%d\n", ref_id, actual_clsid, expected_clsid, offset, instanceable_class_layout_ptr[actual_clsid].tot_size);
+                // Allow accessing base class fields on derived instances; just bounds-check against the actual class layout.
+                if (actual_clsid < 0 || actual_clsid >= instanceable_class_N)
+                {
+                    DOOM("Object class id out of range (actual=%d, total=%d)\n", actual_clsid, instanceable_class_N);
+                }
+                if (offset >= instanceable_class_layout_ptr[actual_clsid].tot_size)
+                {
+                    // Heuristic: if expected class differs and the field fits expected class, redirect to method 'this'
+                    if (expected_clsid >= 0 && expected_clsid < instanceable_class_N &&
+                        offset < instanceable_class_layout_ptr[expected_clsid].tot_size &&
+                        my_stack->args && my_stack->args[0] == ReferenceID)
+                    {
+                        int this_ref = As(my_stack->args + 1, int);
+                        if (this_ref > 0)
+                        {
+                            struct object_val* this_obj = heap_obj[this_ref].pointer;
+                            if (this_obj && this_obj->clsid == expected_clsid)
+                            {
+                                WARN("Redirect stfld to method 'this': ref %d (cls %d) for expected cls %d\n", this_ref, this_obj->clsid, expected_clsid);
+                                obj = this_obj;
+                                actual_clsid = expected_clsid;
+                            }
+                        }
+                    }
+                    if (offset >= instanceable_class_layout_ptr[actual_clsid].tot_size)
+                    {
+                        DOOM("Field offset %d outside class %d size %d\n", offset, actual_clsid, instanceable_class_layout_ptr[actual_clsid].tot_size);
+                    }
+                }
 
 				uchar* field_ptr = &obj->payload + offset;
 
@@ -2082,9 +2201,8 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				else if (ic == 0x7D)
 				{
 					// Stfld
+					WARN("stfld: ref_id=%d actual_cls=%d expected_cls=%d offset=%d dst_type=%d src_type=%d\n", ref_id, actual_clsid, expected_clsid, offset, *field_ptr, *valptr);
 					copy_val(field_ptr, valptr); //actually eptr
-					DBG
-					("stfld to obj_%d(cls:%d, ofst:%d), type_%d\n", ref_id, aux, offset, *field_ptr);
 				}
 			}
 
@@ -4269,6 +4387,20 @@ void delegate_ctor(uchar** reptr, short clsid)
 		DOOM("builtin method as action not supported");
 	int obj_id = pop_reference(reptr);
 
+    // If target object is null (static delegate to instance method singleton), try to instantiate from method metadata
+    if (obj_id == 0) {
+        uchar* mptr = method_detail_pointer + methods_table[mp->id].meta_offset;
+        uchar ret_type = *mptr; mptr += 1; // return type
+        short ret_aux = *((short*)mptr); mptr += 2; (void)ret_type; (void)ret_aux;
+        short n_args = *((short*)mptr); mptr += 2;
+        if (n_args > 0) {
+            uchar t0 = *mptr; short aux0 = *((short*)(mptr + 1));
+            if (t0 == ReferenceID && aux0 >= 0) {
+                obj_id = newobj(aux0);
+            }
+        }
+    }
+
 	// Set the fields of the Action
 	struct object_val* del = (struct object_val*)heap_obj[builtin_arg0].pointer;
 	uchar* heap = (&del->payload);
@@ -4755,159 +4887,807 @@ void builtin_String_Join_ObjectArray(uchar** reptr) {
 	PUSH_STACK_REFERENCEID(result_str_id);
 }
 
-// Implementation of Enumerable.Select
+// Implementation of Enumerable.Select (supports primitive and reference results)
 void builtin_Enumerable_Select(uchar** reptr) {
-	// Pop the selector delegate (Func<TSource, TResult>)
-	int selector_id = pop_reference(reptr);
+    int selector_id = pop_reference(reptr); // Func<TSource,TResult>
+    int source_id = pop_reference(reptr);   // IEnumerable<TSource>
 
-	// Pop the source enumerable (IEnumerable<TSource>)
-	int source_id = pop_reference(reptr);
+    if (source_id == 0 || selector_id == 0) { PUSH_STACK_REFERENCEID(0); return; }
 
-	if (source_id == 0 || selector_id == 0) {
-		// Return null for null source or selector
-		PUSH_STACK_REFERENCEID(0);
-		return;
-	}
+    uchar* source_header = heap_obj[source_id].pointer;
+    bool is_list = false;
+    struct array_val* source_arr = 0;
+    struct object_val* list_obj = 0;
+    if (*source_header == ArrayHeader) {
+        source_arr = (struct array_val*)source_header;
+    } else if (*source_header == ObjectHeader) {
+        struct object_val* obj = (struct object_val*)source_header;
+        if (obj->clsid == BUILTIN_CLSID(BUILTIN_CLSIDX_LIST)) { is_list = true; list_obj = obj; }
+    } else {
+        DOOM("Enumerable.Select expects array or List source, got type %d", *source_header);
+    }
+    struct object_val* selector = (struct object_val*)heap_obj[selector_id].pointer;
+    if (selector->clsid != 0xf003) { DOOM("Enumerable.Select expects a Func<T, TResult> delegate, got class ID %d", selector->clsid); }
 
-	uchar* source_header = heap_obj[source_id].pointer;
-	if (*source_header != ArrayHeader) {
-		DOOM("Enumerable.Select expects an array as source, got type %d", *source_header);
-	}
+    int delegate_this_id = *(int*)(&selector->payload + 1);
+    int delegate_method_id = *(int*)(&selector->payload + get_val_sz(ReferenceID) + 1);
 
-	struct array_val* source_arr = (struct array_val*)source_header;
-	struct object_val* selector = (struct object_val*)heap_obj[selector_id].pointer;
+    int src_len = is_list ? list_get_count(list_obj) : (source_arr ? source_arr->len : 0);
+    if (src_len == 0) { // empty => empty array of Int32 by default
+        int rid = newarr(0, Int32);
+        PUSH_STACK_REFERENCEID(rid);
+        return;
+    }
 
-	// We treat the delegate as a Func<TSource, TResult> (0xf003)
-	if (selector->clsid != 0xf003) {
-		DOOM("Enumerable.Select expects a Func<T, TResult> delegate, got class ID %d", selector->clsid);
-	}
+    // Execute delegate on first element to detect result type
+    uchar* saved_sp = *reptr;
+    if (delegate_this_id > 0) PUSH_STACK_REFERENCEID(delegate_this_id);
+    if (!is_list) {
+        if (source_arr->typeid == ReferenceID) {
+            int element_id = *(int*)(&source_arr->payload + 0 * get_type_sz(ReferenceID));
+            PUSH_STACK_REFERENCEID(element_id);
+        } else {
+            **reptr = source_arr->typeid;
+            memcpy(*reptr + 1, &source_arr->payload + 0 * get_type_sz(source_arr->typeid), get_type_sz(source_arr->typeid));
+            *reptr += STACK_STRIDE;
+        }
+    } else {
+        struct array_val* storage_arr; uchar* storage = list_storage_bytes(list_obj, &storage_arr);
+        push_stack_value(reptr, (stack_value_t*)(storage + 0 * STACK_STRIDE));
+    }
+    vm_push_stack(delegate_method_id, -1, reptr);
+    POP;
+    uchar result_type = **reptr;
+    int result_elem_size = get_type_sz(result_type);
 
-	// Create a new array to hold the results
-	int result_arr_id = newarr(source_arr->len, ReferenceID);
-	struct array_val* result_arr = (struct array_val*)heap_obj[result_arr_id].pointer;
+    // Allocate result array using detected element type
+    int result_arr_id = newarr(src_len, result_type == ReferenceID ? ReferenceID : result_type);
+    struct array_val* result_arr = (struct array_val*)heap_obj[result_arr_id].pointer;
 
-	// Extract the delegate info
-	int delegate_this_id = *(int*)(&selector->payload + 1);
-	int delegate_method_id = *(int*)(&selector->payload + get_val_sz(ReferenceID) + 1);
+    // Store first element
+    if (result_type == ReferenceID) {
+        int result_id = *(int*)(*reptr + 1);
+        *(int*)(&result_arr->payload + 0 * get_type_sz(ReferenceID)) = result_id;
+    } else {
+        memcpy(&result_arr->payload + 0 * result_elem_size, *reptr + 1, result_elem_size);
+    }
+    *reptr = saved_sp;
 
-	// Process each element of the source array
-	for (int i = 0; i < source_arr->len; i++) {
-		// Save the current stack pointer
-		uchar* current_stack_ptr = *reptr;
+    // Process remaining elements
+    for (int i = 1; i < src_len; i++) {
+        uchar* current_stack_ptr = *reptr;
+        if (delegate_this_id > 0) PUSH_STACK_REFERENCEID(delegate_this_id);
+        if (!is_list) {
+            if (source_arr->typeid == ReferenceID) {
+                int element_id = *(int*)(&source_arr->payload + i * get_type_sz(ReferenceID));
+                PUSH_STACK_REFERENCEID(element_id);
+            } else {
+                **reptr = source_arr->typeid;
+                memcpy(*reptr + 1, &source_arr->payload + i * get_type_sz(source_arr->typeid), get_type_sz(source_arr->typeid));
+                *reptr += STACK_STRIDE;
+            }
+        } else {
+            struct array_val* storage_arr; uchar* storage = list_storage_bytes(list_obj, &storage_arr);
+            push_stack_value(reptr, (stack_value_t*)(storage + i * STACK_STRIDE));
+        }
+        vm_push_stack(delegate_method_id, -1, reptr);
+        POP;
+        if (**reptr != result_type) { DOOM("Select: result type changed within sequence (%d->%d)", result_type, **reptr); }
+        if (result_type == ReferenceID) {
+            int result_id = *(int*)(*reptr + 1);
+            *(int*)(&result_arr->payload + i * get_type_sz(ReferenceID)) = result_id;
+        } else {
+            memcpy(&result_arr->payload + i * result_elem_size, *reptr + 1, result_elem_size);
+        }
+        *reptr = current_stack_ptr;
+    }
 
-		// Push the delegate's target object (this pointer)
-		PUSH_STACK_REFERENCEID(delegate_this_id);
-
-		// Push the element from the source array as the argument to the delegate
-		if (source_arr->typeid == ReferenceID) {
-			int* elem_ptr = (int*)(&source_arr->payload + i * get_type_sz(ReferenceID));
-			int element_id = *elem_ptr;
-			PUSH_STACK_REFERENCEID(element_id);
-		}
-		else {
-			// For value types, push the value directly
-			**reptr = source_arr->typeid;
-			memcpy(*reptr + 1, &source_arr->payload + i * get_type_sz(source_arr->typeid), get_type_sz(source_arr->typeid));
-			*reptr += STACK_STRIDE;
-		}
-
-		// Invoke the delegate method
-		vm_push_stack(delegate_method_id, -1, reptr);
-
-		// Get the result (it's now on the stack)
-		POP;
-
-		// Store the result in our result array
-		if (**reptr == ReferenceID) {
-			int result_id = *(int*)(*reptr + 1);
-			*(int*)(&result_arr->payload + i * get_type_sz(ReferenceID)) = result_id;
-		}
-		else {
-			// For value types, we would need to box them
-			// For simplicity, store null for non-reference results
-			*(int*)(&result_arr->payload + i * get_type_sz(ReferenceID)) = 0;
-		}
-
-		// Restore the stack pointer for the next iteration
-		*reptr = current_stack_ptr;
-	}
-
-	// Push the result array onto the stack
-	PUSH_STACK_REFERENCEID(result_arr_id);
+    PUSH_STACK_REFERENCEID(result_arr_id);
 }
 
 // List<T> builtin methods
 void builtin_List_ctor(uchar** reptr) {
-	// todo.
+	// stack: this(List`1)
+	int this_id = pop_reference(reptr);
+	struct object_val* list_obj = expect_builtin_obj(this_id, BUILTIN_CLSIDX_LIST, "List.ctor");
+	// initialize with small byte-array storage; element type is unknown until first Add/Item set
+	int storage_id = newarr(LIST_INITIAL_CAPACITY * STACK_STRIDE, Byte);
+	list_set_storage_ref(list_obj, storage_id);
+	list_set_count(list_obj, 0);
+	list_set_capacity(list_obj, LIST_INITIAL_CAPACITY);
+	// element type 0 means unknown; will be set on first write
+	list_set_element_type(list_obj, 0);
 }
 
 void builtin_List_Add(uchar** reptr) {
-	// todo
+	// stack: value(T), this(List`1)
+	// Pop value into a temp stack_value to preserve raw payload
+	stack_value_t value;
+	POP; stack_value_copy(&value, *reptr);
+	int this_id = pop_reference(reptr);
+	struct object_val* list_obj = expect_builtin_obj(this_id, BUILTIN_CLSIDX_LIST, "List.Add");
+
+	int count = list_get_count(list_obj);
+	int capacity = list_get_capacity(list_obj);
+	int storage_ref = list_get_storage_ref(list_obj);
+	struct array_val* storage_arr = expect_array(storage_ref, Byte, "List.Add storage");
+	uchar* storage = &storage_arr->payload;
+
+	// Determine/validate element type
+	int elem_type = list_get_element_type(list_obj);
+	uchar val_type = stack_value_type(&value);
+	if (elem_type == 0) {
+		// Set element type on first Add
+		list_set_element_type(list_obj, val_type);
+		elem_type = val_type;
+	} else if (elem_type != val_type) {
+		DOOM("List.Add type mismatch: list elem=%d, value=%d", elem_type, val_type);
+	}
+
+	// Ensure capacity
+	if (count >= capacity) {
+		int new_capacity = capacity * 2;
+		int new_storage_ref = newarr(new_capacity * STACK_STRIDE, Byte);
+		struct array_val* new_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
+		memcpy(&new_arr->payload, storage, capacity * STACK_STRIDE);
+		list_set_storage_ref(list_obj, new_storage_ref);
+		list_set_capacity(list_obj, new_capacity);
+		storage_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
+		storage = &storage_arr->payload;
+	}
+
+	// Write value at end
+	stack_value_store(storage + count * STACK_STRIDE, &value);
+	list_set_count(list_obj, count + 1);
 }
 
 void builtin_List_get_Count(uchar** reptr) {
-	// todo
+	// stack: this(List`1)
+	int this_id = pop_reference(reptr);
+	struct object_val* list_obj = expect_builtin_obj(this_id, BUILTIN_CLSIDX_LIST, "List.get_Count");
+	push_int(reptr, list_get_count(list_obj));
 }
 
 void builtin_List_get_Item(uchar** reptr) {
-	// todo
+	// stack: index(Int32), this(List`1)
+	int index = pop_int(reptr);
+	int this_id = pop_reference(reptr);
+	struct object_val* list_obj = expect_builtin_obj(this_id, BUILTIN_CLSIDX_LIST, "List.get_Item");
+	int count = list_get_count(list_obj);
+	if (index < 0 || index >= count) DOOM("List.get_Item out of range: %d/%d", index, count);
+	struct array_val* storage_arr;
+	uchar* storage = list_storage_bytes(list_obj, &storage_arr);
+	stack_value_t tmp;
+	stack_value_from_storage(&tmp, storage, index);
+	push_stack_value(reptr, &tmp);
 }
 
 void builtin_List_set_Item(uchar** reptr) {
-	// todo
+	// stack: value(T), index(Int32), this(List`1)
+	stack_value_t value; POP; stack_value_copy(&value, *reptr);
+	int index = pop_int(reptr);
+	int this_id = pop_reference(reptr);
+	struct object_val* list_obj = expect_builtin_obj(this_id, BUILTIN_CLSIDX_LIST, "List.set_Item");
+	int count = list_get_count(list_obj);
+	if (index < 0 || index >= count) DOOM("List.set_Item out of range: %d/%d", index, count);
+	int elem_type = list_get_element_type(list_obj);
+	uchar val_type = stack_value_type(&value);
+	if (elem_type == 0) { list_set_element_type(list_obj, val_type); elem_type = val_type; }
+	if (elem_type != val_type) DOOM("List.set_Item type mismatch: %d vs %d", elem_type, val_type);
+	struct array_val* storage_arr;
+	uchar* storage = list_storage_bytes(list_obj, &storage_arr);
+	stack_value_store(storage + index * STACK_STRIDE, &value);
 }
 
 void builtin_List_RemoveAt(uchar** reptr) {
-	// todo
+	// stack: index(Int32), this(List`1)
+	int index = pop_int(reptr);
+	int this_id = pop_reference(reptr);
+	struct object_val* list_obj = expect_builtin_obj(this_id, BUILTIN_CLSIDX_LIST, "List.RemoveAt");
+	int count = list_get_count(list_obj);
+	if (index < 0 || index >= count) DOOM("List.RemoveAt out of range: %d/%d", index, count);
+	struct array_val* storage_arr;
+	uchar* storage = list_storage_bytes(list_obj, &storage_arr);
+	int tail = count - 1;
+	if (index < tail) {
+		memmove(storage + index * STACK_STRIDE, storage + (index + 1) * STACK_STRIDE, (tail - index) * STACK_STRIDE);
+	}
+	list_set_count(list_obj, count - 1);
 }
 
 void builtin_List_Clear(uchar** reptr) {
-	// todo
+	// stack: this(List`1)
+	int this_id = pop_reference(reptr);
+	struct object_val* list_obj = expect_builtin_obj(this_id, BUILTIN_CLSIDX_LIST, "List.Clear");
+	list_set_count(list_obj, 0);
 }
 
 void builtin_List_Contains(uchar** reptr) {
-	// todo
+	// stack: value(T), this(List`1)
+	stack_value_t value; POP; stack_value_copy(&value, *reptr);
+	int this_id = pop_reference(reptr);
+	struct object_val* list_obj = expect_builtin_obj(this_id, BUILTIN_CLSIDX_LIST, "List.Contains");
+	int count = list_get_count(list_obj);
+	struct array_val* storage_arr; uchar* storage = list_storage_bytes(list_obj, &storage_arr);
+	uchar elem_type = (uchar)list_get_element_type(list_obj);
+	uchar val_type = stack_value_type(&value);
+	if (elem_type != 0 && elem_type != val_type) { push_bool(reptr, false); return; }
+	for (int i = 0; i < count; ++i) {
+		if (memcmp(storage + i * STACK_STRIDE, value.bytes, STACK_STRIDE) == 0) { push_bool(reptr, true); return; }
+	}
+	push_bool(reptr, false);
 }
 
 void builtin_List_IndexOf(uchar** reptr) {
-	// todo
+	// stack: value(T), this(List`1)
+	stack_value_t value; POP; stack_value_copy(&value, *reptr);
+	int this_id = pop_reference(reptr);
+	struct object_val* list_obj = expect_builtin_obj(this_id, BUILTIN_CLSIDX_LIST, "List.IndexOf");
+	int count = list_get_count(list_obj);
+	struct array_val* storage_arr; uchar* storage = list_storage_bytes(list_obj, &storage_arr);
+	for (int i = 0; i < count; ++i) {
+		if (memcmp(storage + i * STACK_STRIDE, value.bytes, STACK_STRIDE) == 0) { push_int(reptr, i); return; }
+	}
+	push_int(reptr, -1);
 }
 
 void builtin_List_InsertRange(uchar** reptr) {
-	// todo
+	// stack: collection(IEnumerable`1 -> we expect array), index(Int32), this(List`1)
+	int source_id = pop_reference(reptr);
+	int index = pop_int(reptr);
+	int this_id = pop_reference(reptr);
+	struct object_val* list_obj = expect_builtin_obj(this_id, BUILTIN_CLSIDX_LIST, "List.InsertRange");
+	if (source_id == 0) return;
+	struct array_val* src = expect_array(source_id, 0xFF, "List.InsertRange src");
+	int insert_count = src->len;
+	if (insert_count == 0) return;
+	int count = list_get_count(list_obj);
+	if (index < 0 || index > count) DOOM("List.InsertRange index out of range: %d/%d", index, count);
+
+	// If element type not set, set from first element of source
+	int elem_type = list_get_element_type(list_obj);
+	if (elem_type == 0) { list_set_element_type(list_obj, src->typeid == ReferenceID ? ReferenceID : src->typeid); elem_type = list_get_element_type(list_obj); }
+	if (src->typeid != elem_type) DOOM("List.InsertRange type mismatch: list=%d src=%d", elem_type, src->typeid);
+
+	int capacity = list_get_capacity(list_obj);
+	int needed = count + insert_count;
+	int storage_ref = list_get_storage_ref(list_obj);
+	struct array_val* storage_arr = expect_array(storage_ref, Byte, "List.InsertRange storage");
+	uchar* storage = &storage_arr->payload;
+	if (needed > capacity) {
+		int new_capacity = capacity * 2; if (new_capacity < needed) new_capacity = needed;
+		int new_storage_ref = newarr(new_capacity * STACK_STRIDE, Byte);
+		struct array_val* new_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
+		memcpy(&new_arr->payload, storage, count * STACK_STRIDE);
+		list_set_storage_ref(list_obj, new_storage_ref);
+		list_set_capacity(list_obj, new_capacity);
+		storage_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
+		storage = &storage_arr->payload;
+	}
+	// make room
+	memmove(storage + (index + insert_count) * STACK_STRIDE, storage + index * STACK_STRIDE, (count - index) * STACK_STRIDE);
+	// copy from src array into list storage as stack values
+	int elem_sz = get_type_sz(src->typeid);
+	for (int i = 0; i < insert_count; ++i) {
+		stack_value_t tmp;
+		stack_value_clear(&tmp);
+		tmp.bytes[0] = src->typeid;
+		memcpy(tmp.bytes + 1, &src->payload + i * elem_sz, elem_sz);
+		stack_value_store(storage + (index + i) * STACK_STRIDE, &tmp);
+	}
+	list_set_count(list_obj, needed);
+}
+
+// Queue<T> builtin methods
+void builtin_Queue_ctor(uchar** reptr) {
+	int this_id = pop_reference(reptr);
+	struct object_val* q = expect_builtin_obj(this_id, BUILTIN_CLSIDX_QUEUE, "Queue.ctor");
+	int storage_id = newarr(LIST_INITIAL_CAPACITY * STACK_STRIDE, Byte);
+	queue_set_storage_ref(q, storage_id);
+	queue_set_head(q, 0);
+	queue_set_tail(q, 0);
+	queue_set_count(q, 0);
+	queue_set_capacity(q, LIST_INITIAL_CAPACITY);
+	queue_set_element_type(q, 0);
+}
+
+void builtin_Queue_Enqueue(uchar** reptr) {
+	stack_value_t value; POP; stack_value_copy(&value, *reptr);
+	int this_id = pop_reference(reptr);
+	struct object_val* q = expect_builtin_obj(this_id, BUILTIN_CLSIDX_QUEUE, "Queue.Enqueue");
+	int count = queue_get_count(q);
+	int capacity = queue_get_capacity(q);
+	int head = queue_get_head(q);
+	int tail = queue_get_tail(q);
+	int elem_type = queue_get_element_type(q);
+	uchar val_type = stack_value_type(&value);
+	if (elem_type == 0) { queue_set_element_type(q, val_type); elem_type = val_type; }
+	if (elem_type != val_type) DOOM("Queue.Enqueue type mismatch: %d vs %d", elem_type, val_type);
+	struct array_val* storage_arr; uchar* storage = queue_storage_bytes(q, &storage_arr);
+	if (count >= capacity) {
+		int new_capacity = capacity * 2;
+		int new_storage_ref = newarr(new_capacity * STACK_STRIDE, Byte);
+		struct array_val* new_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
+		uchar* ns = &new_arr->payload;
+		for (int i = 0; i < count; ++i) {
+			int idx = (head + i) % capacity;
+			memcpy(ns + i * STACK_STRIDE, storage + idx * STACK_STRIDE, STACK_STRIDE);
+		}
+		queue_set_storage_ref(q, new_storage_ref);
+		queue_set_capacity(q, new_capacity);
+		head = 0; tail = count;
+		queue_set_head(q, head); queue_set_tail(q, tail);
+		storage_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
+		storage = &storage_arr->payload;
+		capacity = new_capacity;
+	}
+	stack_value_store(storage + tail * STACK_STRIDE, &value);
+	tail = (tail + 1) % capacity;
+	queue_set_tail(q, tail);
+	queue_set_count(q, count + 1);
+}
+
+void builtin_Queue_Dequeue(uchar** reptr) {
+	int this_id = pop_reference(reptr);
+	struct object_val* q = expect_builtin_obj(this_id, BUILTIN_CLSIDX_QUEUE, "Queue.Dequeue");
+	int count = queue_get_count(q);
+	if (count <= 0) DOOM("Queue.Dequeue on empty queue");
+	int capacity = queue_get_capacity(q);
+	int head = queue_get_head(q);
+	struct array_val* storage_arr; uchar* storage = queue_storage_bytes(q, &storage_arr);
+	stack_value_t tmp; stack_value_copy(&tmp, storage + head * STACK_STRIDE);
+	head = (head + 1) % capacity; queue_set_head(q, head);
+	queue_set_count(q, count - 1);
+	push_stack_value(reptr, &tmp);
+}
+
+void builtin_Queue_Peek(uchar** reptr) {
+	int this_id = pop_reference(reptr);
+	struct object_val* q = expect_builtin_obj(this_id, BUILTIN_CLSIDX_QUEUE, "Queue.Peek");
+	int count = queue_get_count(q);
+	if (count <= 0) DOOM("Queue.Peek on empty queue");
+	int head = queue_get_head(q);
+	struct array_val* storage_arr; uchar* storage = queue_storage_bytes(q, &storage_arr);
+	stack_value_t tmp; stack_value_copy(&tmp, storage + head * STACK_STRIDE);
+	push_stack_value(reptr, &tmp);
+}
+
+void builtin_Queue_get_Count(uchar** reptr) {
+	int this_id = pop_reference(reptr);
+	struct object_val* q = expect_builtin_obj(this_id, BUILTIN_CLSIDX_QUEUE, "Queue.get_Count");
+	push_int(reptr, queue_get_count(q));
+}
+
+// Stack<T> builtin methods
+void builtin_Stack_ctor(uchar** reptr) {
+	int this_id = pop_reference(reptr);
+	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_STACK, "Stack.ctor");
+	int storage_id = newarr(LIST_INITIAL_CAPACITY * STACK_STRIDE, Byte);
+	stack_set_storage_ref(s, storage_id);
+	stack_set_count(s, 0);
+	stack_set_capacity(s, LIST_INITIAL_CAPACITY);
+	stack_set_element_type(s, 0);
+}
+
+void builtin_Stack_Push(uchar** reptr) {
+	stack_value_t value; POP; stack_value_copy(&value, *reptr);
+	int this_id = pop_reference(reptr);
+	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_STACK, "Stack.Push");
+	int count = stack_get_count(s);
+	int capacity = stack_get_capacity(s);
+	int elem_type = stack_get_element_type(s);
+	uchar val_type = stack_value_type(&value);
+	if (elem_type == 0) { stack_set_element_type(s, val_type); elem_type = val_type; }
+	if (elem_type != val_type) DOOM("Stack.Push type mismatch: %d vs %d", elem_type, val_type);
+	struct array_val* storage_arr; uchar* storage = stack_storage_bytes(s, &storage_arr);
+	if (count >= capacity) {
+		int new_capacity = capacity * 2;
+		int new_storage_ref = newarr(new_capacity * STACK_STRIDE, Byte);
+		struct array_val* new_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
+		memcpy(&new_arr->payload, storage, capacity * STACK_STRIDE);
+		stack_set_storage_ref(s, new_storage_ref);
+		stack_set_capacity(s, new_capacity);
+		storage_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
+		storage = &storage_arr->payload;
+	}
+	stack_value_store(storage + count * STACK_STRIDE, &value);
+	stack_set_count(s, count + 1);
+}
+
+void builtin_Stack_Pop(uchar** reptr) {
+	int this_id = pop_reference(reptr);
+	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_STACK, "Stack.Pop");
+	int count = stack_get_count(s);
+	if (count <= 0) DOOM("Stack.Pop on empty stack");
+	struct array_val* storage_arr; uchar* storage = stack_storage_bytes(s, &storage_arr);
+	stack_value_t tmp; stack_value_copy(&tmp, storage + (count - 1) * STACK_STRIDE);
+	stack_set_count(s, count - 1);
+	push_stack_value(reptr, &tmp);
+}
+
+void builtin_Stack_Peek(uchar** reptr) {
+	int this_id = pop_reference(reptr);
+	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_STACK, "Stack.Peek");
+	int count = stack_get_count(s);
+	if (count <= 0) DOOM("Stack.Peek on empty stack");
+	struct array_val* storage_arr; uchar* storage = stack_storage_bytes(s, &storage_arr);
+	stack_value_t tmp; stack_value_copy(&tmp, storage + (count - 1) * STACK_STRIDE);
+	push_stack_value(reptr, &tmp);
+}
+
+void builtin_Stack_get_Count(uchar** reptr) {
+	int this_id = pop_reference(reptr);
+	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_STACK, "Stack.get_Count");
+	push_int(reptr, stack_get_count(s));
+}
+
+// Dictionary<TKey,TValue> builtin methods
+static int dict_find_index(struct object_val* d, uchar* storage, int count, const stack_value_t* key) {
+	for (int i = 0; i < count; ++i) {
+		uchar* kp = storage + (i * 2) * STACK_STRIDE;
+		if (memcmp(kp, key->bytes, STACK_STRIDE) == 0) return i;
+	}
+	return -1;
+}
+
+void builtin_Dictionary_ctor(uchar** reptr) {
+	int this_id = pop_reference(reptr);
+	struct object_val* d = expect_builtin_obj(this_id, BUILTIN_CLSIDX_DICTIONARY, "Dictionary.ctor");
+	int storage_id = newarr(LIST_INITIAL_CAPACITY * 2 * STACK_STRIDE, Byte);
+	dict_set_storage_ref(d, storage_id);
+	dict_set_count(d, 0);
+	dict_set_capacity(d, LIST_INITIAL_CAPACITY);
+	dict_set_key_type(d, 0);
+	dict_set_value_type(d, 0);
+}
+
+void builtin_Dictionary_Add(uchar** reptr) {
+	stack_value_t val; POP; stack_value_copy(&val, *reptr);
+	stack_value_t key; POP; stack_value_copy(&key, *reptr);
+	int this_id = pop_reference(reptr);
+	struct object_val* d = expect_builtin_obj(this_id, BUILTIN_CLSIDX_DICTIONARY, "Dictionary.Add");
+	int count = dict_get_count(d);
+	int capacity = dict_get_capacity(d);
+	int kt = dict_get_key_type(d); int vt = dict_get_value_type(d);
+	if (kt == 0) { dict_set_key_type(d, stack_value_type(&key)); kt = stack_value_type(&key); }
+	if (vt == 0) { dict_set_value_type(d, stack_value_type(&val)); vt = stack_value_type(&val); }
+	if (kt != stack_value_type(&key) || vt != stack_value_type(&val)) DOOM("Dictionary.Add type mismatch");
+	struct array_val* storage_arr; uchar* storage = dict_storage_bytes(d, &storage_arr);
+	int idx = dict_find_index(d, storage, count, &key);
+	if (idx >= 0) DOOM("Dictionary.Add duplicate key");
+	if (count >= capacity) {
+		int new_capacity = capacity * 2;
+		int new_storage_ref = newarr(new_capacity * 2 * STACK_STRIDE, Byte);
+		struct array_val* new_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
+		memcpy(&new_arr->payload, storage, capacity * 2 * STACK_STRIDE);
+		dict_set_storage_ref(d, new_storage_ref);
+		dict_set_capacity(d, new_capacity);
+		storage_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
+		storage = &storage_arr->payload;
+	}
+	stack_value_store(storage + (count * 2) * STACK_STRIDE, &key);
+	stack_value_store(storage + (count * 2 + 1) * STACK_STRIDE, &val);
+	dict_set_count(d, count + 1);
+}
+
+void builtin_Dictionary_get_Item(uchar** reptr) {
+	stack_value_t key; POP; stack_value_copy(&key, *reptr);
+	int this_id = pop_reference(reptr);
+	struct object_val* d = expect_builtin_obj(this_id, BUILTIN_CLSIDX_DICTIONARY, "Dictionary.get_Item");
+	int count = dict_get_count(d);
+	struct array_val* storage_arr; uchar* storage = dict_storage_bytes(d, &storage_arr);
+	int idx = dict_find_index(d, storage, count, &key);
+	if (idx < 0) DOOM("Dictionary.get_Item key not found");
+	stack_value_t tmp; stack_value_copy(&tmp, storage + (idx * 2 + 1) * STACK_STRIDE);
+	push_stack_value(reptr, &tmp);
+}
+
+void builtin_Dictionary_set_Item(uchar** reptr) {
+	stack_value_t val; POP; stack_value_copy(&val, *reptr);
+	stack_value_t key; POP; stack_value_copy(&key, *reptr);
+	int this_id = pop_reference(reptr);
+	struct object_val* d = expect_builtin_obj(this_id, BUILTIN_CLSIDX_DICTIONARY, "Dictionary.set_Item");
+	int count = dict_get_count(d);
+	int capacity = dict_get_capacity(d);
+	int kt = dict_get_key_type(d); int vt = dict_get_value_type(d);
+	if (kt == 0) { dict_set_key_type(d, stack_value_type(&key)); kt = stack_value_type(&key); }
+	if (vt == 0) { dict_set_value_type(d, stack_value_type(&val)); vt = stack_value_type(&val); }
+	if (kt != stack_value_type(&key) || vt != stack_value_type(&val)) DOOM("Dictionary.set_Item type mismatch");
+	struct array_val* storage_arr; uchar* storage = dict_storage_bytes(d, &storage_arr);
+	int idx = dict_find_index(d, storage, count, &key);
+	if (idx >= 0) {
+		stack_value_store(storage + (idx * 2 + 1) * STACK_STRIDE, &val);
+		return;
+	}
+	if (count >= capacity) {
+		int new_capacity = capacity * 2;
+		int new_storage_ref = newarr(new_capacity * 2 * STACK_STRIDE, Byte);
+		struct array_val* new_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
+		memcpy(&new_arr->payload, storage, capacity * 2 * STACK_STRIDE);
+		dict_set_storage_ref(d, new_storage_ref);
+		dict_set_capacity(d, new_capacity);
+		storage_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
+		storage = &storage_arr->payload;
+	}
+	stack_value_store(storage + (count * 2) * STACK_STRIDE, &key);
+	stack_value_store(storage + (count * 2 + 1) * STACK_STRIDE, &val);
+	dict_set_count(d, count + 1);
+}
+
+void builtin_Dictionary_Remove(uchar** reptr) {
+	stack_value_t key; POP; stack_value_copy(&key, *reptr);
+	int this_id = pop_reference(reptr);
+	struct object_val* d = expect_builtin_obj(this_id, BUILTIN_CLSIDX_DICTIONARY, "Dictionary.Remove");
+	int count = dict_get_count(d);
+	struct array_val* storage_arr; uchar* storage = dict_storage_bytes(d, &storage_arr);
+	int idx = dict_find_index(d, storage, count, &key);
+	if (idx < 0) { push_bool(reptr, false); return; }
+	if (idx != count - 1) {
+		memcpy(storage + (idx * 2) * STACK_STRIDE, storage + ((count - 1) * 2) * STACK_STRIDE, 2 * STACK_STRIDE);
+	}
+	dict_set_count(d, count - 1);
+	push_bool(reptr, true);
+}
+
+void builtin_Dictionary_ContainsKey(uchar** reptr) {
+	stack_value_t key; POP; stack_value_copy(&key, *reptr);
+	int this_id = pop_reference(reptr);
+	struct object_val* d = expect_builtin_obj(this_id, BUILTIN_CLSIDX_DICTIONARY, "Dictionary.ContainsKey");
+	int count = dict_get_count(d);
+	struct array_val* storage_arr; uchar* storage = dict_storage_bytes(d, &storage_arr);
+	int idx = dict_find_index(d, storage, count, &key);
+	push_bool(reptr, idx >= 0);
+}
+
+void builtin_Dictionary_get_Count(uchar** reptr) {
+	int this_id = pop_reference(reptr);
+	struct object_val* d = expect_builtin_obj(this_id, BUILTIN_CLSIDX_DICTIONARY, "Dictionary.get_Count");
+	push_int(reptr, dict_get_count(d));
+}
+
+// HashSet<T> builtin methods
+static int hset_find_index(struct object_val* s, uchar* storage, int count, const stack_value_t* val) {
+	for (int i = 0; i < count; ++i) {
+		uchar* p = storage + i * STACK_STRIDE;
+		if (memcmp(p, val->bytes, STACK_STRIDE) == 0) return i;
+	}
+	return -1;
+}
+
+void builtin_HashSet_ctor(uchar** reptr) {
+	int this_id = pop_reference(reptr);
+	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_HASHSET, "HashSet.ctor");
+	int storage_id = newarr(LIST_INITIAL_CAPACITY * STACK_STRIDE, Byte);
+	hset_set_storage_ref(s, storage_id);
+	hset_set_count(s, 0);
+	hset_set_capacity(s, LIST_INITIAL_CAPACITY);
+	hset_set_element_type(s, 0);
+}
+
+void builtin_HashSet_Add(uchar** reptr) {
+	stack_value_t value; POP; stack_value_copy(&value, *reptr);
+	int this_id = pop_reference(reptr);
+	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_HASHSET, "HashSet.Add");
+	int count = hset_get_count(s);
+	int capacity = hset_get_capacity(s);
+	int elem_type = hset_get_element_type(s);
+	uchar val_type = stack_value_type(&value);
+	if (elem_type == 0) { hset_set_element_type(s, val_type); elem_type = val_type; }
+	if (elem_type != val_type) DOOM("HashSet.Add type mismatch: %d vs %d", elem_type, val_type);
+	struct array_val* storage_arr; uchar* storage = hset_storage_bytes(s, &storage_arr);
+	if (hset_find_index(s, storage, count, &value) >= 0) { push_bool(reptr, false); return; }
+	if (count >= capacity) {
+		int new_capacity = capacity * 2;
+		int new_storage_ref = newarr(new_capacity * STACK_STRIDE, Byte);
+		struct array_val* new_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
+		memcpy(&new_arr->payload, storage, capacity * STACK_STRIDE);
+		hset_set_storage_ref(s, new_storage_ref);
+		hset_set_capacity(s, new_capacity);
+		storage_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
+		storage = &storage_arr->payload;
+	}
+	stack_value_store(storage + count * STACK_STRIDE, &value);
+	hset_set_count(s, count + 1);
+	push_bool(reptr, true);
+}
+
+void builtin_HashSet_Remove(uchar** reptr) {
+	stack_value_t value; POP; stack_value_copy(&value, *reptr);
+	int this_id = pop_reference(reptr);
+	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_HASHSET, "HashSet.Remove");
+	int count = hset_get_count(s);
+	struct array_val* storage_arr; uchar* storage = hset_storage_bytes(s, &storage_arr);
+	int idx = hset_find_index(s, storage, count, &value);
+	if (idx < 0) { push_bool(reptr, false); return; }
+	if (idx != count - 1) memcpy(storage + idx * STACK_STRIDE, storage + (count - 1) * STACK_STRIDE, STACK_STRIDE);
+	hset_set_count(s, count - 1);
+	push_bool(reptr, true);
+}
+
+void builtin_HashSet_Contains(uchar** reptr) {
+	stack_value_t value; POP; stack_value_copy(&value, *reptr);
+	int this_id = pop_reference(reptr);
+	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_HASHSET, "HashSet.Contains");
+	int count = hset_get_count(s);
+	struct array_val* storage_arr; uchar* storage = hset_storage_bytes(s, &storage_arr);
+	int idx = hset_find_index(s, storage, count, &value);
+	push_bool(reptr, idx >= 0);
+}
+
+void builtin_HashSet_get_Count(uchar** reptr) {
+	int this_id = pop_reference(reptr);
+	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_HASHSET, "HashSet.get_Count");
+	push_int(reptr, hset_get_count(s));
 }
 
 void builtin_Enumerable_ToList(uchar** reptr) {
-	// todo
+    // Treat as identity for arrays: return the same enumerable
+    int source_id = pop_reference(reptr);
+    PUSH_STACK_REFERENCEID(source_id);
 }
 
 void builtin_Enumerable_ToArray(uchar** reptr) {
-	// todo
+	// stack: source(IEnumerable`1 -> expect array)
+	int source_id = pop_reference(reptr);
+	if (source_id == 0) { PUSH_STACK_REFERENCEID(0); return; }
+	uchar* header = heap_obj[source_id].pointer;
+	if (*header != ArrayHeader) { DOOM("Enumerable.ToArray expects array source, got %d", *header); }
+	// Return the same array (identity) since arrays are already contiguous
+	PUSH_STACK_REFERENCEID(source_id);
 }
 
 // Implementation of Enumerable.Where
 void builtin_Enumerable_Where(uchar** reptr) {
-	// todo
+    // Pop predicate (Func<T,bool>) and source enumerable (array or List)
+    int predicate_id = pop_reference(reptr);
+    int source_id = pop_reference(reptr);
+    if (source_id == 0 || predicate_id == 0) { PUSH_STACK_REFERENCEID(0); return; }
+
+    uchar* source_header = heap_obj[source_id].pointer;
+    bool is_list = false;
+    struct array_val* source_arr = 0;
+    struct object_val* list_obj = 0;
+    if (*source_header == ArrayHeader) {
+        source_arr = (struct array_val*)source_header;
+    } else if (*source_header == ObjectHeader) {
+        struct object_val* obj = (struct object_val*)source_header;
+        if (obj->clsid == BUILTIN_CLSID(BUILTIN_CLSIDX_LIST)) { is_list = true; list_obj = obj; }
+    } else {
+        DOOM("Enumerable.Where expects array or List source, got %d", *source_header);
+    }
+    struct object_val* predicate = (struct object_val*)heap_obj[predicate_id].pointer;
+    if (!(predicate->clsid == 0xf002 || predicate->clsid == 0xf003)) { DOOM("Where expects a Func<T,bool> delegate, got class ID %d", predicate->clsid); }
+
+    int pred_this_id = *(int*)(&predicate->payload + 1);
+    int pred_method_id = *(int*)(&predicate->payload + get_val_sz(ReferenceID) + 1);
+
+    int src_len = is_list ? list_get_count(list_obj) : (source_arr ? source_arr->len : 0);
+    uchar src_type = is_list ? (uchar)list_get_element_type(list_obj) : (source_arr ? source_arr->typeid : 0);
+    // Temporary result array with max size
+    int tmp_arr_id = newarr(src_len, src_type);
+    struct array_val* tmp_arr = (struct array_val*)heap_obj[tmp_arr_id].pointer;
+    int out_idx = 0;
+    int elem_sz = get_type_sz(src_type);
+
+    for (int i = 0; i < src_len; i++) {
+        uchar* current_stack_ptr = *reptr;
+        if (pred_this_id > 0) PUSH_STACK_REFERENCEID(pred_this_id);
+        if (!is_list) {
+            if (src_type == ReferenceID) {
+                int element_id = *(int*)(&source_arr->payload + i * elem_sz);
+                PUSH_STACK_REFERENCEID(element_id);
+            } else {
+                **reptr = src_type;
+                memcpy(*reptr + 1, &source_arr->payload + i * elem_sz, elem_sz);
+                *reptr += STACK_STRIDE;
+            }
+        } else {
+            struct array_val* storage_arr; uchar* storage = list_storage_bytes(list_obj, &storage_arr);
+            push_stack_value(reptr, (stack_value_t*)(storage + i * STACK_STRIDE));
+        }
+        vm_push_stack(pred_method_id, -1, reptr);
+        // Expect boolean-like result: accept Boolean or integral 0/1
+        POP;
+        uchar rtype = **reptr;
+        bool keep = false;
+        if (rtype == 0) { // Boolean
+            keep = *(*reptr + 1) ? true : false;
+        } else if (rtype == Int32 || rtype == UInt32 || rtype == Int16 || rtype == UInt16 || rtype == SByte || rtype == Byte) {
+            keep = (*(int*)(*reptr + 1)) != 0;
+        } else {
+            DOOM("Where predicate must return Boolean, got %d", rtype);
+        }
+        *reptr = current_stack_ptr;
+        if (keep) {
+            if (src_type == ReferenceID) {
+                if (!is_list) {
+                    int element_id = *(int*)(&source_arr->payload + i * elem_sz);
+                    *(int*)(&tmp_arr->payload + out_idx * elem_sz) = element_id;
+                } else {
+                    struct array_val* storage_arr; uchar* storage = list_storage_bytes(list_obj, &storage_arr);
+                    int element_id = *(int*)(storage + i * STACK_STRIDE + 1);
+                    *(int*)(&tmp_arr->payload + out_idx * elem_sz) = element_id;
+                }
+            } else {
+                if (!is_list) memcpy(&tmp_arr->payload + out_idx * elem_sz, &source_arr->payload + i * elem_sz, elem_sz);
+                else {
+                    struct array_val* storage_arr; uchar* storage = list_storage_bytes(list_obj, &storage_arr);
+                    memcpy(&tmp_arr->payload + out_idx * elem_sz, storage + i * STACK_STRIDE + 1, elem_sz);
+                }
+            }
+            out_idx++;
+        }
+    }
+
+    if (out_idx == src_len) { PUSH_STACK_REFERENCEID(source_id); return; }
+    int result_arr_id = newarr(out_idx, src_type);
+    struct array_val* result_arr = (struct array_val*)heap_obj[result_arr_id].pointer;
+    memcpy(&result_arr->payload, &tmp_arr->payload, out_idx * elem_sz);
+    PUSH_STACK_REFERENCEID(result_arr_id);
 }
 
 // Implementation of Enumerable.Sum for Int32 sequences
 void builtin_Enumerable_Sum(uchar** reptr) {
-	// todo
+    int source_id = pop_reference(reptr);
+    if (source_id == 0) { PUSH_STACK_INT(0); return; }
+    uchar* header = heap_obj[source_id].pointer;
+    if (*header != ArrayHeader) { DOOM("Sum expects array source, got %d", *header); }
+    struct array_val* arr = (struct array_val*)header;
+    if (arr->typeid != Int32) { DOOM("Sum only supports Int32 sequences, got type %d", arr->typeid); }
+    int sum = 0; int sz = get_type_sz(Int32);
+    for (int i = 0; i < arr->len; ++i) sum += *(int*)(&arr->payload + i * sz);
+    PUSH_STACK_INT(sum);
 }
 
 // Implementation of Enumerable.Max for Int32 sequences
 void builtin_Enumerable_Max(uchar** reptr) {
-	// todo
+    int source_id = pop_reference(reptr);
+    if (source_id == 0) { PUSH_STACK_INT(0); return; }
+    uchar* header = heap_obj[source_id].pointer;
+    if (*header != ArrayHeader) { DOOM("Max expects array source, got %d", *header); }
+    struct array_val* arr = (struct array_val*)header;
+    if (arr->len == 0) { DOOM("Max on empty sequence"); }
+    if (arr->typeid != Int32) { DOOM("Max only supports Int32 sequences, got type %d", arr->typeid); }
+    int sz = get_type_sz(Int32); int m = *(int*)(&arr->payload + 0 * sz);
+    for (int i = 1; i < arr->len; ++i) { int v = *(int*)(&arr->payload + i * sz); if (v > m) m = v; }
+    PUSH_STACK_INT(m);
 }
 
 // Implementation of Enumerable.Min for Int32 sequences
 void builtin_Enumerable_Min(uchar** reptr) {
-	// todo
+    int source_id = pop_reference(reptr);
+    if (source_id == 0) { PUSH_STACK_INT(0); return; }
+    uchar* header = heap_obj[source_id].pointer;
+    if (*header != ArrayHeader) { DOOM("Min expects array source, got %d", *header); }
+    struct array_val* arr = (struct array_val*)header;
+    if (arr->len == 0) { DOOM("Min on empty sequence"); }
+    if (arr->typeid != Int32) { DOOM("Min only supports Int32 sequences, got type %d", arr->typeid); }
+    int sz = get_type_sz(Int32); int m = *(int*)(&arr->payload + 0 * sz);
+    for (int i = 1; i < arr->len; ++i) { int v = *(int*)(&arr->payload + i * sz); if (v < m) m = v; }
+    PUSH_STACK_INT(m);
 }
 
 // Implementation of Enumerable.DefaultIfEmpty for Int32 sequences
 void builtin_Enumerable_DefaultIfEmpty(uchar** reptr) {
-	// todo
+    // Pop default value (T) then source enumerable
+    POP; // value
+    uchar def_type = **reptr; int def_raw = *(int*)(*reptr + 1);
+    int source_id = pop_reference(reptr);
+    if (source_id == 0) {
+        int rid = newarr(1, def_type);
+        struct array_val* arr = (struct array_val*)heap_obj[rid].pointer;
+        memcpy(&arr->payload, &def_raw, get_type_sz(def_type));
+        PUSH_STACK_REFERENCEID(rid);
+        return;
+    }
+    uchar* header = heap_obj[source_id].pointer;
+    if (*header != ArrayHeader) { DOOM("DefaultIfEmpty expects array source, got %d", *header); }
+    struct array_val* arr = (struct array_val*)header;
+    if (arr->len > 0) { PUSH_STACK_REFERENCEID(source_id); return; }
+    int rid = newarr(1, def_type);
+    struct array_val* out_arr = (struct array_val*)heap_obj[rid].pointer;
+    memcpy(&out_arr->payload, &def_raw, get_type_sz(def_type));
+    PUSH_STACK_REFERENCEID(rid);
 }
 
 // Helper function to set up the built-in method table
@@ -5075,6 +5855,36 @@ void setup_builtin_methods() {
 	builtin_methods[bn++] = builtin_Enumerable_DefaultIfEmpty; //143
 	builtin_methods[bn++] = builtin_Enumerable_ToArray; //144
 
+	// Queue<T>
+	builtin_methods[bn++] = builtin_Queue_ctor; //145
+	builtin_methods[bn++] = builtin_Queue_Enqueue; //146
+	builtin_methods[bn++] = builtin_Queue_Dequeue; //147
+	builtin_methods[bn++] = builtin_Queue_Peek; //148
+	builtin_methods[bn++] = builtin_Queue_get_Count; //149
+
+	// Stack<T>
+	builtin_methods[bn++] = builtin_Stack_ctor; //150
+	builtin_methods[bn++] = builtin_Stack_Push; //151
+	builtin_methods[bn++] = builtin_Stack_Pop; //152
+	builtin_methods[bn++] = builtin_Stack_Peek; //153
+	builtin_methods[bn++] = builtin_Stack_get_Count; //154
+
+	// Dictionary<TKey,TValue>
+	builtin_methods[bn++] = builtin_Dictionary_ctor; //155
+	builtin_methods[bn++] = builtin_Dictionary_Add; //156
+	builtin_methods[bn++] = builtin_Dictionary_get_Item; //157
+	builtin_methods[bn++] = builtin_Dictionary_set_Item; //158
+	builtin_methods[bn++] = builtin_Dictionary_Remove; //159
+	builtin_methods[bn++] = builtin_Dictionary_ContainsKey; //160
+	builtin_methods[bn++] = builtin_Dictionary_get_Count; //161
+
+	// HashSet<T>
+	builtin_methods[bn++] = builtin_HashSet_ctor; //162
+	builtin_methods[bn++] = builtin_HashSet_Add; //163
+	builtin_methods[bn++] = builtin_HashSet_Remove; //164
+	builtin_methods[bn++] = builtin_HashSet_Contains; //165
+	builtin_methods[bn++] = builtin_HashSet_get_Count; //166
+
 	INFO("System builtin methods n=%d", bn);
 	add_additional_builtins();
 
@@ -5120,6 +5930,7 @@ __declspec(dllexport) void set_error_report_cb(NotifyErr cb)
 
 void report_error(int il_offset, uchar* error_str) { 
 	err_cb(il_offset, error_str, strlen(error_str));
+	print_stacktrace();
 	exit(2);
 }
 void print_line(uchar* error_str) { printf("%s\n", error_str); }; // should upload text info.

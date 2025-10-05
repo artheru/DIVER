@@ -1678,7 +1678,8 @@ internal partial class Processor
 
             case Code.Initobj:
                 cc.Error("not allowed to create heap object");
-                return [0x79];
+                // Use dedicated opcode for initobj to avoid colliding with castclass
+                return [0x78];
             case Code.Newobj:
             { 
                 cc.Error("not allowed to create heap object");
@@ -1836,9 +1837,10 @@ internal partial class Processor
                     SI.linking_actions.Add(() =>
                     {
                         // instanced offset relative to pointer address; static offset relative to class_static_field_start.
-                        var offset = (instanced&&!iscart? SI.class_ifield_offset[cname]: SI.sfield_offset).field_offset[fr.Resolve().Name].offset;
+                        var offset = (instanced && !iscart ? SI.class_ifield_offset[cname] : SI.sfield_offset).field_offset[fr.Resolve().Name].offset;
                         ret[2] = (byte)(offset & 0xff);
                         ret[3] = (byte)(offset >> 8);
+                        bmw.WriteWarning($"FLD encode: op={(int)code:X2} decl={cname} field={fr.Resolve().FullName} inst={instanced} iscart={iscart} off={offset}");
                     });
                     SI.linking_actions.Add(() =>
                     {
@@ -1851,6 +1853,7 @@ internal partial class Processor
 
                             ret[4] = (byte)(id & 0xff);
                             ret[5] = (byte)(id >> 8);
+                            bmw.WriteWarning($"FLD encode: classid {id} for {cname}");
                         }
 
                         if (iscart)

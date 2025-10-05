@@ -386,56 +386,42 @@ namespace CartActivator
         }
 
 
+        private class MapEntry { public int a; public int m; public int l; public string n; }
+
         private static (string method, int line, int winStart, int winEnd) ResolveByOffset(string mapJson, int abs)
         {
-            // Map is a JSON array of entries: {a:abs, m:methodId, mi:instIndex, l:line, n:name}
-            int best = -1;
-            int bestDelta = int.MaxValue;
-            string bestName = "?";
-            int bestMi = -1;
-            int bestLine = 0;
-
-            // naive scan (small JSON)
-            int i = 0;
-            while (i < mapJson.Length)
+            // Map is a JSON array of entries: {a:abs, m:methodId, l:line, n:name}
+            try
             {
-                int aIdx = mapJson.IndexOf("\"a\":", i);
-                if (aIdx == -1) break;
-                int comma = mapJson.IndexOf(',', aIdx + 4);
-                if (comma == -1) break;
-                if (int.TryParse(mapJson.Substring(aIdx + 4, comma - (aIdx + 4)), out int aVal))
+                var entries = JsonConvert.DeserializeObject<List<MapEntry>>(mapJson);
+                if (entries != null && entries.Count > 0)
                 {
-                    int d = abs - aVal;
-                    if (d >= 0 && d < bestDelta)
+                    // Find the nearest entry with a <= abs
+                    MapEntry best = null;
+                    int bestDelta = int.MaxValue;
+                    // Entries are roughly sorted; linear scan is fine for small maps
+                    foreach (var e in entries)
                     {
-                        bestDelta = d; best = aVal;
-                        // parse l
-                        int lIdx = mapJson.IndexOf("\"l\":", comma + 1);
-                        if (lIdx != -1)
+                        int d = abs - e.a;
+                        if (d >= 0 && d < bestDelta)
                         {
-                            int lEnd = mapJson.IndexOf(',', lIdx + 4);
-                            int lEndAlt = mapJson.IndexOf('}', lIdx + 4);
-                            int lEndUse = (lEnd == -1 || (lEndAlt != -1 && lEndAlt < lEnd)) ? lEndAlt : lEnd;
-                            int.TryParse(mapJson.Substring(lIdx + 4, lEndUse - (lIdx + 4)), out bestLine);
-                        }
-                        // parse n
-                        int nIdx = mapJson.IndexOf("\"n\":\"", comma + 1);
-                        if (nIdx != -1)
-                        {
-                            int nEnd = mapJson.IndexOf('"', nIdx + 5);
-                            if (nEnd != -1)
-                            {
-                                bestName = mapJson.Substring(nIdx + 5, nEnd - (nIdx + 5)).Replace("\\\"", "\"").Replace("\\\\", "\\");
-                            }
+                            bestDelta = d;
+                            best = e;
+                            if (d == 0) break;
                         }
                     }
+                    if (best != null)
+                    {
+                        int ws = Math.Max(1, best.l - 5);
+                        int we = best.l + 5;
+                        return (best.n ?? "?", best.l, ws, we);
+                    }
                 }
-                i = comma + 1;
             }
+            catch { /* fall back to naive parsing below */ }
 
-            int ws = Math.Max(1, bestLine - 5);
-            int we = bestLine + 5;
-            return (bestName, bestLine, ws, we);
+            // Fallback: if parsing fails, show start of file
+            return ("?", 1, 1, 10);
         }
 
         private static void PrintWindow(string diver, int start, int end)
@@ -446,6 +432,7 @@ namespace CartActivator
                 while (true)
                 {
                     var line = sr.ReadLine();
+                    if (line.StartsWith("===")) continue;
                     if (line == null) break;
                     ln++;
                     if (ln < start) continue;

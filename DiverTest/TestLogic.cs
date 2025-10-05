@@ -230,7 +230,7 @@ public class TestLogic : LadderLogic<TestVehicle>
         BaseProcessor baseProc = (BaseProcessor)processor;
         int transformed = baseProc.Transform(iteration, iteration + 1);
 
-        // ============ TEST LINQ ============
+        // ============ TEST LINQ & Containers ============
         
         var numbers = new int[] { iteration, iteration + 1, iteration + 2, iteration + 3, iteration + 4 };
         
@@ -243,6 +243,34 @@ public class TestLogic : LadderLogic<TestVehicle>
         var sumResult = result.Sum();
         var maxResult = result.DefaultIfEmpty(0).Max();
         var minResult = result.DefaultIfEmpty(100).Min();
+
+        // Containers: Queue, Stack, Dictionary, HashSet
+        var q = new Queue<int>();
+        q.Enqueue(iteration);
+        q.Enqueue(iteration + 1);
+        int qPeek = q.Peek();
+        int qDeq = q.Dequeue();
+        int qCount = q.Count;
+
+        var st = new Stack<int>();
+        st.Push(iteration);
+        st.Push(iteration + 2);
+        int stTop = st.Peek();
+        int stPop = st.Pop();
+        int stCount = st.Count;
+
+        var hs = new HashSet<int>();
+        bool hsAdded = hs.Add(iteration);
+        bool hsContains = hs.Contains(iteration);
+        bool hsRemoved = hs.Remove(iteration);
+        int hsCount = hs.Count;
+
+        var dict = new Dictionary<int, int>();
+        dict[iteration] = iteration * 10;
+        bool hasKey = dict.ContainsKey(iteration);
+        int dictVal = dict[iteration];
+        dict.Remove(iteration);
+        int dictCount = dict.Count;
         
         // LINQ with tuples
         var tupleList = new List<(int x, float y)>
@@ -284,6 +312,8 @@ public class TestLogic : LadderLogic<TestVehicle>
             iteration, DataProcessor.GlobalCounter, DataProcessor.GlobalState.rawValue, processed, coeff));
         Console.WriteLine(string.Format("LINQ: sum={0}, max={1}, transform={2}, tuple=({3},{4:F1},{5})",
             sumResult, maxResult, transformed, s, a, v));
+        Console.WriteLine(string.Format("Containers: q={{peek:{0},deq:{1},cnt:{2}}} st={{peek:{3},pop:{4},cnt:{5}}} hs={{add:{6},has:{7},rm:{8},cnt:{9}}} dict={{has:{10},val:{11},cnt:{12}}}",
+            qPeek, qDeq, qCount, stTop, stPop, stCount, hsAdded, hsContains, hsRemoved, hsCount, hasKey, dictVal, dictCount));
         Console.WriteLine(string.Format("IO: lowerIO={0}, upperIO={1}, shared={2}, compute={3}",
             cart.read_from_mcu, commandId, cart.test_shared_var, computeResult));
     }
