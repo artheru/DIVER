@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+using System.Reflection;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using DiverTest.DIVER.CoralinkerAdaption;
@@ -45,7 +46,9 @@ namespace CartActivator
             using var br = new BinaryReader(ms);
             if (mcu_logics.TryGetValue(mcuUri, out var tup))
             {
-                //Console.WriteLine($"recv iter {br.ReadInt32()} lowerIO data from {mcuUri}, operation {tup.name}", $"DIVER-{tup.name}");
+                var iteration = br.ReadInt32();
+                tup.iterations = iteration;
+                //Console.WriteLine($"recv iter {iteration} lowerIO data from {mcuUri}, operation {tup.name}", $"DIVER-{tup.name}");
 
                 for (int cid = 0; cid < tup.fields.Length; cid++)
                 {
@@ -176,10 +179,11 @@ namespace CartActivator
                     }
 
                     if (tup.fields[cid].isUpper) continue;
-                    tup.fields[cid].fi.SetValue(this, value);
+                    var field = tup.fields[cid].fi;
+                    value = CoerceValue(value, field.FieldType);
+                    field.SetValue(this, value);
                 }
 
-                // Build upper buffer: sequential typed payload
                 using var sends = new MemoryStream();
                 using var bw = new BinaryWriter(sends);
 
@@ -303,6 +307,46 @@ namespace CartActivator
             else
                 Console.WriteLine($"warning: {mcuUri} received lowerIOData but not registered", $"DIVER-{tup.name}");
 
+        }
+
+        private static object? CoerceValue(object? value, Type targetType)
+        {
+            if (value == null)
+            {
+                if (targetType.IsValueType && Nullable.GetUnderlyingType(targetType) == null)
+                    return Activator.CreateInstance(targetType);
+                return null;
+            }
+
+            if (targetType.IsInstanceOfType(value))
+                return value;
+
+            if (value is Array sourceArray && targetType.IsArray)
+            {
+                var elementType = targetType.GetElementType();
+                if (elementType == null)
+                    return value;
+
+                var length = sourceArray.Length;
+                var converted = Array.CreateInstance(elementType, length);
+                for (int i = 0; i < length; i++)
+                {
+                    var element = sourceArray.GetValue(i);
+                    object? convertedElement;
+                    if (element == null)
+                    {
+                        convertedElement = elementType.IsValueType ? Activator.CreateInstance(elementType) : null;
+                    }
+                    else
+                    {
+                        convertedElement = Convert.ChangeType(element, elementType, CultureInfo.InvariantCulture);
+                    }
+                    converted.SetValue(convertedElement, i);
+                }
+                return converted;
+            }
+
+            return Convert.ChangeType(value, targetType, CultureInfo.InvariantCulture);
         }
 
         public virtual void RunDIVER()
@@ -558,3 +602,4 @@ namespace CartActivator
         }
     }
 }
+

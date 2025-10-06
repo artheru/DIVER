@@ -1,4 +1,4 @@
-﻿using Fody;
+using Fody;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -751,6 +751,16 @@ internal partial class Processor
                 SI.referenced_typefield[zname] = (ct.BaseType, fr);
             //bmw.WriteWarning("cart object not used, no data communication to upper controller."); this is not correct.
 
+            foreach (var ctor in method.DeclaringType.Methods.Where(m => m.IsConstructor && !m.IsStatic))
+            {
+                var ctorName = GetGenericResolvedName(ctor, null);
+                if (!SI.methods.ContainsKey(ctorName))
+                {
+                    var ctorProcessor = new Processor(this) { bmw = bmw };
+                    if (ctorProcessor.Process(ctor) == null)
+                        throw new WeavingException($"Failed to process constructor {ctor.FullName}");
+                }
+            }
         re_link:
             
             //todo: flawwed virtual call table.
@@ -1071,6 +1081,8 @@ internal partial class Processor
                     .Concat(BitConverter.GetBytes(mi.md.Body.MaxStackSize))
                     .ToArray(),
                 mi.buffer.SelectMany(bs => bs.bytes).ToArray())).ToArray();
+            var logicTypeFullName = SI.EntryMethod.DeclaringType.FullName;
+            var initMethodIndex = Array.FindIndex(all_methods, m => m.md.IsConstructor && m.md.DeclaringType.FullName == logicTypeFullName);
             List<byte> code_table = [(byte)all_methods.Length, (byte)(all_methods.Length >> 8),];
             
             int c_offset = 0;
@@ -1178,8 +1190,9 @@ internal partial class Processor
             bmw.WriteWarning($"entry point, this cls_id={this_clsID}");
 
             byte[] dll = [
-                ..BitConverter.GetBytes(scanInterval), //operation interval. 
-                ..BitConverter.GetBytes(entry_offset),
+                ..BitConverter.GetBytes(scanInterval), // operation interval
+                ..BitConverter.GetBytes(entry_offset), // entry method id
+                ..BitConverter.GetBytes(initMethodIndex), // ctor method id
                 ..BitConverter.GetBytes(program_desc.Length),
                 ..BitConverter.GetBytes(code_chunk.Length),
                 ..BitConverter.GetBytes(virts.Length), 
@@ -1190,7 +1203,7 @@ internal partial class Processor
             // Build .diver source and map
             try
             {
-                int headerLen = 7 * 4;
+                int headerLen = 8 * 4;
                 int methodsN = all_methods.Length;
                 int methodDetailBase = headerLen + program_desc.Length + 2 + methodsN * 8;
 
@@ -2541,3 +2554,6 @@ internal partial class Processor
         }
     }
 }
+
+
+

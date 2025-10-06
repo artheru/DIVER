@@ -26,9 +26,21 @@ public class TestLogic : LadderLogic<TestVehicle>
         int good(int b);
     }
 
+    public abstract class AClass : IFace
+    {
+        public int good(int b)
+        {
+            Console.WriteLine("A-good");
+            return 0;
+        }
+
+        public virtual float VMethod() => 0.5f;
+        public abstract float GG();
+    }
+
     private (int a, IFace b) vv = (1, null);
 
-    public class TI:IFace
+    public class TI:AClass, IFace
     {
         private TestLogic ll;
         public TI(TestLogic ll)
@@ -41,6 +53,13 @@ public class TestLogic : LadderLogic<TestVehicle>
             if (ll.vv.a > 7) ll.vv.a %= 6;
             return ll.vv.a + 4;
         }
+
+        public override float VMethod() => 1.5f;
+
+        public override float GG()
+        {
+            return VMethod() + 1;
+        }
     }
 
     public TestLogic()
@@ -48,6 +67,7 @@ public class TestLogic : LadderLogic<TestVehicle>
         vv.b = new TI(this);
     }
 
+    private Func<int,int> act = null;
     public override void Operation(int iteration)
     {
         if (testDict == null) testDict = new Dictionary<int, string>();
@@ -63,10 +83,19 @@ public class TestLogic : LadderLogic<TestVehicle>
         var arr = ls.Where(p => p % 2 == 1).ToArray();
         cart.arr = arr;
         if (testDict.ContainsKey(vv.a))
-        {
             cart.str = testDict[vv.a];
+        else 
+            cart.str = vv.a + ">" + vv.b.good(vv.a);
+
+        int I(int id)
+        {
+            ls.Add(99);
+            return ls[id % ls.Count] + 100;
         }
-        else cart.str = "?" + vv.b.good(vv.a);
-        Console.WriteLine($"arr=[{string.Join(",", arr)}], upload={cart.str}");
+
+        act ??= _ => I(iteration);
+        testDict[act(iteration)] = $"{new TI(this).GG()}.xxx";
+        if (iteration % 3 == 1) act = j => I(iteration * 2 + j);
+        Console.WriteLine($"arr=[{string.Join(",", arr)}], upload={cart.str}...");
     }
 }        

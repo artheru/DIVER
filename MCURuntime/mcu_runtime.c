@@ -1,4 +1,4 @@
-﻿#ifndef IS_MCU
+#ifndef IS_MCU
 #include "mcu_runtime.h"
 #else
 #include "appl/vm.h"
@@ -176,6 +176,8 @@ struct heap_obj_slot
 //      is less than the chunk size). note the object can only be moved tail-wise, so it works.
 
 int entry_method_id;
+int init_method_id;
+int ladderlogic_this_refid;
 int ladderlogic_this_clsid;
 int statics_amount, cartIO_N, instanceable_class_N;
 
@@ -744,6 +746,8 @@ int get_virt_method_actual_methodID(int vmethod_id, int cls_id)
 void setup_builtin_methods();
 
 int iterations = 0;
+void vm_push_stack(int method_id, int new_obj_id, uchar** reptr);
+void clean_up();
 
 void mark_object(int obj_id);
 
@@ -751,9 +755,12 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
 {
 	setup_builtin_methods();
 
+	heap_newobj_id = 1;
+	ladderlogic_this_refid = 0;
 	uchar* ptr = mem0 = vm_memory;
 	auto interval = ReadInt;
 	entry_method_id = ReadInt;
+	init_method_id = ReadInt;
 	auto program_desc_sz = ReadInt;
 	auto code_chunk_sz = ReadInt;
 	auto virt_chunk_sz = ReadInt;
@@ -775,10 +782,23 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
 
 	DBG("interval=%d, nstatics=%d, this_clsid=%d\n", interval, statics_amount, ladderlogic_this_clsid);
 	heap_obj[0] = (struct heap_obj_slot){ .pointer = -1, .new_id = -0xF };
-	newobj(ladderlogic_this_clsid);
+	ladderlogic_this_refid = newobj(ladderlogic_this_clsid);
 
 	// parse statics desc to get stack0 ptr.
 	parse_statics();
+	if (init_method_id >= 0) {
+		struct stack_frame_header* root_frame = (struct stack_frame_header*)stack0;
+		memset(root_frame, 0, sizeof(*root_frame));
+		root_frame->evaluation_pointer = (uchar*)(root_frame + 1);
+		root_frame->evaluation_st_ptr = root_frame->evaluation_pointer;
+		stack_ptr[0] = root_frame;
+		new_stack_depth = 1;
+		uchar* caller_eptr = root_frame->evaluation_pointer;
+		vm_push_stack(init_method_id, ladderlogic_this_refid, &caller_eptr);
+		new_stack_depth = 0;
+		stack_ptr[0] = NULL;
+		clean_up();
+	}
 
 	iterations = 0;
 
@@ -826,7 +846,6 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
         DOOM("POP exceeds range!");\
     } }
 
-void vm_push_stack(int method_id, int new_obj_id, uchar** reptr);
 
 #define CPYVAL(dst,src,type) {\
 	switch (type){ \
@@ -999,7 +1018,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			DOOM("Entry Method must be 'void Operation(int i);\n");
 		}
 		//reference_id = 1. if it's the root method, `this` is always obj1.
-		*sptr = ReferenceID; As(sptr + 1, int) = 1; sptr += 1 + get_type_sz(ReferenceID);
+		*sptr = ReferenceID; As(sptr + 1, int) = ladderlogic_this_refid; sptr += 1 + get_type_sz(ReferenceID);
 		*sptr = Int32; As(sptr + 1, int) = iterations; sptr += 1 + get_type_sz(Int32);
 	}
 	else {
@@ -2672,9 +2691,10 @@ void clean_up()
 		heap_obj[i].new_id = -1;
 
 
-	// Start traversal from object 1 (root object)
+	// Start traversal from LadderLogic root object
 	DBG("mark root: ");
-	mark_object(1);
+	if (ladderlogic_this_refid > 0)
+		mark_object(ladderlogic_this_refid);
 
 	// also need to traverse all statics
 	{
