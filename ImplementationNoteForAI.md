@@ -119,3 +119,4 @@
 - Keep ASCII in generated files; runtime assumes 1-byte char encoding for debug prints.
 - When modifying runtime memory constants (`NUM_BUILTIN_METHODS`, heap/stack sizes), sync with compiler metadata to avoid overflow DOOMs.
 - Host/MCU handshake expects periodic `vm_run(i++)`; replicas should maintain call parity with IO buffer flushes.
+- Write to this file if you have debug insights.

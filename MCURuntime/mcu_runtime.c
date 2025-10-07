@@ -310,37 +310,6 @@ uchar get_val_sz(uchar typeid)
 	return get_type_sz(typeid) + 1;
 }
 
-#define STACK_VALUE_SIZE STACK_STRIDE
-typedef struct { uchar bytes[STACK_VALUE_SIZE]; } stack_value_t;
-
-INLINE void stack_value_copy(stack_value_t* dst, const uchar* src) { memcpy(dst->bytes, src, STACK_VALUE_SIZE); }
-INLINE void stack_value_store(uchar* dst, const stack_value_t* value) { memcpy(dst, value->bytes, STACK_VALUE_SIZE); }
-INLINE uchar stack_value_type(const stack_value_t* value) { return value->bytes[0]; }
-INLINE void push_stack_value(uchar** reptr, const stack_value_t* value) { memcpy(*reptr, value->bytes, STACK_VALUE_SIZE); *reptr += STACK_STRIDE; }
-INLINE int stack_value_as_int(const stack_value_t* value) { return *(int*)(value->bytes + 1); }
-INLINE float stack_value_as_float(const stack_value_t* value) { return *(float*)(value->bytes + 1); }
-#define DIS_HANDLER_MAX 32
-
-typedef struct
-{
-    int in_use;
-    int buffer_ref_id;
-    int capacity;
-    int length;
-} dis_handler_ctx;
-
-static dis_handler_ctx dis_handler_pool[DIS_HANDLER_MAX];
-
-static int dis_clamp_capacity(int estimate);
-static int dis_allocate_context(int estimate, const char* where);
-static void dis_release_context(dis_handler_ctx* ctx);
-static void dis_ensure_capacity(dis_handler_ctx* ctx, int extra);
-static void dis_append_bytes(dis_handler_ctx* ctx, const char* data, int len);
-static void dis_append_string_id(dis_handler_ctx* ctx, int str_id, const char* where);
-static void dis_format_stack_value(dis_handler_ctx* ctx, stack_value_t* value, struct string_val* format, const char* where);
-static uchar* dis_pop_handler_slot(uchar** reptr, const char* where);
-static dis_handler_ctx* dis_get_ctx_from_slot(uchar* slot, const char* where);
-
 
 // builtin class fields, each fields...
 uchar builtin_cls_delegate[] = { 2, ReferenceID, Int32 }; // number of fields, type of field1, type of field2....
@@ -3137,13 +3106,15 @@ void vm_sort_slots() {
 
 
 
-///
+/// ##########################################################################################
 ///
 ///    ┳┓  •┓ •    ┏      •      •     ┓             •     
 ///    ┣┫┓┏┓┃╋┓┏┓  ╋┓┏┏┓┏╋┓┏┓┏┓  ┓┏┳┓┏┓┃┏┓┏┳┓┏┓┏┓╋┏┓╋┓┏┓┏┓┏
 ///    ┻┛┗┻┗┗┗┗┛┗  ┛┗┻┛┗┗┗┗┗┛┛┗  ┗┛┗┗┣┛┗┗ ┛┗┗┗ ┛┗┗┗┻┗┗┗┛┛┗┛
-///                                  ┛                     
-///    
+///                     
+/// ##########################################################################################
+///
+///	All builtin related implementations start from here.
 
 // PUSH
 #define PUSH_STACK_INT8(val) **reptr = SByte; As(*reptr + 1, int) = val; *reptr+=8;
@@ -3166,6 +3137,38 @@ void vm_sort_slots() {
 #define bool uchar
 #define true 1
 #define false 0
+
+
+#define STACK_VALUE_SIZE STACK_STRIDE
+typedef struct { uchar bytes[STACK_VALUE_SIZE]; } stack_value_t;
+
+INLINE void stack_value_copy(stack_value_t* dst, const uchar* src) { memcpy(dst->bytes, src, STACK_VALUE_SIZE); }
+INLINE void stack_value_store(uchar* dst, const stack_value_t* value) { memcpy(dst, value->bytes, STACK_VALUE_SIZE); }
+INLINE uchar stack_value_type(const stack_value_t* value) { return value->bytes[0]; }
+INLINE void push_stack_value(uchar** reptr, const stack_value_t* value) { memcpy(*reptr, value->bytes, STACK_VALUE_SIZE); *reptr += STACK_STRIDE; }
+INLINE int stack_value_as_int(const stack_value_t* value) { return *(int*)(value->bytes + 1); }
+INLINE float stack_value_as_float(const stack_value_t* value) { return *(float*)(value->bytes + 1); }
+#define DIS_HANDLER_MAX 32
+
+typedef struct
+{
+	int in_use;
+	int buffer_ref_id;
+	int capacity;
+	int length;
+} dis_handler_ctx;
+
+static dis_handler_ctx dis_handler_pool[DIS_HANDLER_MAX];
+
+static int dis_clamp_capacity(int estimate);
+static int dis_allocate_context(int estimate, const char* where);
+static void dis_release_context(dis_handler_ctx* ctx);
+static void dis_ensure_capacity(dis_handler_ctx* ctx, int extra);
+static void dis_append_bytes(dis_handler_ctx* ctx, const char* data, int len);
+static void dis_append_string_id(dis_handler_ctx* ctx, int str_id, const char* where);
+static void dis_format_stack_value(dis_handler_ctx* ctx, stack_value_t* value, struct string_val* format, const char* where);
+static uchar* dis_pop_handler_slot(uchar** reptr, const char* where);
+static dis_handler_ctx* dis_get_ctx_from_slot(uchar* slot, const char* where);
 
 void push_int(uchar** reptr, int value) {
 	PUSH_STACK_INT(value);
@@ -6113,6 +6116,9 @@ void setup_builtin_methods() {
 	builtin_methods[bn++] = builtin_HashSet_Remove; //164
 	builtin_methods[bn++] = builtin_HashSet_Contains; //165
 	builtin_methods[bn++] = builtin_HashSet_get_Count; //166
+
+
+	// Compiler: String Interpolation.
 	builtin_methods[bn++] = builtin_DefaultInterpolatedStringHandler_ctor; //167
 	builtin_methods[bn++] = builtin_DefaultInterpolatedStringHandler_AppendLiteral; //168
 	builtin_methods[bn++] = builtin_DefaultInterpolatedStringHandler_AppendFormatted_String; //169
@@ -6130,7 +6136,21 @@ void setup_builtin_methods() {
 
 }
 
-
+/// ##########################################################################################
+///
+///
+///     ▄▄▄▄   ▄▄▄▄▄▄ ▄▄▄▄▄  ▄    ▄   ▄▄▄
+///     █   ▀▄ █      █    █ █    █ ▄▀   ▀
+///     █    █ █▄▄▄▄▄ █▄▄▄▄▀ █    █ █   ▄▄
+///     █    █ █      █    █ █    █ █    █
+///     █▄▄▄▀  █▄▄▄▄▄ █▄▄▄▄▀ ▀▄▄▄▄▀  ▀▄▄▄▀
+///     
+///                     
+/// ##########################################################################################
+///
+///	WINDOWS DEBUG:
+///
+///
 #ifdef _DEBUG
 
 
