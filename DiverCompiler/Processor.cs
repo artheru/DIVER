@@ -19,7 +19,7 @@ namespace MCURoutineCompiler;
 
 internal partial class Processor
 {
-    private const bool debugAnalyze = true;
+    private const bool debugAnalyze = false;
 
     public BaseModuleWeaver bmw;
 
@@ -272,6 +272,8 @@ internal partial class Processor
 
     public bool IsStruct(TypeReference tr)
     {
+        // if (tr != null && tr.FullName == DefaultInterpolatedStringHandlerFullName)
+        //     return false; // Treat DISH as reference-like, not struct
         var ret = tr.IsValueType;
         // if (ret) bmw.WriteWarning($"{tr} is struct");
         return ret;
@@ -676,6 +678,7 @@ internal partial class Processor
                 {
                     tt.instantiateClsID = SI.instanceable_classes.IndexOf(paramType.FullName);
                     if (tt.instantiateClsID == -1) throw new WeavingException($"Variable struct {paramType} not instanceable?");
+                    bmw.WriteWarning($">> Method {fname} Var({tname}:{vars.Last().typeID}@{vars.Last().offset} aux={tt.instantiateClsID})");
                 });
                 vsize += 5;
             }
@@ -691,7 +694,7 @@ internal partial class Processor
 
         myBuffer = ret.buffer;
 
-        bmw.WriteWarning($"** Process method {fname} into #{SI.methods.Count}=> {methodinitInfo}.");
+        bmw.WriteWarning($"** Process method {fname} into #{SI.methods.Count-1}=> {methodinitInfo}.");
 
         // foreach (var instruction in method.Body.Instructions)
         //     bmw.WriteWarning(fname+">"+ instruction.ToString()); 
@@ -763,9 +766,37 @@ internal partial class Processor
             }
         re_link:
             
-            //todo: flawwed virtual call table.
-            Dictionary<MethodDefinition, Dictionary<string, int>> virtCallDefs = new();
-            var current_referenced = SI.referenced_typefield.ToArray();
+            //todo: flawed virtual call table.
+            // Expand candidate types beyond only field-referenced ones to include:
+            //  - all instanceable classes we laid out
+            //  - declaring types of all compiled methods (e.g., iterator state machines)
+            Dictionary<MethodDefinition, Dictionary<string, string>> virtCallDefs = new();
+            var current_referenced =
+                SI.referenced_typefield
+                    .Concat(
+                        SI.class_ifield_offset
+                            .Where(kv => kv.Value?.tr != null)
+                            .Select(kv => new KeyValuePair<string, (TypeReference tr, FieldReference fr)>(
+                                kv.Key,
+                                (kv.Value.tr, null)))
+                    )
+                    .Concat(
+                        SI.methods.Values
+                            .Where(m => m?.md?.DeclaringType != null)
+                            .Select(m => new KeyValuePair<string, (TypeReference tr, FieldReference fr)>(
+                                m.md.DeclaringType.FullName,
+                                (m.md.DeclaringType, null)))
+                    )
+                    .Concat(
+                        (bmw?.ModuleDefinition?.Types ?? Enumerable.Empty<TypeDefinition>())
+                            .SelectMany(t => new[] { t }.Concat(t.NestedTypes))
+                            .Select(t => new KeyValuePair<string, (TypeReference tr, FieldReference fr)>(
+                                t.FullName,
+                                (t, null)))
+                    )
+                    .GroupBy(k => k.Key)
+                    .Select(g => g.First())
+                    .ToArray();
             bool virt_expand_occurred = false;
             foreach (var md in SI.virtcallMethods)
             {
@@ -790,7 +821,10 @@ internal partial class Processor
                                 goto re_link;
                             }
                              
-                            dict[tup.Value.tr.FullName] = en.registry;
+                            // Use the runtime instanceable class id when available; otherwise map by declaring type name
+                            var keyName = tup.Value.tr?.FullName ?? td.FullName;
+                            // Defer to final registry by storing the unique method key; we'll resolve to registry later
+                            dict[keyName] = GetGenericResolvedName(rmd, null);
                             virt_expand_occurred = true;
                         }
                         else   
@@ -910,6 +944,18 @@ internal partial class Processor
                     EnsureInheritanceLayout(v.tr);
                     if (!SI.class_ifield_offset.TryGetValue(cname, out var cfields))
                         SI.class_ifield_offset[cname] = cfields = new();
+                    // Ensure base layout is present before placing derived fields, to avoid offset collisions
+                    var td0 = v.tr.Resolve();
+                    var baseTd0 = td0?.BaseType?.Resolve();
+                    if (baseTd0 != null && baseTd0.FullName != "System.Object" && SI.class_ifield_offset.TryGetValue(baseTd0.FullName, out var baseInfo0))
+                    {
+                        foreach (var kv in baseInfo0.field_offset)
+                        {
+                            if (!cfields.field_offset.ContainsKey(kv.Key))
+                                cfields.field_offset[kv.Key] = kv.Value;
+                        }
+                        cfields.size = Math.Max(cfields.size, baseInfo0.size);
+                    }
                     cfields.field_offset[fd.Name] = (cfields.size, ftype, typeid, v.tr);
                     cfields.size += mysz;
                     cfields.tr = v.tr;
@@ -960,6 +1006,10 @@ internal partial class Processor
             } 
 
             SI.instanceable_classes = SI.class_ifield_offset.Keys.ToList(); 
+
+            // Allow inheritance layout to recompute after all fields are discovered
+            foreach (var cf in SI.class_ifield_offset.Values)
+                cf.baseInitialized = false;
 
             var bcs = SI.class_ifield_offset.Values.Select(p => p.tr.Resolve()).ToList();
             foreach (var derivedType in bcs)
@@ -1066,7 +1116,7 @@ internal partial class Processor
                 } 
                 else
                 {
-                    bmw.WriteWarning($"CCode error of {m.name}: {m.ccoder.CError}");
+                    //bmw.WriteWarning($"CCode error of {m.name}: {m.ccoder.CError}");
                 }
             }
              
@@ -1102,29 +1152,33 @@ internal partial class Processor
                 code_table.AddRange(BitConverter.GetBytes(c_offset));
                 c_offset += code.Length;
 
-                bmw.WriteWarning($"method:{all_methods[j].name}, meta/code_offset={a}/{b}");
+                bmw.WriteWarning($"method_{j}:{all_methods[j].name}, meta/code_offset={a}/{b}");
                 methodMetaOffsets.Add(a);
                 methodCodeOffsets.Add(b);
             }
 
             byte[] code_chunk = [..code_table, ..codes.SelectMany(p => p.meta.Concat(p.code).ToArray())];
 
+            // Do not reorder field layouts here; offsets must remain consistent with previously linked field instructions
+
             byte[][] iclass = SI.instanceable_classes.Select((p,id) =>
-                SI.class_ifield_offset[p].field_offset.SelectMany(k =>
-                {
-                    var aux = -1; 
-                    if (IsStruct(k.Value.tr) && k.Value.typeid== tMap.aReference.typeid)
-                        aux = SI.instanceable_classes.IndexOf(k.Value.tr.FullName);
-
-                    bmw.WriteWarning($"clsid_{id} fld > {p}.{k.Key}: @{k.Value.offset}, type={k.Value.tr}({k.Value.typeid}), aux={aux}");
-
-                    return new[]
+                SI.class_ifield_offset[p].field_offset
+                    .OrderBy(kv => kv.Value.offset)
+                    .SelectMany(k =>
                     {
-                        k.Value.typeid,
-                        (byte)(k.Value.offset & 0xff), (byte)(k.Value.offset >> 8),
-                        (byte)(aux &0xff), (byte)(aux>>8)
-                    };
-                }).ToArray()).ToArray();
+                        var aux = -1; 
+                        if (IsStruct(k.Value.tr) && k.Value.typeid == tMap.aReference.typeid)
+                            aux = SI.instanceable_classes.IndexOf(k.Value.tr.FullName);
+
+                        bmw.WriteWarning($"clsid_{id} fld > {p}.{k.Key}: @{k.Value.offset}, type={k.Value.tr}({k.Value.typeid}), aux={aux}");
+
+                        return new[]
+                        {
+                            k.Value.typeid,
+                            (byte)(k.Value.offset & 0xff), (byte)(k.Value.offset >> 8),
+                            (byte)(aux & 0xff), (byte)(aux >> 8)
+                        };
+                    }).ToArray()).ToArray();
 
             List<byte> iclass_layout = [];
             int ic_offset = 0;
@@ -1165,18 +1219,47 @@ internal partial class Processor
 
 
             // virtual method calls:
-            byte[][] virt_method_calls = SI.virtcallMethods.Select(p => 
-                new byte[]{(byte)virtCallDefs[p].Count, (byte)p.Parameters.Count}
-                .Concat(virtCallDefs[p].SelectMany(k =>
-                    BitConverter.GetBytes((short)SI.instanceable_classes.IndexOf(k.Key)) 
-                        .Concat(BitConverter.GetBytes((short)k.Value)))).ToArray()).ToArray();
-            List<byte> virt_table=BitConverter.GetBytes((short)virt_method_calls.Length).ToList();
             bmw.WriteWarning($"virtual methods={SI.virtcallMethods.Count}"); 
+            byte[][] virt_method_calls = SI.virtcallMethods.Select(p =>
+            {
+                var ret = new byte[] { (byte)virtCallDefs[p].Count, (byte)p.Parameters.Count }
+                    .Concat(virtCallDefs[p].SelectMany(k =>
+                    {
+                        // Map type name to instanceable class index; if missing, append to instanceable_classes so runtime knows it
+                        var idx = SI.instanceable_classes.IndexOf(k.Key);
+                        if (idx == -1)
+                        {
+                            SI.instanceable_classes.Add(k.Key);
+                            idx = SI.instanceable_classes.Count - 1;
+                            if (!SI.class_ifield_offset.ContainsKey(k.Key))
+                            {
+                                var tr = SI.RT_types.Values.FirstOrDefault(v => v.tr.FullName == k.Key).tr ??
+                                         (TypeReference)bmw?.ModuleDefinition?.Types.FirstOrDefault(t =>
+                                             t.FullName == k.Key);
+                                SI.class_ifield_offset[k.Key] = new shared_info.class_fields
+                                {
+                                    tr = tr,
+                                    size = 0
+                                };
+                            }
+                        }
+
+                        // Resolve method registry late from stored method key
+                        var methodKey = k.Value;
+                        if (!SI.methods.TryGetValue(methodKey, out var ment))
+                            throw new WeavingException($"Virtual call mapping refers to unknown method '{methodKey}'.");
+                        return BitConverter.GetBytes((short)idx).Concat(BitConverter.GetBytes((short)ment.registry));
+                    })).ToArray();
+                bmw.WriteWarning(
+                    $"> {p.Name}:[{string.Join(",", virtCallDefs[p].Select(k => $"cls{SI.instanceable_classes.IndexOf(k.Key)}:{SI.methods[k.Value].registry}"))}]");
+                return ret;
+            }).ToArray();
+            List<byte> virt_table=BitConverter.GetBytes((short)virt_method_calls.Length).ToList();
             int vc_offset = 0;
             for (int j = 0; j < virt_method_calls.Length; j++)
             {
                 virt_table.AddRange(BitConverter.GetBytes((short)vc_offset));
-                bmw.WriteWarning($"fuck debugger:{string.Join(" ", virt_method_calls[j].Select(p=>$"{p:X2}"))}");
+                //bmw.WriteWarning($"fuck debugger:{string.Join(" ", virt_method_calls[j].Select(p=>$"{p:X2}"))}");
                 vc_offset += virt_method_calls[j].Length;
             }
             byte[] virts = [..virt_table, ..virt_method_calls.SelectMany(p => p)];
@@ -1861,7 +1944,7 @@ internal partial class Processor
                         var offset = (instanced && !iscart ? SI.class_ifield_offset[cname] : SI.sfield_offset).field_offset[fr.Resolve().Name].offset;
                         ret[2] = (byte)(offset & 0xff);
                         ret[3] = (byte)(offset >> 8);
-                        // bmw.WriteWarning($"FLD encode: op={(int)code:X2} decl={cname} field={fr.Resolve().FullName} inst={instanced} iscart={iscart} off={offset}");
+                        //bmw.WriteWarning($"FLD encode: op={(int)code:X2} decl={cname} field={fr.Resolve().FullName} inst={instanced} iscart={iscart} off={offset}");
                     });
                     SI.linking_actions.Add(() =>
                     {
@@ -2017,15 +2100,16 @@ internal partial class Processor
                 // limited polymophism support.
                 var methodRef = (MethodReference)instruction.Operand;
                 var mdr = methodRef.Resolve();
+                var sname = GetNameNonGeneric(mdr);
 
-                if (mdr.IsAbstract)
+                if ((mdr.IsAbstract || mdr.IsVirtual) && BuiltInMethods.All(p => p.name != sname))
                 {
                     var id = SI.virtcallMethods.IndexOf(mdr);
                     if (id == -1)
                     {
                         id = SI.virtcallMethods.Count;
                         SI.virtcallMethods.Add(mdr);
-                        bmw.WriteWarning($"Abstract method call {methodRef.Name}, add to virt call list => id={id}");
+                        bmw.WriteWarning($"Abstract/Virtual method call {sname}, add to virt call list => id={id}");
                     }
 
                     return [0xA0, (byte)(id & 0xff), (byte)(id >> 8)];
@@ -2155,10 +2239,10 @@ internal partial class Processor
             //var sname = GetGenericResolvedName(methodDefinition, methodRef); //why bother?
             var sname = GetNameNonGeneric(methodDefinition);
 
-            if (BuiltInCalls.Any(p => p.name == sname))
+            if (BuiltInDirects.Any(p => p.name == sname))
             {
                 cc.Error($"Not allowed for {sname}");
-                return BuiltInCalls.First(p => p.name == sname).bc;
+                return BuiltInDirects.First(p => p.name == sname).bc;
             }
 
             if (BuiltInMethods.Any(p => p.name == sname))
@@ -2550,6 +2634,7 @@ internal partial class Processor
         if (SI.class_ifield_offset.TryGetValue(td.BaseType.FullName, out var baseInfo))
         {
             info.baseType = td.BaseType;
+            // 1) Copy base fields into derived if missing
             foreach (var kv in baseInfo.field_offset)
             {
                 if (!info.field_offset.ContainsKey(kv.Key))
@@ -2557,7 +2642,23 @@ internal partial class Processor
                     info.field_offset[kv.Key] = kv.Value;
                 }
             }
-            info.size = Math.Max(info.size, baseInfo.size);
+
+            // 2) Shift ALL fields declared on this type by base size; recompute total size conservatively
+            var declaredNames = new HashSet<string>(td.Fields.Select(f => f.Name));
+            int oldDeclaredSize = info.size; // current derived-only size (before shift)
+            if (declaredNames.Count > 0 && baseInfo.size > 0)
+            {
+                foreach (var name in declaredNames)
+                {
+                    if (info.field_offset.TryGetValue(name, out var v))
+                    {
+                        info.field_offset[name] = (v.offset + baseInfo.size, v.tr, v.typeid, v.dtr);
+                    }
+                }
+            }
+
+            // 3) Ensure size accommodates base + derived declared block
+            info.size = baseInfo.size + oldDeclaredSize;
         }
     }
 }

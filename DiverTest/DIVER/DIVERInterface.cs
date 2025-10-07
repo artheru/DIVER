@@ -519,12 +519,12 @@ namespace CartActivator
             {
                 NotifyLowerData("default", bs);
                 // debug output all fields of cart object.
-                Console.WriteLine("Lower Data notified");
-                foreach (var field in GetType().GetFields())
-                {
-                    var value = field.GetValue(this);
-                    Console.WriteLine($"    {field.Name}: {value}");
-                }
+                // Console.WriteLine("Lower Data notified");
+                // foreach (var field in GetType().GetFields())
+                // {
+                //     var value = field.GetValue(this);
+                //     Console.WriteLine($"    {field.Name}: {value}");
+                // }
 
             }); // note: apply NotifyLowerData on data received.
         }

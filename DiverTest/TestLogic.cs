@@ -33,7 +33,7 @@ namespace DiverTest
                 return 0;
             }
 
-            public virtual float VMethod() => 0.5f;
+            public virtual int VMethod() => 0;
             public abstract float GG();
             internal IEnumerator<bool> Running;
         }
@@ -53,10 +53,12 @@ namespace DiverTest
             {
                 ll.vv.a += 3;
                 if (ll.vv.a > 7) ll.vv.a %= 6;
-                return ll.vv.a + 4 + (int)GG();
+                var zz = (int)GG();
+                Console.WriteLine($"A={ll.vv.a}, zz={zz}");
+                return ll.vv.a + 4 + zz;
             }
 
-            public override float VMethod() => 1.5f + ll.test;
+            public override int VMethod() => 7 + ll.test;
 
             public override float GG()
             {
@@ -87,7 +89,7 @@ namespace DiverTest
         }
 
         private Func<int, int> act = null;
-        private float test = 0;
+        private int test = 3;
 
         public override void Operation(int iteration)
         {

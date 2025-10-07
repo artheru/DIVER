@@ -113,7 +113,7 @@
 - Native build failures → confirm VS environment variables (`vcvars64.bat`) loaded via `setenv.ps1` or rerun `build_cpp.bat` manually inside VS developer prompt.
 
 ## Build/Run Shortcuts
-- Regenerate + run quick loop: `powershell -ExecutionPolicy Bypass -Command "cd D:\src\DIVER\DiverTest; dotnet build --no-incremental -c Debug; dotnet run -c Debug"`.
+- Regenerate + run quick loop: `powershell -ExecutionPolicy Bypass -Command "cd D:\src\DIVER\DiverTest; dotnet build  -c Debug; dotnet run --no-incremental -c Debug"`.
 
 ## Misc Notes
 - Keep ASCII in generated files; runtime assumes 1-byte char encoding for debug prints.

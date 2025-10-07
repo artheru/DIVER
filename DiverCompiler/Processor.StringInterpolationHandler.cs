@@ -22,10 +22,11 @@ internal partial class Processor
         var handlerFields = new shared_info.class_fields
         {
             tr = handlerType,
-            size = tMap.vInt32.size + 1,
+            size = 10,
             baseInitialized = true
         };
-        handlerFields.field_offset["__ctx"] = (0, int32Type, tMap.vInt32.typeid, handlerType);
+        handlerFields.field_offset["+len"] = (0, int32Type, tMap.vInt32.typeid, handlerType);
+        handlerFields.field_offset["+bytes"] = (5, handlerType, tMap.aReference.typeid, handlerType);
         SI.class_ifield_offset[handlerType.FullName] = handlerFields;
 
         var keysToRemove = SI.referenced_typefield.Keys
