@@ -85,6 +85,7 @@ internal partial class Processor
         internal Dictionary<string, (TypeReference tr, MethodReference mr)> RT_types = [];
 
         internal List<MethodDefinition> virtcallMethods = [];
+        internal bool defaultInterpolatedStringHandlerPrepared;
     }
 
     internal shared_info SI = new();
@@ -541,9 +542,6 @@ internal partial class Processor
         if (SI.methods.TryGetValue(fname, out var ret))
             return ret; 
 
-        var stringInterpolationHandler = new StringInterpolationHandler(bmw.ModuleDefinition, bmw);
-        stringInterpolationHandler.ProcessMethod(method);
-
         rettype = methodRef?.ReturnType ?? method.ReturnType;
         if (rettype.IsGenericParameter) 
             rettype = ((GenericInstanceType)methodRef.DeclaringType).GenericArguments[
@@ -826,7 +824,9 @@ internal partial class Processor
                 }
             } 
 
+            EnsureDefaultInterpolatedStringHandlerSupport(method.Module);
             order.AddRange(SI.referenced_typefield.Keys);
+            order = order.Where(k => SI.referenced_typefield.ContainsKey(k)).ToList();
             HashSet<string> parsed = new(); 
 
             bmw.WriteWarning(">>> Allocate class/struct fields");

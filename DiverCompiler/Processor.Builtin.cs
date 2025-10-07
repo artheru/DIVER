@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 namespace MCURoutineCompiler;
 
@@ -197,6 +197,14 @@ internal partial class Processor
         ("System.Collections.Generic.HashSet`1.Remove(T)", 0), //164
         ("System.Collections.Generic.HashSet`1.Contains(T)", 0), //165
         ("System.Collections.Generic.HashSet`1.get_Count()", 0), //166
+
+        // string interpolation
+        ("System.Runtime.CompilerServices.DefaultInterpolatedStringHandler..ctor(Int32, Int32)", 0),      //167
+        ("System.Runtime.CompilerServices.DefaultInterpolatedStringHandler.AppendLiteral(String)", 0),      //168
+        ("System.Runtime.CompilerServices.DefaultInterpolatedStringHandler.AppendFormatted(String)", 0),      //169
+        ("System.Runtime.CompilerServices.DefaultInterpolatedStringHandler.AppendFormatted(T)", 0),      //170
+        ("System.Runtime.CompilerServices.DefaultInterpolatedStringHandler.AppendFormatted(T, String)", 0),      //171
+        ("System.Runtime.CompilerServices.DefaultInterpolatedStringHandler.ToStringAndClear()", 0),      //172
     ];
 
 }

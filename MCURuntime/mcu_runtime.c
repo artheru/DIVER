@@ -319,6 +319,28 @@ INLINE uchar stack_value_type(const stack_value_t* value) { return value->bytes[
 INLINE void push_stack_value(uchar** reptr, const stack_value_t* value) { memcpy(*reptr, value->bytes, STACK_VALUE_SIZE); *reptr += STACK_STRIDE; }
 INLINE int stack_value_as_int(const stack_value_t* value) { return *(int*)(value->bytes + 1); }
 INLINE float stack_value_as_float(const stack_value_t* value) { return *(float*)(value->bytes + 1); }
+#define DIS_HANDLER_MAX 32
+
+typedef struct
+{
+    int in_use;
+    int buffer_ref_id;
+    int capacity;
+    int length;
+} dis_handler_ctx;
+
+static dis_handler_ctx dis_handler_pool[DIS_HANDLER_MAX];
+
+static int dis_clamp_capacity(int estimate);
+static int dis_allocate_context(int estimate, const char* where);
+static void dis_release_context(dis_handler_ctx* ctx);
+static void dis_ensure_capacity(dis_handler_ctx* ctx, int extra);
+static void dis_append_bytes(dis_handler_ctx* ctx, const char* data, int len);
+static void dis_append_string_id(dis_handler_ctx* ctx, int str_id, const char* where);
+static void dis_format_stack_value(dis_handler_ctx* ctx, stack_value_t* value, struct string_val* format, const char* where);
+static uchar* dis_pop_handler_slot(uchar** reptr, const char* where);
+static dis_handler_ctx* dis_get_ctx_from_slot(uchar* slot, const char* where);
+
 
 // builtin class fields, each fields...
 uchar builtin_cls_delegate[] = { 2, ReferenceID, Int32 }; // number of fields, type of field1, type of field2....
@@ -3791,6 +3813,146 @@ void format_string(char* format, char* result, int len_args, uchar** arg_ptr) {
     *result_ptr = '\0';  // Null-terminate the result string
 }
 
+// DefaultInterpolatedStringHandler helpers
+static int dis_clamp_capacity(int estimate)
+{
+    if (estimate < 32) estimate = 32;
+    if (estimate > 32000) estimate = 32000;
+    return estimate;
+}
+
+static int dis_allocate_context(int estimate, const char* where)
+{
+    estimate = dis_clamp_capacity(estimate);
+    for (int i = 0; i < DIS_HANDLER_MAX; ++i)
+    {
+        dis_handler_ctx* ctx = &dis_handler_pool[i];
+        if (!ctx->in_use)
+        {
+            ctx->in_use = 1;
+            ctx->length = 0;
+            if (ctx->buffer_ref_id == 0 || ctx->capacity < estimate)
+            {
+                int ref = newarr((short)estimate, Byte);
+                ctx->buffer_ref_id = ref;
+                ctx->capacity = estimate;
+            }
+            return i + 1;
+        }
+    }
+    DOOM("%s: no available DefaultInterpolatedStringHandler slots", where);
+    return 0;
+}
+
+static void dis_release_context(dis_handler_ctx* ctx)
+{
+    ctx->in_use = 0;
+    ctx->length = 0;
+}
+
+static void dis_ensure_capacity(dis_handler_ctx* ctx, int extra)
+{
+    if (!ctx->in_use)
+        DOOM("DefaultInterpolatedStringHandler append on inactive context");
+
+    if (ctx->length + extra <= ctx->capacity)
+        return;
+
+    int new_cap = ctx->capacity ? ctx->capacity * 2 : 32;
+    int required = ctx->length + extra;
+    while (new_cap < required)
+        new_cap *= 2;
+    new_cap = dis_clamp_capacity(new_cap);
+
+    int new_ref = newarr((short)new_cap, Byte);
+    struct array_val* new_arr = (struct array_val*)heap_obj[new_ref].pointer;
+    if (ctx->buffer_ref_id)
+    {
+        struct array_val* old_arr = (struct array_val*)heap_obj[ctx->buffer_ref_id].pointer;
+        memcpy(&new_arr->payload, &old_arr->payload, ctx->length);
+    }
+
+    ctx->buffer_ref_id = new_ref;
+    ctx->capacity = new_cap;
+}
+
+static void dis_append_bytes(dis_handler_ctx* ctx, const char* data, int len)
+{
+    if (len <= 0)
+        return;
+
+    dis_ensure_capacity(ctx, len);
+    struct array_val* arr = (struct array_val*)heap_obj[ctx->buffer_ref_id].pointer;
+    memcpy(&arr->payload + ctx->length, data, len);
+    ctx->length += len;
+}
+
+static void dis_append_string_id(dis_handler_ctx* ctx, int str_id, const char* where)
+{
+    if (str_id == 0)
+        return;
+
+    if (str_id <= 0 || str_id >= heap_newobj_id)
+        DOOM("%s: invalid string reference %d", where, str_id);
+
+    struct string_val* str = (struct string_val*)heap_obj[str_id].pointer;
+    if (*((uchar*)str) != StringHeader)
+        DOOM("%s: expected string reference, got header %d", where, *((uchar*)str));
+
+    dis_append_bytes(ctx, (char*)&str->payload, str->str_len);
+}
+
+static uchar* dis_pop_handler_slot(uchar** reptr, const char* where)
+{
+    POP;
+    uchar* addr = *reptr;
+    if (*addr != Address)
+        DOOM("%s: expected Address for handler struct, got type %d", where, *addr);
+    uchar* target = TypedAddrAsValPtr(addr);
+    if (*target == JumpAddress)
+    {
+        target = TypedAddrAsValPtr(target);
+    }
+    return target;
+}
+
+static dis_handler_ctx* dis_get_ctx_from_slot(uchar* slot, const char* where)
+{
+    if (slot[0] != Int32)
+        DOOM("%s: handler struct not initialized (type %d)", where, slot[0]);
+    int ctx_id = *(int*)(slot + 1);
+    if (ctx_id <= 0 || ctx_id > DIS_HANDLER_MAX)
+        DOOM("%s: invalid handler context id %d", where, ctx_id);
+    dis_handler_ctx* ctx = &dis_handler_pool[ctx_id - 1];
+    if (!ctx->in_use)
+        DOOM("%s: handler context %d not active", where, ctx_id);
+    return ctx;
+}
+
+static void dis_format_stack_value(dis_handler_ctx* ctx, stack_value_t* value, struct string_val* format, const char* where)
+{
+    char fmt_buf[64];
+    int pos = 0;
+    fmt_buf[pos++] = '{';
+    fmt_buf[pos++] = '0';
+    if (format != NULL && format->str_len > 0)
+    {
+        fmt_buf[pos++] = ':';
+        int copy_len = format->str_len;
+        if (copy_len > 30)
+            copy_len = 30;
+        memcpy(fmt_buf + pos, &format->payload, copy_len);
+        pos += copy_len;
+    }
+    fmt_buf[pos++] = '}';
+    fmt_buf[pos] = '\0';
+
+    uchar* args[1];
+    args[0] = value->bytes;
+    char tmp[256];
+    format_string(fmt_buf, tmp, 1, args);
+    dis_append_bytes(ctx, tmp, (int)strlen(tmp));
+}
 void do_job(uchar** reptr, int len, uchar** arg_ptr)
 {
 	int format_str_id = pop_reference(reptr);
@@ -3953,6 +4115,75 @@ void builtin_String_get_Length(uchar** reptr) {
 		DOOM("substring require string");
 
 	push_int(reptr, str->str_len);
+}
+void builtin_DefaultInterpolatedStringHandler_ctor(uchar** reptr)
+{
+    int formattedCount = pop_int(reptr);
+    int literalLength = pop_int(reptr);
+    uchar* slot = dis_pop_handler_slot(reptr, "DefaultInterpolatedStringHandler..ctor");
+    int ctx_id = dis_allocate_context(literalLength + formattedCount * 16 + 32, "DefaultInterpolatedStringHandler..ctor");
+    slot[0] = Int32;
+    *(int*)(slot + 1) = ctx_id;
+}
+
+void builtin_DefaultInterpolatedStringHandler_AppendLiteral(uchar** reptr)
+{
+    int str_id = pop_reference(reptr);
+    uchar* slot = dis_pop_handler_slot(reptr, "DefaultInterpolatedStringHandler.AppendLiteral");
+    dis_handler_ctx* ctx = dis_get_ctx_from_slot(slot, "DefaultInterpolatedStringHandler.AppendLiteral");
+    dis_append_string_id(ctx, str_id, "DefaultInterpolatedStringHandler.AppendLiteral");
+}
+
+void builtin_DefaultInterpolatedStringHandler_AppendFormatted_String(uchar** reptr)
+{
+    int str_id = pop_reference(reptr);
+    uchar* slot = dis_pop_handler_slot(reptr, "DefaultInterpolatedStringHandler.AppendFormatted(string)");
+    dis_handler_ctx* ctx = dis_get_ctx_from_slot(slot, "DefaultInterpolatedStringHandler.AppendFormatted(string)");
+    dis_append_string_id(ctx, str_id, "DefaultInterpolatedStringHandler.AppendFormatted(string)");
+}
+
+void builtin_DefaultInterpolatedStringHandler_AppendFormatted_Value(uchar** reptr)
+{
+    stack_value_t value;
+    POP;
+    stack_value_copy(&value, *reptr);
+    uchar* slot = dis_pop_handler_slot(reptr, "DefaultInterpolatedStringHandler.AppendFormatted<T>");
+    dis_handler_ctx* ctx = dis_get_ctx_from_slot(slot, "DefaultInterpolatedStringHandler.AppendFormatted<T>");
+    dis_format_stack_value(ctx, &value, NULL, "DefaultInterpolatedStringHandler.AppendFormatted<T>");
+}
+
+void builtin_DefaultInterpolatedStringHandler_AppendFormatted_Value_Format(uchar** reptr)
+{
+    int format_id = pop_reference(reptr);
+    stack_value_t value;
+    POP;
+    stack_value_copy(&value, *reptr);
+    uchar* slot = dis_pop_handler_slot(reptr, "DefaultInterpolatedStringHandler.AppendFormatted<T,String>");
+    dis_handler_ctx* ctx = dis_get_ctx_from_slot(slot, "DefaultInterpolatedStringHandler.AppendFormatted<T,String>");
+    struct string_val* format = NULL;
+    if (format_id != 0)
+    {
+        if (format_id <= 0 || format_id >= heap_newobj_id)
+            DOOM("DefaultInterpolatedStringHandler.AppendFormatted<T,String>: invalid format reference %d", format_id);
+        format = (struct string_val*)heap_obj[format_id].pointer;
+        if (*((uchar*)format) != StringHeader)
+            DOOM("DefaultInterpolatedStringHandler.AppendFormatted<T,String>: format arg not string (header %d)", *((uchar*)format));
+    }
+    dis_format_stack_value(ctx, &value, format, "DefaultInterpolatedStringHandler.AppendFormatted<T,String>");
+}
+
+void builtin_DefaultInterpolatedStringHandler_ToStringAndClear(uchar** reptr)
+{
+    uchar* slot = dis_pop_handler_slot(reptr, "DefaultInterpolatedStringHandler.ToStringAndClear");
+    dis_handler_ctx* ctx = dis_get_ctx_from_slot(slot, "DefaultInterpolatedStringHandler.ToStringAndClear");
+    if (ctx->buffer_ref_id == 0)
+        DOOM("DefaultInterpolatedStringHandler.ToStringAndClear: missing buffer");
+    struct array_val* arr = (struct array_val*)heap_obj[ctx->buffer_ref_id].pointer;
+    int str_id = newstr(ctx->length, &arr->payload);
+    dis_release_context(ctx);
+    slot[0] = Int32;
+    *(int*)(slot + 1) = 0;
+    PUSH_STACK_REFERENCEID(str_id);
 }
 
 
@@ -5882,6 +6113,12 @@ void setup_builtin_methods() {
 	builtin_methods[bn++] = builtin_HashSet_Remove; //164
 	builtin_methods[bn++] = builtin_HashSet_Contains; //165
 	builtin_methods[bn++] = builtin_HashSet_get_Count; //166
+	builtin_methods[bn++] = builtin_DefaultInterpolatedStringHandler_ctor; //167
+	builtin_methods[bn++] = builtin_DefaultInterpolatedStringHandler_AppendLiteral; //168
+	builtin_methods[bn++] = builtin_DefaultInterpolatedStringHandler_AppendFormatted_String; //169
+	builtin_methods[bn++] = builtin_DefaultInterpolatedStringHandler_AppendFormatted_Value; //170
+	builtin_methods[bn++] = builtin_DefaultInterpolatedStringHandler_AppendFormatted_Value_Format; //171
+	builtin_methods[bn++] = builtin_DefaultInterpolatedStringHandler_ToStringAndClear; //172
 
 	INFO("System builtin methods n=%d", bn);
 	add_additional_builtins();

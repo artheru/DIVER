@@ -195,9 +195,9 @@
     <Compile Include="ModuleWeaver.cs" />
     <Compile Include="Processor.Builtin.cs" />
     <Compile Include="Processor.cs" />
+    <Compile Include="Processor.StringInterpolationHandler.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="StringInterpolationHandler.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
