@@ -362,227 +362,6 @@ uchar* builtin_cls[] = {
 
 int builtin_arg0; //this pointer for builtin class ctor.
 
-INLINE int builtin_field_offset_by_index(int clsidx, int field_idx)
-{
-	uchar* layout = builtin_cls[clsidx];
-	int offset = 0;
-	for (int i = 0; i < field_idx; ++i)
-		offset += get_val_sz(layout[i + 1]);
-	return offset;
-}
-
-INLINE uchar* builtin_field_ptr_by_index(struct object_val* obj, int clsidx, int field_idx)
-{
-	return &obj->payload + builtin_field_offset_by_index(clsidx, field_idx);
-}
-
-INLINE int* builtin_field_int_ptr(struct object_val* obj, int clsidx, int field_idx)
-{
-	uchar* field = builtin_field_ptr_by_index(obj, clsidx, field_idx);
-	if (field[0] != Int32)
-		DOOM("Field %d of clsidx %d is not Int32 (type=%d)\n", field_idx, clsidx, field[0]);
-	return (int*)(field + 1);
-}
-
-INLINE int builtin_field_get_reference(struct object_val* obj, int clsidx, int field_idx)
-{
-	uchar* field = builtin_field_ptr_by_index(obj, clsidx, field_idx);
-	if (field[0] != ReferenceID)
-		DOOM("Field %d of clsidx %d is not ReferenceID (type=%d)\n", field_idx, clsidx, field[0]);
-	return *(int*)(field + 1);
-}
-
-INLINE void builtin_field_set_reference(struct object_val* obj, int clsidx, int field_idx, int ref_id)
-{
-	uchar* field = builtin_field_ptr_by_index(obj, clsidx, field_idx);
-	if (field[0] != ReferenceID)
-		DOOM("Field %d of clsidx %d is not ReferenceID (type=%d)\n", field_idx, clsidx, field[0]);
-	*(int*)(field + 1) = ref_id;
-}
-
-INLINE int builtin_field_get_int(struct object_val* obj, int clsidx, int field_idx)
-{
-	return *builtin_field_int_ptr(obj, clsidx, field_idx);
-}
-
-INLINE void builtin_field_set_int(struct object_val* obj, int clsidx, int field_idx, int value)
-{
-	*builtin_field_int_ptr(obj, clsidx, field_idx) = value;
-}
-
-INLINE struct object_val* expect_builtin_obj(int ref_id, int clsidx, const char* where)
-{
-	if (ref_id <= 0 || ref_id >= heap_newobj_id)
-		DOOM("%s: invalid reference id %d\n", where, ref_id);
-	struct object_val* obj = (struct object_val*)heap_obj[ref_id].pointer;
-	if (obj == NULL || obj->header != ObjectHeader)
-		DOOM("%s: reference %d does not point to an object (header=%d)\n", where, ref_id, obj ? obj->header : -1);
-	if (obj->clsid != BUILTIN_CLSID(clsidx))
-		DOOM("%s: builtin object expected clsid %d but got %d\n", where, BUILTIN_CLSID(clsidx), obj->clsid);
-	return obj;
-}
-
-INLINE struct array_val* expect_array(int ref_id, uchar expected_type, const char* where)
-{
-	if (ref_id <= 0 || ref_id >= heap_newobj_id)
-		DOOM("%s: invalid array reference id %d\n", where, ref_id);
-	uchar* header = heap_obj[ref_id].pointer;
-	if (header == NULL || *header != ArrayHeader)
-		DOOM("%s: reference %d does not point to an array (header=%d)\n", where, ref_id, header ? *header : -1);
-	struct array_val* arr = (struct array_val*)header;
-	if (expected_type != 0xFF && arr->typeid != expected_type)
-		DOOM("%s: expected array type %d but got %d\n", where, expected_type, arr->typeid);
-	return arr;
-}
-
-INLINE void stack_value_clear(stack_value_t* value)
-{
-	memset(value->bytes, 0, STACK_VALUE_SIZE);
-}
-
-INLINE void stack_value_from_array_elem(stack_value_t* dst, struct array_val* arr, int index)
-{
-	uchar typeid = arr->typeid;
-	int elem_sz = get_type_sz(typeid);
-	stack_value_clear(dst);
-	dst->bytes[0] = typeid;
-	memcpy(dst->bytes + 1, &arr->payload + index * elem_sz, elem_sz);
-}
-
-INLINE void stack_value_from_storage(stack_value_t* dst, uchar* storage, int index)
-{
-	stack_value_copy(dst, storage + index * STACK_VALUE_SIZE);
-}
-
-#define LIST_FIELD_STORAGE 0
-#define LIST_FIELD_COUNT 1
-#define LIST_FIELD_CAPACITY 2
-#define LIST_FIELD_ELEMENTTYPE 3
-#define LIST_INITIAL_CAPACITY 4
-
-INLINE int list_get_count(struct object_val* list_obj)
-{
-	return builtin_field_get_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_COUNT);
-}
-
-INLINE int list_get_capacity(struct object_val* list_obj)
-{
-	return builtin_field_get_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_CAPACITY);
-}
-
-INLINE void list_set_count(struct object_val* list_obj, int count)
-{
-	builtin_field_set_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_COUNT, count);
-}
-
-INLINE void list_set_capacity(struct object_val* list_obj, int capacity)
-{
-	builtin_field_set_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_CAPACITY, capacity);
-}
-
-INLINE int list_get_element_type(struct object_val* list_obj)
-{
-	return builtin_field_get_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_ELEMENTTYPE);
-}
-
-INLINE void list_set_element_type(struct object_val* list_obj, int type_id)
-{
-	builtin_field_set_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_ELEMENTTYPE, type_id);
-}
-
-INLINE int list_get_storage_ref(struct object_val* list_obj)
-{
-	return builtin_field_get_reference(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_STORAGE);
-}
-
-INLINE void list_set_storage_ref(struct object_val* list_obj, int ref_id)
-{
-	builtin_field_set_reference(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_STORAGE, ref_id);
-}
-
-INLINE uchar* list_storage_bytes(struct object_val* list_obj, struct array_val** out_arr)
-{
-	int storage_ref = list_get_storage_ref(list_obj);
-	if (storage_ref == 0)
-		return NULL;
-	struct array_val* arr = expect_array(storage_ref, Byte, "List storage");
-	if (out_arr) *out_arr = arr;
-	return &arr->payload;
-}
-
-// Queue<T> helpers
-#define QUEUE_FIELD_STORAGE 0
-#define QUEUE_FIELD_HEAD 1
-#define QUEUE_FIELD_TAIL 2
-#define QUEUE_FIELD_COUNT 3
-#define QUEUE_FIELD_CAPACITY 4
-#define QUEUE_FIELD_ELEMENTTYPE 5
-
-INLINE int queue_get_head(struct object_val* q) { return builtin_field_get_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_HEAD); }
-INLINE int queue_get_tail(struct object_val* q) { return builtin_field_get_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_TAIL); }
-INLINE int queue_get_count(struct object_val* q) { return builtin_field_get_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_COUNT); }
-INLINE int queue_get_capacity(struct object_val* q) { return builtin_field_get_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_CAPACITY); }
-INLINE int queue_get_element_type(struct object_val* q) { return builtin_field_get_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_ELEMENTTYPE); }
-INLINE void queue_set_head(struct object_val* q, int v) { builtin_field_set_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_HEAD, v); }
-INLINE void queue_set_tail(struct object_val* q, int v) { builtin_field_set_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_TAIL, v); }
-INLINE void queue_set_count(struct object_val* q, int v) { builtin_field_set_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_COUNT, v); }
-INLINE void queue_set_capacity(struct object_val* q, int v) { builtin_field_set_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_CAPACITY, v); }
-INLINE void queue_set_element_type(struct object_val* q, int v) { builtin_field_set_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_ELEMENTTYPE, v); }
-INLINE int queue_get_storage_ref(struct object_val* q) { return builtin_field_get_reference(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_STORAGE); }
-INLINE void queue_set_storage_ref(struct object_val* q, int id) { builtin_field_set_reference(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_STORAGE, id); }
-INLINE uchar* queue_storage_bytes(struct object_val* q, struct array_val** out_arr) { int r = queue_get_storage_ref(q); if (r==0) return NULL; struct array_val* a=expect_array(r, Byte, "Queue storage"); if (out_arr) *out_arr=a; return &a->payload; }
-
-// Stack<T> helpers
-#define STACK_FIELD_STORAGE 0
-#define STACK_FIELD_COUNT 1
-#define STACK_FIELD_CAPACITY 2
-#define STACK_FIELD_ELEMENTTYPE 3
-
-INLINE int stack_get_count(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_COUNT); }
-INLINE int stack_get_capacity(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_CAPACITY); }
-INLINE int stack_get_element_type(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_ELEMENTTYPE); }
-INLINE void stack_set_count(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_COUNT, v); }
-INLINE void stack_set_capacity(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_CAPACITY, v); }
-INLINE void stack_set_element_type(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_ELEMENTTYPE, v); }
-INLINE int stack_get_storage_ref(struct object_val* s) { return builtin_field_get_reference(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_STORAGE); }
-INLINE void stack_set_storage_ref(struct object_val* s, int id) { builtin_field_set_reference(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_STORAGE, id); }
-INLINE uchar* stack_storage_bytes(struct object_val* s, struct array_val** out_arr) { int r = stack_get_storage_ref(s); if (r==0) return NULL; struct array_val* a=expect_array(r, Byte, "Stack storage"); if (out_arr) *out_arr=a; return &a->payload; }
-
-// Dictionary<TKey,TValue> helpers (linear-probe-like contiguous pairs)
-#define DICT_FIELD_STORAGE 0
-#define DICT_FIELD_COUNT 1
-#define DICT_FIELD_CAPACITY 2
-#define DICT_FIELD_KEYTYPE 3
-#define DICT_FIELD_VALUETYPE 4
-
-INLINE int dict_get_count(struct object_val* d) { return builtin_field_get_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_COUNT); }
-INLINE int dict_get_capacity(struct object_val* d) { return builtin_field_get_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_CAPACITY); }
-INLINE int dict_get_key_type(struct object_val* d) { return builtin_field_get_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_KEYTYPE); }
-INLINE int dict_get_value_type(struct object_val* d) { return builtin_field_get_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_VALUETYPE); }
-INLINE void dict_set_count(struct object_val* d, int v) { builtin_field_set_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_COUNT, v); }
-INLINE void dict_set_capacity(struct object_val* d, int v) { builtin_field_set_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_CAPACITY, v); }
-INLINE void dict_set_key_type(struct object_val* d, int v) { builtin_field_set_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_KEYTYPE, v); }
-INLINE void dict_set_value_type(struct object_val* d, int v) { builtin_field_set_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_VALUETYPE, v); }
-INLINE int dict_get_storage_ref(struct object_val* d) { return builtin_field_get_reference(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_STORAGE); }
-INLINE void dict_set_storage_ref(struct object_val* d, int id) { builtin_field_set_reference(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_STORAGE, id); }
-INLINE uchar* dict_storage_bytes(struct object_val* d, struct array_val** out_arr) { int r = dict_get_storage_ref(d); if (r==0) return NULL; struct array_val* a=expect_array(r, Byte, "Dict storage"); if (out_arr) *out_arr=a; return &a->payload; }
-
-// HashSet<T> helpers
-#define HSET_FIELD_STORAGE 0
-#define HSET_FIELD_COUNT 1
-#define HSET_FIELD_CAPACITY 2
-#define HSET_FIELD_ELEMENTTYPE 3
-
-INLINE int hset_get_count(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_COUNT); }
-INLINE int hset_get_capacity(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_CAPACITY); }
-INLINE int hset_get_element_type(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_ELEMENTTYPE); }
-INLINE void hset_set_count(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_COUNT, v); }
-INLINE void hset_set_capacity(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_CAPACITY, v); }
-INLINE void hset_set_element_type(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_ELEMENTTYPE, v); }
-INLINE int hset_get_storage_ref(struct object_val* s) { return builtin_field_get_reference(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_STORAGE); }
-INLINE void hset_set_storage_ref(struct object_val* s, int id) { builtin_field_set_reference(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_STORAGE, id); }
-INLINE uchar* hset_storage_bytes(struct object_val* s, struct array_val** out_arr) { int r = hset_get_storage_ref(s); if (r==0) return NULL; struct array_val* a=expect_array(r, Byte, "HashSet storage"); if (out_arr) *out_arr=a; return &a->payload; }
-
 // use heap_newobj_id-1 to get obj_id.
 int newobj(int clsid)
 {
@@ -3149,6 +2928,229 @@ INLINE void push_stack_value(uchar** reptr, const stack_value_t* value) { memcpy
 INLINE int stack_value_as_int(const stack_value_t* value) { return *(int*)(value->bytes + 1); }
 INLINE float stack_value_as_float(const stack_value_t* value) { return *(float*)(value->bytes + 1); }
 #define DIS_HANDLER_MAX 32
+
+
+INLINE int builtin_field_offset_by_index(int clsidx, int field_idx)
+{
+	uchar* layout = builtin_cls[clsidx];
+	int offset = 0;
+	for (int i = 0; i < field_idx; ++i)
+		offset += get_val_sz(layout[i + 1]);
+	return offset;
+}
+
+INLINE uchar* builtin_field_ptr_by_index(struct object_val* obj, int clsidx, int field_idx)
+{
+	return &obj->payload + builtin_field_offset_by_index(clsidx, field_idx);
+}
+
+INLINE int* builtin_field_int_ptr(struct object_val* obj, int clsidx, int field_idx)
+{
+	uchar* field = builtin_field_ptr_by_index(obj, clsidx, field_idx);
+	if (field[0] != Int32)
+		DOOM("Field %d of clsidx %d is not Int32 (type=%d)\n", field_idx, clsidx, field[0]);
+	return (int*)(field + 1);
+}
+
+INLINE int builtin_field_get_reference(struct object_val* obj, int clsidx, int field_idx)
+{
+	uchar* field = builtin_field_ptr_by_index(obj, clsidx, field_idx);
+	if (field[0] != ReferenceID)
+		DOOM("Field %d of clsidx %d is not ReferenceID (type=%d)\n", field_idx, clsidx, field[0]);
+	return *(int*)(field + 1);
+}
+
+INLINE void builtin_field_set_reference(struct object_val* obj, int clsidx, int field_idx, int ref_id)
+{
+	uchar* field = builtin_field_ptr_by_index(obj, clsidx, field_idx);
+	if (field[0] != ReferenceID)
+		DOOM("Field %d of clsidx %d is not ReferenceID (type=%d)\n", field_idx, clsidx, field[0]);
+	*(int*)(field + 1) = ref_id;
+}
+
+INLINE int builtin_field_get_int(struct object_val* obj, int clsidx, int field_idx)
+{
+	return *builtin_field_int_ptr(obj, clsidx, field_idx);
+}
+
+INLINE void builtin_field_set_int(struct object_val* obj, int clsidx, int field_idx, int value)
+{
+	*builtin_field_int_ptr(obj, clsidx, field_idx) = value;
+}
+
+INLINE struct object_val* expect_builtin_obj(int ref_id, int clsidx, const char* where)
+{
+	if (ref_id <= 0 || ref_id >= heap_newobj_id)
+		DOOM("%s: invalid reference id %d\n", where, ref_id);
+	struct object_val* obj = (struct object_val*)heap_obj[ref_id].pointer;
+	if (obj == NULL || obj->header != ObjectHeader)
+		DOOM("%s: reference %d does not point to an object (header=%d)\n", where, ref_id, obj ? obj->header : -1);
+	if (obj->clsid != BUILTIN_CLSID(clsidx))
+		DOOM("%s: builtin object expected clsid %d but got %d\n", where, BUILTIN_CLSID(clsidx), obj->clsid);
+	return obj;
+}
+
+INLINE struct array_val* expect_array(int ref_id, uchar expected_type, const char* where)
+{
+	if (ref_id <= 0 || ref_id >= heap_newobj_id)
+		DOOM("%s: invalid array reference id %d\n", where, ref_id);
+	uchar* header = heap_obj[ref_id].pointer;
+	if (header == NULL || *header != ArrayHeader)
+		DOOM("%s: reference %d does not point to an array (header=%d)\n", where, ref_id, header ? *header : -1);
+	struct array_val* arr = (struct array_val*)header;
+	if (expected_type != 0xFF && arr->typeid != expected_type)
+		DOOM("%s: expected array type %d but got %d\n", where, expected_type, arr->typeid);
+	return arr;
+}
+
+INLINE void stack_value_clear(stack_value_t* value)
+{
+	memset(value->bytes, 0, STACK_VALUE_SIZE);
+}
+
+INLINE void stack_value_from_array_elem(stack_value_t* dst, struct array_val* arr, int index)
+{
+	uchar typeid = arr->typeid;
+	int elem_sz = get_type_sz(typeid);
+	stack_value_clear(dst);
+	dst->bytes[0] = typeid;
+	memcpy(dst->bytes + 1, &arr->payload + index * elem_sz, elem_sz);
+}
+
+INLINE void stack_value_from_storage(stack_value_t* dst, uchar* storage, int index)
+{
+	stack_value_copy(dst, storage + index * STACK_VALUE_SIZE);
+}
+
+#define LIST_FIELD_STORAGE 0
+#define LIST_FIELD_COUNT 1
+#define LIST_FIELD_CAPACITY 2
+#define LIST_FIELD_ELEMENTTYPE 3
+#define LIST_INITIAL_CAPACITY 4
+
+INLINE int list_get_count(struct object_val* list_obj)
+{
+	return builtin_field_get_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_COUNT);
+}
+
+INLINE int list_get_capacity(struct object_val* list_obj)
+{
+	return builtin_field_get_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_CAPACITY);
+}
+
+INLINE void list_set_count(struct object_val* list_obj, int count)
+{
+	builtin_field_set_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_COUNT, count);
+}
+
+INLINE void list_set_capacity(struct object_val* list_obj, int capacity)
+{
+	builtin_field_set_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_CAPACITY, capacity);
+}
+
+INLINE int list_get_element_type(struct object_val* list_obj)
+{
+	return builtin_field_get_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_ELEMENTTYPE);
+}
+
+INLINE void list_set_element_type(struct object_val* list_obj, int type_id)
+{
+	builtin_field_set_int(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_ELEMENTTYPE, type_id);
+}
+
+INLINE int list_get_storage_ref(struct object_val* list_obj)
+{
+	return builtin_field_get_reference(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_STORAGE);
+}
+
+INLINE void list_set_storage_ref(struct object_val* list_obj, int ref_id)
+{
+	builtin_field_set_reference(list_obj, BUILTIN_CLSIDX_LIST, LIST_FIELD_STORAGE, ref_id);
+}
+
+INLINE uchar* list_storage_bytes(struct object_val* list_obj, struct array_val** out_arr)
+{
+	int storage_ref = list_get_storage_ref(list_obj);
+	if (storage_ref == 0)
+		return NULL;
+	struct array_val* arr = expect_array(storage_ref, Byte, "List storage");
+	if (out_arr) *out_arr = arr;
+	return &arr->payload;
+}
+
+// Queue<T> helpers
+#define QUEUE_FIELD_STORAGE 0
+#define QUEUE_FIELD_HEAD 1
+#define QUEUE_FIELD_TAIL 2
+#define QUEUE_FIELD_COUNT 3
+#define QUEUE_FIELD_CAPACITY 4
+#define QUEUE_FIELD_ELEMENTTYPE 5
+
+INLINE int queue_get_head(struct object_val* q) { return builtin_field_get_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_HEAD); }
+INLINE int queue_get_tail(struct object_val* q) { return builtin_field_get_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_TAIL); }
+INLINE int queue_get_count(struct object_val* q) { return builtin_field_get_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_COUNT); }
+INLINE int queue_get_capacity(struct object_val* q) { return builtin_field_get_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_CAPACITY); }
+INLINE int queue_get_element_type(struct object_val* q) { return builtin_field_get_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_ELEMENTTYPE); }
+INLINE void queue_set_head(struct object_val* q, int v) { builtin_field_set_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_HEAD, v); }
+INLINE void queue_set_tail(struct object_val* q, int v) { builtin_field_set_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_TAIL, v); }
+INLINE void queue_set_count(struct object_val* q, int v) { builtin_field_set_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_COUNT, v); }
+INLINE void queue_set_capacity(struct object_val* q, int v) { builtin_field_set_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_CAPACITY, v); }
+INLINE void queue_set_element_type(struct object_val* q, int v) { builtin_field_set_int(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_ELEMENTTYPE, v); }
+INLINE int queue_get_storage_ref(struct object_val* q) { return builtin_field_get_reference(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_STORAGE); }
+INLINE void queue_set_storage_ref(struct object_val* q, int id) { builtin_field_set_reference(q, BUILTIN_CLSIDX_QUEUE, QUEUE_FIELD_STORAGE, id); }
+INLINE uchar* queue_storage_bytes(struct object_val* q, struct array_val** out_arr) { int r = queue_get_storage_ref(q); if (r == 0) return NULL; struct array_val* a = expect_array(r, Byte, "Queue storage"); if (out_arr) *out_arr = a; return &a->payload; }
+
+// Stack<T> helpers
+#define STACK_FIELD_STORAGE 0
+#define STACK_FIELD_COUNT 1
+#define STACK_FIELD_CAPACITY 2
+#define STACK_FIELD_ELEMENTTYPE 3
+
+INLINE int stack_get_count(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_COUNT); }
+INLINE int stack_get_capacity(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_CAPACITY); }
+INLINE int stack_get_element_type(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_ELEMENTTYPE); }
+INLINE void stack_set_count(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_COUNT, v); }
+INLINE void stack_set_capacity(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_CAPACITY, v); }
+INLINE void stack_set_element_type(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_ELEMENTTYPE, v); }
+INLINE int stack_get_storage_ref(struct object_val* s) { return builtin_field_get_reference(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_STORAGE); }
+INLINE void stack_set_storage_ref(struct object_val* s, int id) { builtin_field_set_reference(s, BUILTIN_CLSIDX_STACK, STACK_FIELD_STORAGE, id); }
+INLINE uchar* stack_storage_bytes(struct object_val* s, struct array_val** out_arr) { int r = stack_get_storage_ref(s); if (r == 0) return NULL; struct array_val* a = expect_array(r, Byte, "Stack storage"); if (out_arr) *out_arr = a; return &a->payload; }
+
+// Dictionary<TKey,TValue> helpers (linear-probe-like contiguous pairs)
+#define DICT_FIELD_STORAGE 0
+#define DICT_FIELD_COUNT 1
+#define DICT_FIELD_CAPACITY 2
+#define DICT_FIELD_KEYTYPE 3
+#define DICT_FIELD_VALUETYPE 4
+
+INLINE int dict_get_count(struct object_val* d) { return builtin_field_get_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_COUNT); }
+INLINE int dict_get_capacity(struct object_val* d) { return builtin_field_get_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_CAPACITY); }
+INLINE int dict_get_key_type(struct object_val* d) { return builtin_field_get_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_KEYTYPE); }
+INLINE int dict_get_value_type(struct object_val* d) { return builtin_field_get_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_VALUETYPE); }
+INLINE void dict_set_count(struct object_val* d, int v) { builtin_field_set_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_COUNT, v); }
+INLINE void dict_set_capacity(struct object_val* d, int v) { builtin_field_set_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_CAPACITY, v); }
+INLINE void dict_set_key_type(struct object_val* d, int v) { builtin_field_set_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_KEYTYPE, v); }
+INLINE void dict_set_value_type(struct object_val* d, int v) { builtin_field_set_int(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_VALUETYPE, v); }
+INLINE int dict_get_storage_ref(struct object_val* d) { return builtin_field_get_reference(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_STORAGE); }
+INLINE void dict_set_storage_ref(struct object_val* d, int id) { builtin_field_set_reference(d, BUILTIN_CLSIDX_DICTIONARY, DICT_FIELD_STORAGE, id); }
+INLINE uchar* dict_storage_bytes(struct object_val* d, struct array_val** out_arr) { int r = dict_get_storage_ref(d); if (r == 0) return NULL; struct array_val* a = expect_array(r, Byte, "Dict storage"); if (out_arr) *out_arr = a; return &a->payload; }
+
+// HashSet<T> helpers
+#define HSET_FIELD_STORAGE 0
+#define HSET_FIELD_COUNT 1
+#define HSET_FIELD_CAPACITY 2
+#define HSET_FIELD_ELEMENTTYPE 3
+
+INLINE int hset_get_count(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_COUNT); }
+INLINE int hset_get_capacity(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_CAPACITY); }
+INLINE int hset_get_element_type(struct object_val* s) { return builtin_field_get_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_ELEMENTTYPE); }
+INLINE void hset_set_count(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_COUNT, v); }
+INLINE void hset_set_capacity(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_CAPACITY, v); }
+INLINE void hset_set_element_type(struct object_val* s, int v) { builtin_field_set_int(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_ELEMENTTYPE, v); }
+INLINE int hset_get_storage_ref(struct object_val* s) { return builtin_field_get_reference(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_STORAGE); }
+INLINE void hset_set_storage_ref(struct object_val* s, int id) { builtin_field_set_reference(s, BUILTIN_CLSIDX_HASHSET, HSET_FIELD_STORAGE, id); }
+INLINE uchar* hset_storage_bytes(struct object_val* s, struct array_val** out_arr) { int r = hset_get_storage_ref(s); if (r == 0) return NULL; struct array_val* a = expect_array(r, Byte, "HashSet storage"); if (out_arr) *out_arr = a; return &a->payload; }
+
 
 typedef struct
 {
