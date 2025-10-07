@@ -4,6 +4,11 @@ namespace MCURoutineCompiler;
 
 internal partial class Processor
 {
+    internal static List<(string name, byte[] bc)> BuiltInCalls =
+    [
+        ("System.Environment.get_CurrentManagedThreadId()", [0x24, 0x15, 6, 0x01, 0x00, 0x00, 0x00]),
+    ];
+
     internal static List<(string name, ushort ctor_clsid)> BuiltInMethods =
     [
         ("System.Object..ctor()", 0),      //0

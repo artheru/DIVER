@@ -1,13 +1,15 @@
 using System;
 
 // will generate a ExtraMethods.dll for reference.
-namespace TEST;
-
-public static class TESTCls
+namespace TEST
 {
-    public static int TestFunc(int input)
+
+    public static class TESTCls
     {
-        // the function is actually implemented in cpp.
-        throw new NotImplementedException();
+        public static int TestFunc(int input)
+        {
+            // the function is actually implemented in cpp.
+            throw new NotImplementedException();
+        }
     }
 }

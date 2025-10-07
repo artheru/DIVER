@@ -533,9 +533,6 @@ internal partial class Processor
      
     public MethodEntry Process(MethodDefinition method, MethodReference methodRef=null, int scanInterval=1000)
     {
-        var stringInterpolationHandler = new StringInterpolationHandler(bmw.ModuleDefinition, bmw);
-        stringInterpolationHandler.ProcessMethod(method);
-
         if (isRoot) 
         {
             SI.EntryMethod = method;
@@ -543,6 +540,9 @@ internal partial class Processor
         var fname = GetGenericResolvedName(method, methodRef);
         if (SI.methods.TryGetValue(fname, out var ret))
             return ret; 
+
+        var stringInterpolationHandler = new StringInterpolationHandler(bmw.ModuleDefinition, bmw);
+        stringInterpolationHandler.ProcessMethod(method);
 
         rettype = methodRef?.ReturnType ?? method.ReturnType;
         if (rettype.IsGenericParameter) 
@@ -695,6 +695,8 @@ internal partial class Processor
 
         bmw.WriteWarning($"** Process method {fname} into #{SI.methods.Count}=> {methodinitInfo}.");
 
+        // foreach (var instruction in method.Body.Instructions)
+        //     bmw.WriteWarning(fname+">"+ instruction.ToString()); 
 
         AnalyzeMethod(method);
 
@@ -2152,7 +2154,13 @@ internal partial class Processor
         {
             //var sname = GetGenericResolvedName(methodDefinition, methodRef); //why bother?
             var sname = GetNameNonGeneric(methodDefinition);
-            
+
+            if (BuiltInCalls.Any(p => p.name == sname))
+            {
+                cc.Error($"Not allowed for {sname}");
+                return BuiltInCalls.First(p => p.name == sname).bc;
+            }
+
             if (BuiltInMethods.Any(p => p.name == sname))
             { 
                 // check if it's ..ctor?
@@ -2165,6 +2173,7 @@ internal partial class Processor
                 if (id == -1)
                 {
                     bmw.WriteError($"Runtime library doesn't support ctor `{sname}`!");
+                    cc.Error("Runtime not supported");
                     return null;
                 }
 
@@ -2184,10 +2193,7 @@ internal partial class Processor
                         cc.Append(me => $"{signature}({string.Join(",", me)})", args, rettype);
                     }
                     else
-                    {
-                        // Non-ctor builtins that aren't C-transpilable are still allowed (handled in VM)
-                        cc.Append(_ => "", methodDefinition.Parameters.Count + (methodDefinition.HasThis ? 1 : 0));
-                    }
+                        cc.Error("not allowed to call non-CCoder builtin methods");
                 }
                 
                 return [0xA7, (byte)(id&0xff), (byte)(id>>8)];
@@ -2197,7 +2203,7 @@ internal partial class Processor
             // Check if it's a system library method that's not supported
             if (sname.StartsWith("System.")) 
             {
-                bmw.WriteError($"Runtime library doesn't support `{sname}`!");
+                bmw.WriteError($"Runtime library doesn't support call to `{sname}`!");
                 return null;
             }
 
@@ -2362,11 +2368,12 @@ internal partial class Processor
                 this.stackDepth[instruction] = stackDepth;
                 
                 // if (debugAnalyze)
-                    // bmw.WriteWarning($"ins={instruction}");
+                //     bmw.WriteWarning($"ins={instruction}");
 
-                cc.AnalyzeFrom(previous); 
-                
-                ConvertToBytecode(instruction, method); 
+                cc.AnalyzeFrom(previous);
+
+                ConvertToBytecode(instruction, method);
+                if (cc.error) break;
 
                 stackDepth = UpdateStackDepth(instruction, stackDepth);
 

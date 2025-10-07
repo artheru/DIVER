@@ -319,6 +319,7 @@ public class StringInterpolationHandler
         // Ensure the method has a local variable of type System.Object for our temp values
         // This is needed for handling complex types
         EnsureObjectLocalVariable(method);
+        var formatStringLocal = EnsureStringLocalVariable(method);
         
         // Find the next instruction after the ToStringAndClear call to insert our replacement
         var nextInstruction = endIndex < instructions.Count - 1 ? instructions[endIndex + 1] : null;
@@ -354,15 +355,18 @@ public class StringInterpolationHandler
             try {
                 // Create the new instruction
                 var newInstruction = processor.Create(OpCodes.Ldstr, formatString);
-                
-                // Remove all the interpolation instructions
+
+                var removedInstructions = new List<Instruction>();
+                for (int i = removalStart; i <= endIndex; i++)
+                {
+                    removedInstructions.Add(instructions[i]);
+                }
                 for (int i = endIndex; i >= removalStart; i--)
                 {
                     processor.Remove(instructions[i]);
                 }
-                
-                // Insert the new instruction
                 processor.InsertBefore(nextInstruction, newInstruction);
+                UpdateInstructionReferences(method, removedInstructions, newInstruction);
                 bmw.WriteWarning("[SI] Replaced with literal");
             }
             catch (Exception ex) {
@@ -380,27 +384,29 @@ public class StringInterpolationHandler
             {
                 // Use the specific String.Format overloads for 1, 2, or 3 arguments
                 bmw.WriteWarning($"[SI] Build specific String.Format x{interpolationInfo.FormatItems.Count}");
-                BuildSpecificFormatCall(newInstructions, processor, interpolationInfo);
+                BuildSpecificFormatCall(newInstructions, processor, interpolationInfo, formatStringLocal);
             }
             else
             {
                 // Use the String.Format with object[] for more than 3 arguments
                 bmw.WriteWarning($"[SI] Build array String.Format x{interpolationInfo.FormatItems.Count}");
-                BuildArrayFormatCall(newInstructions, processor, interpolationInfo);
+                BuildArrayFormatCall(newInstructions, processor, interpolationInfo, formatStringLocal);
             }
             
-            // Remove all the interpolation instructions
+            var removedInstructions = new List<Instruction>();
+            for (int i = removalStart; i <= endIndex; i++)
+            {
+                removedInstructions.Add(instructions[i]);
+            }
             for (int i = endIndex; i >= removalStart; i--)
             {
                 processor.Remove(instructions[i]);
             }
-            
-            // Insert all new instructions
             foreach (var instr in newInstructions)
             {
                 processor.InsertBefore(nextInstruction, instr);
             }
-            
+            UpdateInstructionReferences(method, removedInstructions, newInstructions.FirstOrDefault());
             bmw.WriteWarning("[SI] Replaced with String.Format");
         }
         catch (Exception ex) {
@@ -428,6 +434,43 @@ public class StringInterpolationHandler
         method.Body.Variables.Add(newLocal);
         bmw.WriteWarning($"[SI] Added object local at {newLocal.Index}");
     }
+    private VariableDefinition EnsureStringLocalVariable(MethodDefinition method)
+    {
+        method.Body.InitLocals = true;
+        var stringType = _module.ImportReference(typeof(string));
+        foreach (var local in method.Body.Variables)
+        {
+            if (local.VariableType.FullName == stringType.FullName)
+                return local;
+        }
+        var newLocal = new VariableDefinition(stringType);
+        method.Body.Variables.Add(newLocal);
+        return newLocal;
+    }
+
+    private void UpdateInstructionReferences(MethodDefinition method, List<Instruction> removed, Instruction replacement)
+    {
+        if (replacement == null || removed.Count == 0)
+            return;
+
+        foreach (var instr in method.Body.Instructions)
+        {
+            if (instr.Operand is Instruction target)
+            {
+                if (removed.Contains(target))
+                    instr.Operand = replacement;
+            }
+            else if (instr.Operand is Instruction[] targets)
+            {
+                for (int i = 0; i < targets.Length; i++)
+                {
+                    if (removed.Contains(targets[i]))
+                        targets[i] = replacement;
+                }
+            }
+        }
+    }
+
     
     private bool ValidateInterpolationInfo(InterpolationInfo info)
     {
@@ -797,30 +840,25 @@ public class StringInterpolationHandler
         }
     }
     
-    private void BuildSpecificFormatCall(List<Instruction> instructions, ILProcessor processor, InterpolationInfo info)
+    private void BuildSpecificFormatCall(List<Instruction> instructions, ILProcessor processor, InterpolationInfo info, VariableDefinition formatStringLocal)
     {
         // Build the format string with placeholders
         var formatBuilder = new StringBuilder();
         int formatIndex = 0;
         
-        // Interleave literals and format items
         for (int i = 0; i < info.Literals.Count; i++)
         {
             formatBuilder.Append(info.Literals[i]);
-            
             if (i < info.FormatItems.Count)
             {
                 var formatItem = info.FormatItems[i];
                 formatBuilder.Append("{");
                 formatBuilder.Append(formatIndex++);
-                
-                // Add format specifier if available
                 if (!string.IsNullOrEmpty(formatItem.FormatClause))
                 {
                     formatBuilder.Append(":");
                     formatBuilder.Append(formatItem.FormatClause);
                 }
-                
                 formatBuilder.Append("}");
             }
         }
@@ -830,61 +868,57 @@ public class StringInterpolationHandler
         
         try
         {
-            // Load the format string
             instructions.Add(processor.Create(OpCodes.Ldstr, formatString));
-            
-            // Add the format items (arguments) - using the original instructions
-            foreach (var formatItem in info.FormatItems)
+            instructions.Add(processor.Create(OpCodes.Stloc, formatStringLocal));
+        
+            var methodDef = processor.Body.Method;
+            methodDef.Body.InitLocals = true;
+            var objectType = _module.ImportReference(typeof(object));
+            var tempLocals = new List<VariableDefinition>();
+        
+            for (int fi = 0; fi < info.FormatItems.Count; fi++)
             {
-                try
+                var formatItem = info.FormatItems[fi];
+                var tempLocal = new VariableDefinition(objectType);
+                methodDef.Body.Variables.Add(tempLocal);
+                tempLocals.Add(tempLocal);
+        
+                if (formatItem.LoadInstructions.Count == 0)
+                    throw new Exception("Format item has no load instructions");
+        
+                CopyInstructionSequence(instructions, processor, formatItem.LoadInstructions);
+        
+                var valueType = formatItem.Type;
+                if (valueType is ByReferenceType brt)
+                    valueType = brt.ElementType;
+                if (valueType != null)
                 {
-                    if (formatItem.LoadInstructions.Count == 0)
+                    var resolved = valueType.Resolve();
+                    if (resolved != null && resolved.IsValueType)
                     {
-                        throw new Exception("Format item has no load instructions");
-                    }
-                    
-                    // Copy the original value-loading instructions to preserve behavior
-                    CopyInstructionSequence(instructions, processor, formatItem.LoadInstructions);
-                    
-                    // Box value types for String.Format(object, ...)
-                    var valueType = formatItem.Type;
-                    if (valueType is ByReferenceType brt)
-                        valueType = brt.ElementType;
-                    if (valueType != null)
-                    {
-                        var resolved = valueType.Resolve();
-                        if (resolved != null && resolved.IsValueType)
-                        {
-                            var boxType = _module.ImportReference(valueType);
-                            instructions.Add(processor.Create(OpCodes.Box, boxType));
-                            bmw.WriteWarning($"[SI]    Boxed value type: {valueType.FullName}");
-                        }
+                        var boxType = _module.ImportReference(valueType);
+                        instructions.Add(processor.Create(OpCodes.Box, boxType));
+                        bmw.WriteWarning($"[SI]    Boxed value type: {valueType.FullName}");
                     }
                 }
-                catch (Exception ex)
-                {
-                    //bmw.WriteWarning($"    ERROR adding format item: {ex.Message}");
-                    throw;
-                }
+        
+                instructions.Add(processor.Create(OpCodes.Stloc, tempLocal));
             }
-            
-            // Call the appropriate String.Format method
-            MethodReference formatMethod = null;
-            switch (info.FormatItems.Count)
+        
+            instructions.Add(processor.Create(OpCodes.Ldloc, formatStringLocal));
+            foreach (var tempLocal in tempLocals)
             {
-                case 1:
-                    formatMethod = _stringFormat1;
-                    break;
-                case 2:
-                    formatMethod = _stringFormat2;
-                    break;
-                case 3:
-                    formatMethod = _stringFormat3;
-                    break;
-                default:
-                    throw new InvalidOperationException($"Invalid number of format arguments: {info.FormatItems.Count}");
+                instructions.Add(processor.Create(OpCodes.Ldloc, tempLocal));
             }
-            
+        
+            MethodReference formatMethod = info.FormatItems.Count switch
+            {
+                1 => _stringFormat1,
+                2 => _stringFormat2,
+                3 => _stringFormat3,
+                _ => throw new InvalidOperationException($"Invalid number of format arguments: {info.FormatItems.Count}")
+            };
+        
             instructions.Add(processor.Create(OpCodes.Call, formatMethod));
             bmw.WriteWarning($"[SI]    Added call to String.Format with {info.FormatItems.Count} arguments");
         }
@@ -895,30 +929,25 @@ public class StringInterpolationHandler
         }
     }
     
-    private void BuildArrayFormatCall(List<Instruction> instructions, ILProcessor processor, InterpolationInfo info)
+    private void BuildArrayFormatCall(List<Instruction> instructions, ILProcessor processor, InterpolationInfo info, VariableDefinition formatStringLocal)
     {
         // Build the format string with placeholders
         var formatBuilder = new StringBuilder();
         int formatIndex = 0;
         
-        // Interleave literals and format items
         for (int i = 0; i < info.Literals.Count; i++)
         {
             formatBuilder.Append(info.Literals[i]);
-            
             if (i < info.FormatItems.Count)
             {
                 var formatItem = info.FormatItems[i];
                 formatBuilder.Append("{");
                 formatBuilder.Append(formatIndex++);
-                
-                // Add format specifier if available
                 if (!string.IsNullOrEmpty(formatItem.FormatClause))
                 {
                     formatBuilder.Append(":");
                     formatBuilder.Append(formatItem.FormatClause);
                 }
-                
                 formatBuilder.Append("}"); 
             }
         }
@@ -928,8 +957,9 @@ public class StringInterpolationHandler
         
         try
         {
-            // Load the format string
             instructions.Add(processor.Create(OpCodes.Ldstr, formatString));
+            instructions.Add(processor.Create(OpCodes.Stloc, formatStringLocal));
+            instructions.Add(processor.Create(OpCodes.Ldloc, formatStringLocal));
             
             // Create the object array
             instructions.Add(processor.Create(OpCodes.Ldc_I4, info.FormatItems.Count));
