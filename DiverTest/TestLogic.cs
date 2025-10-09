@@ -62,16 +62,20 @@ namespace DiverTest
 
             public override float GG()
             {
+                Console.WriteLine("GG");
                 Running ??= StateMachine().GetEnumerator();
                 Running.MoveNext();
                 return ll.test = VMethod() + 1;
             }
-
+             
             public IEnumerable<bool> StateMachine()
             {
                 var z = ll.vv.a;
                 for (int i = 0; i < z + 1; ++i)
+                {
                     yield return true;
+                }
+
                 Console.WriteLine("Yield done");
                 ll.act = (j) =>
                 {
@@ -93,6 +97,7 @@ namespace DiverTest
 
         public override void Operation(int iteration)
         {
+            if (iteration >= 6) return;
             if (testDict == null) testDict = new Dictionary<int, string>();
             if (vv.b == null) vv.b = new TI(this);
             // ============ TEST AsLowerIO/AsUpperIO (Cart read/write) ============
@@ -106,9 +111,15 @@ namespace DiverTest
             var arr = ls.Where(p => p % 2 == 1).ToArray();
             cart.arr = arr;
             if (testDict.ContainsKey(vv.a))
+            {
+                Console.WriteLine($"has {vv.a}");
                 cart.str = testDict[vv.a];
+            }
             else
+            {
+                Console.WriteLine($"no {vv.a}");
                 cart.str = vv.a + ">" + vv.b.good(vv.a);
+            }
 
             int I(int id)
             {
@@ -118,8 +129,12 @@ namespace DiverTest
 
             act ??= _ => I(iteration);
             cart.str += "::" + test;
-            if (iteration % 3 == 1) testDict[act(iteration)] = $"{new TI(this).GG()}.xxx";
-            Console.WriteLine($"arr=[{string.Join(",", arr)}], upload={cart.str}..");
+            if (iteration % 3 == 1)
+            {
+                Console.WriteLine($"iteration={iteration}, GG!");
+                testDict[act(iteration)] = $"{new TI(this).GG()}.xxx";
+            }
+            Console.WriteLine($"{iteration}:arr=[{string.Join(",", arr)}], upload={cart.str}..");
         }
     }
 }

@@ -16,7 +16,7 @@ namespace DiverTest
             var x = new TestLogic();
             x.cart = new TestVehicle();
             x.Operation(0); 
-            for (int i = 1; i < 5; ++i) 
+            for (int i = 1; i < 10; ++i) 
                 x.Operation(i);
 
             Console.WriteLine(">>> DIVER Implementation:");

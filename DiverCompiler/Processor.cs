@@ -1306,8 +1306,7 @@ internal partial class Processor
                     diver.AppendLine($"=== Method `{m.name}` ===");
 
                     var ilList = m.md.Body.Instructions;
-                    int instCount = Math.Min(ilList.Count, m.buffer.Count);
-                    for (int k = 0; k < instCount; k++)
+                    for (int k = 0; k < ilList.Count; k++)
                     {
                         var il = ilList[k];
                         string csLine = "";
@@ -1338,7 +1337,7 @@ internal partial class Processor
 
                         int abs = methodDetailBase + methodCodeOffsets[j] + m.buffer[k].offset;
                         string ilText = il.ToString();
-                        diver.AppendLine($"{globalLine}:    {ilText}{(csLine.Length > 0 ? "  // " + csLine : "")}");
+                        diver.AppendLine($"{globalLine}({abs}):    {ilText}  █[{string.Join(" ", m.buffer[k].bytes.Select(p => $"{p:X2}"))}]█{(csLine.Length > 0 ? "  // " + csLine : "")}");
 
                         if (!first) map.Append(',');
                         first = false;

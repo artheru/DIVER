@@ -1,10 +1,12 @@
 ﻿#ifndef IS_MCU
 #include "mcu_runtime.h"
+#define INLINE static inline
 #else
 #include "appl/vm.h"
 #include "util/console.h"
 #include "appl/states.h"
 #undef _DEBUG
+#define INLINE __attribute__((always_inline)) static inline
 #endif
 
 // allow unsafe strings...
@@ -30,40 +32,46 @@
 
 int cur_il_offset;
 
+
 #ifdef _DEBUG
-#define INLINE static inline
+
+// debug mode:
 
 // swith on this variable to allow verbose output.
-//#define _VERBOSE
+// #define _VERBOSE
+// #define DEBUG_COMPILER
 
 #ifdef _VERBOSE
 #define DBG printf
-#define INFO printf
-#define WARN printf
 #else
 #define DBG ;
-#define INFO ;
-#define WARN ;
 #endif
 
-#define DIEIF(expr) if (expr)
-#define DOOM(...) { char sprintf_format[100] = { 0 }; sprintf(sprintf_format, __VA_ARGS__); report_error(cur_il_offset, sprintf_format);}
+// Language-level assertions for interpreter debugging (only active in DEBUG_COMPILER mode)
+#ifdef DEBUG_COMPILER
+#define ASSERT_LANG(expr, ...) if (!(expr)) { char sprintf_format[100] = { 0 }; sprintf(sprintf_format, __VA_ARGS__); report_error(cur_il_offset, sprintf_format); }
+#else
+#define ASSERT_LANG(expr, ...) ((void)0)
+#endif
 
 #else
 
 // release mode functions.
 
-#define INLINE __attribute__((always_inline)) static inline
 VAL_OUT(ptr);
 #define DBG(...) ;
-#define INFO(...) ;
+#define DBG(...) ;
 #define WARN(...) ;
-
-char err_tmp[256];
-#define DOOM(...) { int sz = snprintf(err_tmp,sizeof(err_tmp),__VA_ARGS__); report_error(__FILE__, __LINE__, err_tmp, sz);}
-#define DIEIF(expr) if (0)
+#define ASSERT_LANG(expr, ...) ((void)0)
 
 #endif
+
+
+// Runtime assertions for safety checks (always active)
+#define ASSERT_RT(expr, ...) if (!(expr)) { char err_tmp[256]={0}; int sz = snprintf(err_tmp,sizeof(err_tmp),__VA_ARGS__); report_error(cur_il_offset, err_tmp); }
+
+// Deprecated macros - kept for backward compatibility during transition
+#define DOOM(...) ASSERT_RT(0, __VA_ARGS__)
 
 /*
  * memory layout:
@@ -302,7 +310,7 @@ INLINE uchar get_type_sz(uchar typeid)
 	case 17: return 4; // &JumpID
 	case 18: return 5; // boxed object: |actual_type|payload|
 	default:
-		DOOM("invalid typeid %d\n", typeid);
+		ASSERT_LANG(0, "invalid typeid %d", typeid);
 	}
 }
 uchar get_val_sz(uchar typeid)
@@ -316,7 +324,7 @@ int builtin_arg0; //this pointer for builtin class ctor.
 // use heap_newobj_id-1 to get obj_id.
 int newobj(int clsid)
 {
-	if (clsid == -1) DOOM("bad clsid:-1");
+	ASSERT_LANG(clsid != -1, "bad clsid:-1");
 	int reference_id = heap_newobj_id;
 	heap_newobj_id++;
 	uchar* tail = reference_id == 1 ? heap_tail : heap_obj[reference_id - 1].pointer;
@@ -326,14 +334,17 @@ int newobj(int clsid)
 		instanceable_class_layout_ptr[clsid].tot_size) + ObjectHeaderSize;
 	struct object_val* my_ptr = tail - mysz;
 	if (new_stack_depth > 0 && (uchar*)my_ptr < stack_ptr[new_stack_depth - 1]->evaluation_pointer)
-		DOOM("Not enough space allocating %d bytes for obj(%d), heap available=%d, ttl=%d", mysz, clsid, (int)(tail - stack_ptr[new_stack_depth - 1]->evaluation_pointer), (int)(tail - mem0));
+		ASSERT_RT(0, "Out of memory allocating %d bytes for obj(%d)", mysz, clsid);
 	heap_obj[reference_id] = (struct heap_obj_slot){ .pointer = my_ptr, };
 	// initialize:
 	my_ptr->header = ObjectHeader;
 	my_ptr->clsid = clsid;
 
-	// set to zero as default value.
-	memset(&my_ptr->payload, 0, mysz - ObjectHeaderSize);
+	// Zero only necessary fields - most will be initialized explicitly
+	int payload_size = mysz - ObjectHeaderSize;
+	if (payload_size > 0) {
+		memset(&my_ptr->payload, 0, payload_size);
+	}
 
 	if (is_builtin)
 	{
@@ -358,7 +369,7 @@ int newobj(int clsid)
 		}
 	}
 
-	INFO("created obj_%d(cls_%d) @ %x\n", reference_id, clsid, my_ptr);
+	DBG("created obj_%d(cls_%d) @ %x\n", reference_id, clsid, my_ptr);
 
 	return reference_id;
 }
@@ -370,7 +381,7 @@ int newstr(short len, uchar* src)
 	int mysz = len + StringHeaderSize + 1;
 	struct string_val* my_ptr = tail - mysz;
 	if (new_stack_depth > 0 && (uchar*)my_ptr < stack_ptr[new_stack_depth - 1]->evaluation_pointer)
-		DOOM("Not enough space allocating %d bytes for str[%d], heap available=%d, ttl=%d", mysz, len, (int)(tail - stack_ptr[new_stack_depth - 1]->evaluation_pointer), (int)(tail - mem0));
+		ASSERT_RT(0, "Out of memory allocating %d bytes for str[%d]", mysz, len);
 	heap_obj[reference_id] = (struct heap_obj_slot){ .pointer = my_ptr, };
 	// initialize:
 	my_ptr->header = StringHeader;
@@ -391,7 +402,7 @@ int newarr(short len, uchar type_id)
 	int mysz = elemSz * len + ArrayHeaderSize;
 	struct array_val* my_ptr = tail - mysz;
 	if (new_stack_depth > 0 && (uchar*)my_ptr < stack_ptr[new_stack_depth - 1]->evaluation_pointer)
-		DOOM("Not enough space allocating %dB for arr[%d](%d), heap available=%d, ttl=%d", mysz, len, type_id, (int)(tail - stack_ptr[new_stack_depth - 1]->evaluation_pointer), (int)(tail - mem0));
+		ASSERT_RT(0, "Out of memory allocating %dB for arr[%d](%d)", mysz, len, type_id);
 	heap_obj[reference_id] = (struct heap_obj_slot){ .pointer = my_ptr, };
 
 	// initialize:
@@ -399,8 +410,10 @@ int newarr(short len, uchar type_id)
 	my_ptr->typeid = type_id;
 	my_ptr->len = len;
 
-	// set to zero as default value.
-	memset(&my_ptr->payload, 0, mysz - ArrayHeaderSize);
+	// Zero payload only for reference types (to ensure null refs)
+	if (type_id == ReferenceID) {
+		memset(&my_ptr->payload, 0, len * get_type_sz(type_id));
+	}
 
 	DBG("created obj_%d array (type_%d)x%d and initialized @ %x\n", heap_newobj_id, type_id, len, my_ptr);
 	heap_newobj_id++;
@@ -462,7 +475,7 @@ int get_virt_method_actual_methodID(int vmethod_id, int cls_id)
 	struct { short clsid; short methodid; } *vm_s = ptr + 2;
 	for (int i = 0; i < ncls; ++i, vm_s++)
 		if (vm_s->clsid == cls_id) return vm_s->methodid;
-	DOOM("Cannot find vmethod %d for type %d\n", vmethod_id, cls_id);
+	ASSERT_LANG(0, "Cannot find vmethod %d for type %d", vmethod_id, cls_id);
 }
 void setup_builtin_methods();
 
@@ -535,12 +548,12 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
 #define HEAP_WRITE_REFERENCEID(val) *heap=ReferenceID; As(heap+1, int)=val; heap+=get_val_sz(ReferenceID);
 
 // PUSH 
-#define PUSH_STACK_INT8(val) *eptr = SByte; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
-#define PUSH_STACK_UINT8(val) *eptr = Byte; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
-#define PUSH_STACK_INT16(val) *eptr = Int16; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
-#define PUSH_STACK_UINT16(val) *eptr = UInt16; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
-#define PUSH_STACK_INT(val) *eptr = Int32; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
-#define PUSH_STACK_UINT(val) *eptr = UInt32; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
+#define PUSH_STACK_INT8(val) memset(eptr, 0, STACK_STRIDE); *eptr = SByte; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
+#define PUSH_STACK_UINT8(val) memset(eptr, 0, STACK_STRIDE); *eptr = Byte; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
+#define PUSH_STACK_INT16(val) memset(eptr, 0, STACK_STRIDE); *eptr = Int16; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
+#define PUSH_STACK_UINT16(val) memset(eptr, 0, STACK_STRIDE); *eptr = UInt16; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
+#define PUSH_STACK_INT(val) memset(eptr, 0, STACK_STRIDE); *eptr = Int32; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
+#define PUSH_STACK_UINT(val) memset(eptr, 0, STACK_STRIDE); *eptr = UInt32; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
 
 // now our stack has eptr+1 8B aligned.
 #define PUSH_STACK_FLOAT_D(val) *eptr = Single; As(eptr + 1, float) = (val); eptr+=STACK_STRIDE;
@@ -563,8 +576,7 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
 
 #define POP {eptr-=STACK_STRIDE;\
     if (eptr < my_stack->evaluation_st_ptr) {\
-        WARN("POP underflow: method=%d depth=%d eval_ptr=%p st_ptr=%p\n", my_stack->method_id, my_stack->stack_depth, (void*)eptr, (void*)my_stack->evaluation_st_ptr);\
-        DOOM("POP exceeds range!");\
+        ASSERT_LANG(0, "POP underflow: method=%d depth=%d eval_ptr=%p st_ptr=%p\n", my_stack->method_id, my_stack->stack_depth, (void*)eptr, (void*)my_stack->evaluation_st_ptr);\
     } }
 
 
@@ -585,11 +597,11 @@ void copy_val(uchar* dst, uchar* src)
 	case 2:
 		switch (*src)
 		{
-		case 0: dst[1] = src[1]; INFO("b->i1\n"); return;
+		case 0: dst[1] = src[1]; DBG("b->i1\n"); return;
 		case 1:case 2:dst[1] = src[1]; return;
-		case 3:case 4:case 5:case 6:case 7: dst[1] = src[1]; INFO("i2+ ->i1\n"); return;
+		case 3:case 4:case 5:case 6:case 7: dst[1] = src[1]; DBG("i2+ ->i1\n"); return;
 		default:
-			DOOM("invalid i1 value copy from type_%d", *src);
+			ASSERT_LANG(0, "invalid i1 value copy from type_%d", *src);
 		}
 	case 3:
 	case 4:
@@ -597,10 +609,10 @@ void copy_val(uchar* dst, uchar* src)
 		switch (*src)
 		{
 		case 1: *(int16_t*)(dst + 1) = src[1];
-			INFO("u1->iu2\n");
+			DBG("u1->iu2\n");
 			return;
 		case 2: *(int16_t*)(dst + 1) = ((int8_t*)src)[1];
-			INFO("i1->iu2\n");
+			DBG("i1->iu2\n");
 			return;
 		case 3:
 		case 4:
@@ -609,7 +621,7 @@ void copy_val(uchar* dst, uchar* src)
 		case 7: *(int16_t*)(dst + 1) = *(int16_t*)(src + 1);
 			return;
 		}
-		DOOM("invalid i2 value copy from type_%d", *src);
+		ASSERT_LANG(0, "invalid i2 value copy from type_%d", *src);
 
 	case 6:
 	case 7:
@@ -617,22 +629,22 @@ void copy_val(uchar* dst, uchar* src)
 		{
 		case 1:
 			*(int32_t*)(dst + 1) = src[1];
-			INFO("u1->iu4\n");
+			DBG("u1->iu4\n");
 		case 2:
 			*(int32_t*)(dst + 1) = ((int8_t*)src)[1];
-			INFO("i1->iu4\n");
+			DBG("i1->iu4\n");
 			return;
 		case 3:
 		case 4: *(int32_t*)(dst + 1) = *(int16_t*)(src + 1);
-			INFO("i2->iu4\n");
+			DBG("i2->iu4\n");
 		case 5: *(int32_t*)(dst + 1) = *(uint16_t*)(src + 1);
-			INFO("u2->iu4\n");
+			DBG("u2->iu4\n");
 			return;
 		case 6:
 		case 7: *(int32_t*)(dst + 1) = *(int32_t*)(src + 1);
 			return;
 		}
-		DOOM("invalid i4 value copy from type_%d", *src);
+		ASSERT_LANG(0, "invalid i4 value copy from type_%d", *src);
 
 	case 8:
 		if (*src == 8)
@@ -643,7 +655,7 @@ void copy_val(uchar* dst, uchar* src)
 		}
 		else
 		{
-			DOOM("invalid r4 value copy from type_%d", *src);
+			ASSERT_LANG(0, "invalid r4 value copy from type_%d", *src);
 		}
 	case ReferenceID:
 		switch (*src)
@@ -652,7 +664,7 @@ void copy_val(uchar* dst, uchar* src)
 			*(int32_t*)(dst + 1) = *(int32_t*)(src + 1);
 			return;
 		case JumpAddress:
-			INFO("case of copy from JMP to REFID\n");
+			DBG("case of copy from JMP to REFID\n");
 			// store a struct to heap object. ok, we create copy the object
 			struct object_val* obj_src = TypedAddrAsValPtr(src);
 			int refid = newobj(obj_src->clsid);
@@ -661,23 +673,23 @@ void copy_val(uchar* dst, uchar* src)
 			As(dst + 1, int) = refid;
 			return;
 		}
-		DOOM("invalid ref value copy from type_%d", *src);
+		ASSERT_LANG(0, "invalid ref value copy from type_%d", *src);
 	case JumpAddress:
 		struct object_val* obj_dst = TypedAddrAsValPtr(dst);
 		struct object_val* obj_src = 0;
 		switch (*src)
 		{
 		case ReferenceID:
-			INFO("case of copy from RefID to JMP\n");
+			DBG("case of copy from RefID to JMP\n");
 			int ref_id = As(src + 1, int);
-			if (ref_id == 0) DOOM("copy error: copy nullptr to struct?")
+			ASSERT_RT(ref_id != 0, "Null reference assignment");
 				obj_src = heap_obj[ref_id].pointer;
 			break;
 		case JumpAddress:
 			obj_src = TypedAddrAsValPtr(src);
 			break;
 		default:
-			DOOM("invalid struct ja value copy from type_%d", *src);
+			ASSERT_LANG(0, "invalid struct ja value copy from type_%d", *src);
 		}
 		memcpy(obj_dst, obj_src, instanceable_class_layout_ptr[obj_src->clsid].tot_size + ObjectHeaderSize);
 		return;
@@ -687,21 +699,20 @@ void copy_val(uchar* dst, uchar* src)
 		*(dst + 5) = *(src + 5);
 		return;
 	default:
-		DOOM("invalid copy dst type_%d", *dst);
+		ASSERT_LANG(0, "invalid copy dst type_%d", *dst);
 	}
 }
 
 
 void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 {
-	if (method_id >= methods_N)
-		DOOM("Bad method id_%d>%d\n", method_id, methods_N);
+	ASSERT_LANG(method_id < methods_N, "Bad method id_%d>%d", method_id, methods_N);
 
 	int my_stack_depth = new_stack_depth;
 	new_stack_depth += 1;
 	struct stack_frame_header* my_stack = my_stack_depth == 0 ? stack0 : stack_ptr[my_stack_depth - 1]->evaluation_pointer;
 	stack_ptr[my_stack_depth] = my_stack;
-	WARN("vm_push_stack: method=%d depth=%d new_obj=%d\n", method_id, my_stack_depth, new_obj_id);
+	DBG("vm_push_stack: method=%d depth=%d new_obj=%d\n", method_id, my_stack_depth, new_obj_id);
 	uchar* st_ptr = method_detail_pointer + methods_table[method_id].code_offset;
 	*my_stack = (struct stack_frame_header){
 		.method_id = method_id,
@@ -720,7 +731,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 	// put args:
 	my_stack->args = sptr;
 	short n_args = ReadShort;
-	WARN("vm_push_stack: method=%d n_args=%d\n", method_id, n_args);
+	DBG("vm_push_stack: method=%d n_args=%d\n", method_id, n_args);
 
 	short cls_id[16];
 	uchar* auxptr[16];
@@ -736,7 +747,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 		short aux1 = ReadShort;
 		if (typeid0 != 16 || typeid1 != 6 || n_args != 2)
 		{
-			DOOM("Entry Method must be 'void Operation(int i);\n");
+			ASSERT_LANG(0, "Entry Method must be 'void Operation(int i)'");
 		}
 		//reference_id = 1. if it's the root method, `this` is always obj1.
 		*sptr = ReferenceID; As(sptr + 1, int) = ladderlogic_this_refid; sptr += 1 + get_type_sz(ReferenceID);
@@ -752,8 +763,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			eptr -= STACK_STRIDE;
 			if (eptr < caller_stack->evaluation_st_ptr)
 			{
-				WARN("vm_push_stack underflow: method=%d n_args=%d i=%d caller_depth=%d eval_ptr=%p st_ptr=%p\n", method_id, n_args, i, my_stack_depth, (void*)eptr, (void*)caller_stack->evaluation_st_ptr);
-				DOOM("POP exceeds range!");
+				ASSERT_LANG(0, "vm_push_stack underflow: method=%d n_args=%d i=%d caller_depth=%d eval_ptr=%p st_ptr=%p\n", method_id, n_args, i, my_stack_depth, (void*)eptr, (void*)caller_stack->evaluation_st_ptr);
 			}
 		}
 
@@ -763,8 +773,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 		{
 			uchar this_typeid = ReadByte;
 			short aux = ReadShort;
-			DIEIF(this_typeid != ReferenceID)
-				DOOM("newobj call but this pointer is %d\n", this_typeid);
+			ASSERT_LANG(this_typeid == ReferenceID, "newobj call but this pointer is %d", this_typeid);
 			*sptr = ReferenceID;
 			As(sptr + 1, int) = new_obj_id;
 			sptr += get_val_sz(ReferenceID);
@@ -776,7 +785,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			short aux = ReadShort;
 			uchar sz = get_val_sz(typeid);
 			if (typeid == JumpAddress) {
-				if (aux == -1) DOOM("jump address but bad instantiate class");
+				ASSERT_LANG(aux != -1, "jump address but bad instantiate class");
 				cls_id[aux_init] = aux;
 				auxptr[aux_init] = sptr;
 				if (*septr == ReferenceID)
@@ -785,7 +794,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				}
 				else
 				{
-					DOOM("not supported arg push for jumpaddress from type_%d", *septr);
+					ASSERT_LANG(0, "not supported arg push for jumpaddress from type_%d", *septr);
 				}
 				sptr[0] = JumpAddress;
 				sptr += sz;
@@ -813,7 +822,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 		uchar typeid = ReadByte;
 		short aux = ReadShort;
 		if (typeid == JumpAddress) {
-			if (aux == -1) DOOM("jump address but bad instantiate class");
+			ASSERT_LANG(aux != -1, "jump address but bad instantiate class");
 			cls_id[aux_init] = aux;
 			auxptr[aux_init] = sptr;
 			cpy_obj_id[aux_init] = 0; // no copy, just init.
@@ -837,7 +846,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 		if (cpy_obj_id[i] > 0)
 		{
 			struct object_val* obj_ptr = heap_obj[cpy_obj_id[i]].pointer;
-			if (obj_ptr->clsid != clsid) DOOM("copy from bad class_%d, expected cls_%d", obj_ptr->clsid, clsid);
+			ASSERT_LANG(obj_ptr->clsid == clsid, "copy from bad class_%d, expected cls_%d", obj_ptr->clsid, clsid);
 			memcpy(&my_ptr->payload, &obj_ptr->payload, instanceable_class_layout_ptr[clsid].tot_size);
 			DBG("struct copy init (cls_%d) on %d from obj_%d\n", clsid, i, cpy_obj_id[i]);
 		}
@@ -869,7 +878,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 		uchar ic = ReadByte;
 		il_cnt += 1;
 
-		DBG("ic=%X (%d): ", ic, il_cnt);
+		DBG("ic=%X(%d,off%d): ", ic, il_cnt, cur_il_offset);
 
 		switch (ic)
 		{
@@ -992,7 +1001,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			{
 				uchar elem_typeid = ReadByte;
 				POP;
-				if (*eptr != Int32) DOOM("Stack value is not int32 for IL_Newarr...");
+				ASSERT_LANG(*eptr == Int32, "Stack value is not int32 for IL_Newarr");
 				int len = As(eptr + 1, int);
 
 				int id = newarr(len, elem_typeid);
@@ -1079,7 +1088,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			short offset = ReadShort;
 			POP;
 			uchar* val1p = eptr;
-			DIEIF(!(*val1p <= 7 || *val1p == ReferenceID)) DOOM("not supported branch operand type");
+			ASSERT_LANG(*val1p <= 7 || *val1p == ReferenceID, "not supported branch operand type");
 			uchar val1 = eptr[1];
 			int condition;
 			switch (ic)
@@ -1091,7 +1100,6 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			case 0x36: condition = (val1 != 0);
 				break; // Brtrue
 			}
-			WARN("branch op=0x%02X val_type=%d val_raw=%d cond=%d offset=%d\n", ic, *val1p, As(val1p + 1, int), condition, offset);
 			if (condition)
 			{
 				ptr = my_stack->entry_il + offset;
@@ -1140,8 +1148,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			uchar* val2p = eptr;
 			POP;
 			uchar* val1p = eptr;
-			DIEIF(*val2p != *val1p)
-				DOOM("comparison operands not same type?");
+			ASSERT_LANG(*val2p == *val1p, "comparison operands not same type");
 
 			switch (*val1p)
 			{
@@ -1168,7 +1175,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				fval1 = As(&val1, float);
 				break;
 			default:
-				DOOM("Unsupported type for comparison\n");
+				ASSERT_LANG(0, "Unsupported type for comparison");
 			}
 
 			switch (ic) //?
@@ -1225,11 +1232,8 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			uchar typeid = ReadByte;
 			// POP
 			POP;
-			DIEIF(*eptr != Address)
-				DOOM("IL_Ldind as typeid: %d, but stack is %d not address.\n", typeid, *eptr);
-
-			DIEIF(TypedAddrGetType(eptr) != typeid)
-				DOOM("Ldind bad type, required %d, address refers to %d", typeid, TypedAddrGetType(eptr));
+			ASSERT_LANG(*eptr == Address, "IL_Ldind as typeid: %d, but stack is %d not address", typeid, *eptr);
+			ASSERT_LANG(TypedAddrGetType(eptr) == typeid, "Ldind bad type, required %d, address refers to %d", typeid, TypedAddrGetType(eptr));
 
 			uchar* valaddr = TypedAddrAsValPtr(eptr);
 			*eptr = typeid;
@@ -1252,13 +1256,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			// POP address
 			POP;
 
-			DIEIF(*eptr != Address)
-			{
-				DOOM("IL_Stind as typeid: %d, but stack is %d not address.\n", typeid, *eptr);
-			}
-
-			// DIEIF(TypedAddrGetType(eptr) != typeid)
-			// 	DOOM("Stind bad type, store as %d, target %d", typeid, TypedAddrGetType(eptr));
+			ASSERT_LANG(*eptr == Address, "IL_Stind as typeid: %d, but stack is %d not address", typeid, *eptr);
 
 			uchar* valaddr = TypedAddrAsValPtr(eptr);
 			CPYVAL(valaddr, value + 1, typeid);
@@ -1303,7 +1301,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				fval1 = *(float*)(ptr1 + 1);
 				ctype1 = 1;
 				break; // single
-			default: DOOM("unrecognized.");
+			default: ASSERT_LANG(0, "unrecognized type");
 			}
 
 			switch (typeid2)
@@ -1325,13 +1323,12 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				fval2 = *(float*)(ptr2 + 1);
 				ctype2 = 1;
 				break; // single
-			default: DOOM("unrecognized.");
+			default: ASSERT_LANG(0, "unrecognized type");
 			}
 
 			// if (typeid1<8 )
-			DIEIF(ctype1 != ctype2)
-			{
-				DOOM("Type mismatch in arithmetic operation\n");
+			ASSERT_LANG(ctype1 == ctype2, "Type mismatch in arithmetic operation");
+			if (ctype1 != ctype2) {
 				break;
 			}
 
@@ -1370,7 +1367,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 					break;
 				case 0x6C: result = (int)((unsigned int)a >> b);
 					break;
-				default: DOOM("Unsupported operation for Int32\n");
+				default: ASSERT_LANG(0, "Unsupported operation for Int32");
 					return;
 				}
 				DBG
@@ -1393,7 +1390,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 					break;
 				case 0x63: result = a / b;
 					break;
-				default: DOOM("Unsupported operation for Single\n");
+				default: ASSERT_LANG(0, "Unsupported operation for Single");
 					return;
 				}
 				DBG
@@ -1403,7 +1400,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				break;
 			}
 			default:
-				DOOM("Unsupported type for arithmetic operation typeid=%d\n", typeid1);
+				ASSERT_LANG(0, "Unsupported type for arithmetic operation typeid=%d", typeid1);
 				break;
 			}
 			break;
@@ -1428,7 +1425,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				break;
 			}
 			default:
-				DOOM("Unsupported type for neg operation typeid=%d\n", typeid);
+				ASSERT_LANG(0, "Unsupported type for neg operation typeid=%d", typeid);
 				break;
 			}
 			DBG
@@ -1440,7 +1437,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 		{
 			POP;
 			uchar typeid = *eptr;
-			DIEIF(typeid != Int32) { DOOM("Unsupported type for not operation typeid=%d\n", typeid); }
+			ASSERT_LANG(typeid == Int32, "Unsupported type for not operation typeid=%d", typeid);
 
 			PUSH_STACK_INT((~*(int*)(eptr + 1)));
 			DBG("IL_Not operation\n");
@@ -1466,7 +1463,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				float f_value = *(float*)(&tvalue);
 				value = f_value;
 				break;
-			default: DOOM("Unsupported conversion to SByte\n");
+			default: ASSERT_LANG(0, "Unsupported conversion to SByte");
 			}
 			PUSH_STACK_INT8(value);
 			DBG
@@ -1493,7 +1490,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				float f_value = *(float*)(&tvalue);
 				value = f_value;
 				break;
-			default: DOOM("Unsupported conversion to Byte\n");
+			default: ASSERT_LANG(0, "Unsupported conversion to Byte");
 			}
 			PUSH_STACK_UINT8(value);
 			DBG
@@ -1521,7 +1518,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				float f_value = *(float*)(&tvalue);
 				value = f_value;
 				break;
-			default: DOOM("Unsupported conversion to Int16\n");
+			default: ASSERT_LANG(0, "Unsupported conversion to Int16");
 			}
 			PUSH_STACK_INT16(value);
 			DBG
@@ -1549,7 +1546,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				float f_value = *(float*)(&tvalue);
 				value = f_value;
 				break;
-			default: DOOM("Unsupported conversion to UInt16\n");
+			default: ASSERT_LANG(0, "Unsupported conversion to UInt16");
 			}
 			PUSH_STACK_UINT16(value);
 			DBG
@@ -1578,7 +1575,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				float f_value = *(float*)(&tvalue);
 				value = f_value;
 				break;
-			default: DOOM("Unsupported conversion to Int32\n");
+			default: ASSERT_LANG(0, "Unsupported conversion to Int32");
 			}
 			PUSH_STACK_INT(value);
 			DBG
@@ -1607,7 +1604,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				float f_value = *(float*)(&tvalue);
 				value = f_value;
 				break;
-			default: DOOM("Unsupported conversion to UInt32\n");
+			default: ASSERT_LANG(0, "Unsupported conversion to UInt32");
 			}
 			PUSH_STACK_UINT(value);
 			DBG
@@ -1636,7 +1633,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				break;
 			case Single: value = *(float*)(&tmp);
 				break;
-			default: DOOM("Unsupported conversion to Single\n");
+			default: ASSERT_LANG(0, "Unsupported conversion to Single");
 			}
 			PUSH_STACK_FLOAT_D(value);
 			DBG
@@ -1657,7 +1654,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				break;
 			case UInt32: value = (float)*(unsigned int*)(tmp);
 				break;
-			default: DOOM("Unsupported unsigned conversion to Single\n");
+			default: ASSERT_LANG(0, "Unsupported unsigned conversion to Single");
 			}
 			PUSH_STACK_FLOAT_D(value);
 			DBG
@@ -1706,14 +1703,14 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				}
 				else
 				{
-					DOOM("Error: Invalid builtin method ID: %d\n", method_id);
+					ASSERT_LANG(0, "Error: Invalid builtin method ID: %d", method_id);
 				}
 				mtype = "builtin";
 				builtin_arg0 = 0;
 			}
 			else
 			{
-				DOOM("Error: Unknown constructor type: %d\n", op_type);
+				ASSERT_LANG(0, "Error: Unknown constructor type: %d", op_type);
 			}
 
 			// Push object reference onto stack
@@ -1731,7 +1728,6 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			uchar type = ReadByte;
 			short offset = ReadShort;
 			short aux = ReadShort;
-			WARN("fld op=%02X type=%d offset=%d aux=%d\n", ic, type, offset, aux);
 
 			uchar is_static = type & 1;
 			uchar is_cart_io = type & 2;
@@ -1798,9 +1794,6 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			else
 			{
 				uchar* valptr = 0;
-				WARN("fld-pre: top0_type=%d top1_type=%d\n",
-					(eptr > my_stack->evaluation_st_ptr) ? *(eptr - STACK_STRIDE) : -1,
-					(eptr > my_stack->evaluation_st_ptr + STACK_STRIDE) ? *(eptr - 2 * STACK_STRIDE) : -1);
 				if (ic == 0x7D)
 				{
 					POP;
@@ -1814,14 +1807,11 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				{
 					uchar* refval = TypedAddrAsValPtr(eptr);
 					uchar atype = TypedAddrGetType(eptr);
-					WARN("  stfld addr atype=%d refval_off=%d\n", (int)atype, As(refval, int));
 					if (atype == ReferenceID)
 					{
 						ref_id = As(refval, int);
-						DBG
-						("ldfld from address found obj_%d ", ref_id);
-						if (ref_id == 0)
-							DOOM("ldfld of nullpointer");
+						DBG("ldfld from address found obj_%d ", ref_id);
+						ASSERT_RT(ref_id != 0, "Null reference");
 						obj = heap_obj[ref_id].pointer;
 					}
 					else if (atype == JumpAddress) // this is another jump.
@@ -1836,20 +1826,18 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				else if (*eptr == ReferenceID)
 				{
 					ref_id = As(eptr + 1, int);
-					if (ref_id == 0)
-						DOOM("ldfld of nullpointer");
+					ASSERT_RT(ref_id != 0, "Null reference");
 					obj = heap_obj[ref_id].pointer;
 				}
 				else
-					DOOM("IL_Field requires Reference ID!\n");
+					ASSERT_LANG(0, "IL_Field requires Reference ID");
 
                 short actual_clsid = obj->clsid;
                 short expected_clsid = aux;
-                WARN("  fld obj: ref=%d actual_cls=%d expected_cls=%d offset=%d size(actual)=%d\n", ref_id, actual_clsid, expected_clsid, offset, instanceable_class_layout_ptr[actual_clsid].tot_size);
                 // Allow accessing base class fields on derived instances; just bounds-check against the actual class layout.
                 if (actual_clsid < 0 || actual_clsid >= instanceable_class_N)
                 {
-                    DOOM("Object class id out of range (actual=%d, total=%d)\n", actual_clsid, instanceable_class_N);
+                    ASSERT_LANG(0, "Object class id out of range (actual=%d, total=%d)", actual_clsid, instanceable_class_N);
                 }
                 if (offset >= instanceable_class_layout_ptr[actual_clsid].tot_size)
                 {
@@ -1864,7 +1852,6 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
                             struct object_val* this_obj = heap_obj[this_ref].pointer;
                             if (this_obj && this_obj->clsid == expected_clsid)
                             {
-                                WARN("Redirect stfld to method 'this': ref %d (cls %d) for expected cls %d\n", this_ref, this_obj->clsid, expected_clsid);
                                 obj = this_obj;
                                 actual_clsid = expected_clsid;
                             }
@@ -1872,7 +1859,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
                     }
                     if (offset >= instanceable_class_layout_ptr[actual_clsid].tot_size)
                     {
-                        DOOM("Field offset %d outside class %d size %d\n", offset, actual_clsid, instanceable_class_layout_ptr[actual_clsid].tot_size);
+                        ASSERT_LANG(0, "Field offset %d outside class %d size %d", offset, actual_clsid, instanceable_class_layout_ptr[actual_clsid].tot_size);
                     }
                 }
 
@@ -1887,9 +1874,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 					if (ic == 0x7B)
 					{
 						PUSH_STACK_INDIRECT(field_ptr);
-						WARN("ldfld inst push type=%d ref=%d obj=%d cls=%d ofs=%d\n", *field_ptr, As(field_ptr + 1, int), ref_id, aux, offset);
-						DBG
-						("ldfld from %d(cls:%d, ofst:%d), type_%d\n", ref_id, aux, offset, *field_ptr);
+						DBG("ldfld from %d(cls:%d, ofst:%d), type_%d\n", ref_id, aux, offset, *field_ptr);
 					}
 					else if (ic == 0x7C)
 					{
@@ -1900,7 +1885,6 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				else if (ic == 0x7D)
 				{
 					// Stfld
-					WARN("stfld: ref_id=%d actual_cls=%d expected_cls=%d offset=%d dst_type=%d src_type=%d\n", ref_id, actual_clsid, expected_clsid, offset, *field_ptr, *valptr);
 					copy_val(field_ptr, valptr); //actually eptr
 				}
 			}
@@ -1911,15 +1895,11 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 		case 0x8E: // Ldlen
 		{
 			POP;
-			DIEIF(*eptr != ReferenceID)
-			{
-				DOOM("Ldlen: Expected array reference\n");
-			}
+			ASSERT_LANG(*eptr == ReferenceID, "Ldlen: Expected array reference");
 			int arr_id = As(eptr + 1, int);
-			if (arr_id == 0)
-				DOOM("ldlen on nullpointer");
+			ASSERT_RT(arr_id != 0, "Null reference");
 			struct array_val* arr = heap_obj[arr_id].pointer;
-			DIEIF(arr->header != ArrayHeader) DOOM("obj_%d is not a array\n", arr_id);
+			ASSERT_LANG(arr->header == ArrayHeader, "obj_%d is not an array", arr_id);
 			PUSH_STACK_INT(arr->len);
 			DBG
 			("IL_Ldlen obj_%d => %d elements of %d\n", arr_id, arr->len, arr->typeid);
@@ -1931,19 +1911,12 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			POP; // index
 			int index = As(eptr + 1, int);
 			POP; // array reference
-			DIEIF(*eptr != ReferenceID)
-			{
-				DOOM("Ldelema: Expected array reference\n");
-			}
+			ASSERT_LANG(*eptr == ReferenceID, "Ldelema: Expected array reference");
 			int arr_id = As(eptr + 1, int);
-			if (arr_id == 0)
-				DOOM("ldlen on nullpointer");
+			ASSERT_RT(arr_id != 0, "Null reference");
 			struct array_val* arr = heap_obj[arr_id].pointer;
-			DIEIF(arr->header != ArrayHeader) DOOM("obj_%d is not a array\n", arr_id);
-			if (index < 0 || index >= arr->len)
-			{
-				DOOM("Ldelema: Index out of range\n");
-			}
+			ASSERT_LANG(arr->header == ArrayHeader, "obj_%d is not an array", arr_id);
+			ASSERT_RT(index >= 0 && index < arr->len, "Array index out of range: %d/%d", index, arr->len);
 			int elem_size = get_type_sz(arr->typeid);
 			uchar* elem_addr = &arr->payload + elem_size * index;
 
@@ -1966,23 +1939,13 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			POP; // index
 			int index = As(eptr + 1, int);
 			POP; // array reference
-			DIEIF(*eptr != ReferenceID)
-			{
-				DOOM("Ldelem: Expected array reference\n");
-			}
+			ASSERT_LANG(*eptr == ReferenceID, "Ldelem: Expected array reference");
 			int arr_id = As(eptr + 1, int);
-			if (arr_id == 0)
-				DOOM("ldelem on nullpointer");
+			ASSERT_RT(arr_id != 0, "Null reference");
 			struct array_val* arr = heap_obj[arr_id].pointer;
-			DIEIF(arr->header != ArrayHeader) DOOM("obj_%d is not a array\n", arr_id);
-			if (index < 0 || index >= arr->len)
-			{
-				DOOM("Ldelem: Index out of range\n");
-			}
-			DIEIF(arr->typeid != typeid)
-			{
-				DOOM("Ldelem: Type mismatch\n");
-			}
+			ASSERT_LANG(arr->header == ArrayHeader, "obj_%d is not an array", arr_id);
+			ASSERT_RT(index >= 0 && index < arr->len, "Array index out of range: %d/%d", index, arr->len);
+			ASSERT_LANG(arr->typeid == typeid, "Ldelem: Type mismatch");
 			int elem_size = get_type_sz(typeid);
 			uchar* elem_addr = &arr->payload + (elem_size)*index;
 
@@ -2004,21 +1967,12 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			POP; // index
 			int index = As(eptr + 1, int);
 			POP; // array reference
-			DIEIF(*eptr != ReferenceID)
-			{
-				DOOM("Stelem: Expected array reference\n");
-			}
+			ASSERT_LANG(*eptr == ReferenceID, "Stelem: Expected array reference");
 			int arr_id = As(eptr + 1, int);
-			if (arr_id == 0)
-				DOOM("stelem on nullpointer");
+			ASSERT_RT(arr_id != 0, "Null reference");
 			struct array_val* arr = heap_obj[arr_id].pointer;
-			DIEIF(arr->header != ArrayHeader) DOOM("obj_%d is not a array\n", arr_id);
-			// if (*value != typeid)
-			//     DOOM("stelem: expected typeid_%d, get:{%d}", typeid, *value);
-			if (index < 0 || index >= arr->len)
-			{
-				DOOM("Stelem: Index out of range\n");
-			}
+			ASSERT_LANG(arr->header == ArrayHeader, "obj_%d is not an array", arr_id);
+			ASSERT_RT(index >= 0 && index < arr->len, "Array index out of range: %d/%d", index, arr->len);
 
 			int elem_size = get_type_sz(arr->typeid);
 			uchar* elem_addr = &arr->payload + elem_size * index;
@@ -2030,7 +1984,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			else
 			{
 				if(arr->typeid != typeid) 
-					INFO("array_%d is type %d but stelem as %d\n", arr_id, arr->typeid, typeid);
+					DBG("array_%d is type %d but stelem as %d\n", arr_id, arr->typeid, typeid);
 				CPYVAL(elem_addr, value+1, arr->typeid)
 			}
 
@@ -2053,21 +2007,19 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			uchar* ptr = virt_table + *((short*)(virt_ptr + 2) + vmethod_id);
 			uchar ncls = *ptr;
 			uchar paramCnt = *(ptr + 1);
-			WARN("callvirt abstract: ncls=%d paramCnt=%d stackDepth=%d\n", ncls, paramCnt, my_stack->stack_depth);
+			DBG("callvirt abstract: ncls=%d paramCnt=%d stackDepth=%d\n", ncls, paramCnt, my_stack->stack_depth);
 			uchar* o_eptr = eptr;
 			for (int i = 0; i < paramCnt; ++i)
 				POP;
 
 			POP;
-			DIEIF(*eptr != ReferenceID) DOOM("this pointer should be reference id!");
+			ASSERT_LANG(*eptr == ReferenceID, "this pointer should be reference id");
 			int instance_ref = As(eptr + 1, int);
 
-			if (instance_ref == 0)
-				DOOM("callvirt on nullpointer");
+			ASSERT_RT(instance_ref != 0, "Null reference");
 			// Get the object from the heap
 			struct object_val* obj = (struct object_val*)heap_obj[instance_ref].pointer;
-			DIEIF(obj->header != ObjectHeader)
-				DOOM("this is not a object header?");
+			ASSERT_LANG(obj->header == ObjectHeader, "this is not an object header");
 			struct
 			{
 				short clsid;
@@ -2080,7 +2032,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 					goto actual_method_id_initialization_finish;
 				}
 
-			DOOM("Cannot find vmethod %d for type %d\n", vmethod_id, obj->clsid);
+			ASSERT_LANG(0, "Cannot find vmethod %d for type %d", vmethod_id, obj->clsid);
 		actual_method_id_initialization_finish:
 
 			eptr = o_eptr;
@@ -2137,11 +2089,11 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			("IL_Callvirt instanced\n");
 			if (eptr <= my_stack->evaluation_st_ptr)
 			{
-				WARN("callvirt: stack empty before dispatch (method=%d depth=%d)\n", my_stack->method_id, my_stack->stack_depth);
+				DBG("callvirt: stack empty before dispatch (method=%d depth=%d)\n", my_stack->method_id, my_stack->stack_depth);
 			}
 			else
 			{
-				WARN("callvirt: stack top type=%d ref=%d\n", (int)*(eptr - STACK_STRIDE), As(eptr - STACK_STRIDE + 1, int));
+				DBG("callvirt: stack top type=%d ref=%d\n", (int)*(eptr - STACK_STRIDE), As(eptr - STACK_STRIDE + 1, int));
 			}
 			ic = ReadByte;
 			switch (ic)
@@ -2166,7 +2118,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				}
 				else
 				{
-					DOOM("Invalid built-in method ID: %d\n", method_id);
+					ASSERT_LANG(0, "Invalid built-in method ID: %d", method_id);
 				}
 				break;
 			}
@@ -2194,7 +2146,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			}
 			else
 			{
-				DOOM("Invalid built-in method ID: %d\n", method_id);
+				ASSERT_LANG(0, "Invalid built-in method ID: %d", method_id);
 			}
 			break;
 		}
@@ -2279,7 +2231,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				case 0xE5: result = (fv1 < fv2);
 					break;
 				default:
-					DOOM("bad comparison op_%d for single\n", ic);
+					ASSERT_LANG(0, "bad comparison op_%d for single", ic);
 				}
 			}
 
@@ -2296,8 +2248,8 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			POP;
 			uchar typeid = *eptr;
 
-			DIEIF(typeid != 6)
-				DOOM("IL_Switch requires int, actual=%d\n", typeid);
+			ASSERT_LANG(typeid == 6, "IL_Switch requires int, actual=%d", typeid);
+
 			unsigned int jmp = As(eptr + 1, int);
 			if (jmp < n)
 			{
@@ -2315,10 +2267,10 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			break;
 		}
 		default:
-			DOOM("Unknown instruction: 0x%02X\n", ic);
+			ASSERT_LANG(0, "Unknown instruction: 0x%02X", ic);
 		}
 
-		DIEIF(ptr >= virt_ptr) DOOM("bad program counter!");
+		ASSERT_LANG(ptr < virt_ptr, "bad program counter");
 		my_stack->PC = ptr; // Update program counter
 		my_stack->evaluation_pointer = eptr;
 
@@ -2336,10 +2288,9 @@ void reset_cart_IO_stored() {
 // Helper function to mark and traverse objects
 void mark_object(int obj_id)
 {
-	if (obj_id < 0 || obj_id >= heap_newobj_id)
-		DOOM("invalid reference id?\n")
-		if (obj_id == 0 || heap_obj[obj_id].new_id != -1)
-			return;
+	ASSERT_LANG(obj_id >= 0 && obj_id < heap_newobj_id, "invalid reference id %d", obj_id);
+	if (obj_id == 0 || heap_obj[obj_id].new_id != -1)
+		return;
 
 	heap_obj[obj_id].new_id = -2; // Mark as visited
 
@@ -2372,7 +2323,7 @@ void mark_object(int obj_id)
 			for (int j = 0; j < *ftype; ++j)
 			{
 				int typeid = ftype[j + 1];
-				if (typeid != *ptr) DOOM("bad builtin_cls %d on obj_%d", b_clsid, obj_id);
+				ASSERT_LANG(typeid == *ptr, "bad builtin_cls %d on obj_%d", b_clsid, obj_id);
 				if (typeid == ReferenceID)
 				{
 					int* ref_id_ptr = ptr + 1;
@@ -2449,8 +2400,7 @@ void clean_up()
 			uchar typeid = *ptr_s;
 			if (typeid == ReferenceID) {
 				int* ref = ptr_s + 1;
-				if (*ref >= heap_newobj_id)
-					DOOM("WTF?");
+				ASSERT_LANG(*ref < heap_newobj_id, "Invalid reference %d >= %d", *ref, heap_newobj_id);
 				if (*ref > 0)
 					*ref = heap_obj[*ref].new_id;
 			}
@@ -2538,8 +2488,7 @@ void clean_up()
 	for (int i = 1; i < heap_newobj_id; ++i)
 	{
 		uchar* header = heap_obj[i].pointer;
-		if (*header != ArrayHeader && *header != ObjectHeader && *header != StringHeader)
-			DOOM("bad heap header! header=%d?", *header);
+		ASSERT_LANG(*header == ArrayHeader || *header == ObjectHeader || *header == StringHeader, "bad heap header! header=%d", *header);
 	}
 
 	// Compact heap
@@ -2576,8 +2525,7 @@ void clean_up()
 	for (int i = 1; i < heap_newobj_id; ++i)
 	{
 		uchar* header = heap_obj[i].pointer;
-		if (*header != ArrayHeader && *header != ObjectHeader && *header != StringHeader)
-			DOOM("bad heap header! header=%d?", *header);
+		ASSERT_LANG(*header == ArrayHeader || *header == ObjectHeader || *header == StringHeader, "bad heap header! header=%d", *header);
 	}
 }
 
@@ -2586,8 +2534,7 @@ void vm_sort_slots();
 
 void vm_run(int iteration)
 {
-	if (snapshot_state == 0)
-		DOOM("Must update machine snapshot state before new iteration.");
+	ASSERT_LANG(snapshot_state != 0, "Must update machine snapshot state before new iteration");
 
 	// swap buffer.
 	enter_critical();
@@ -2628,8 +2575,7 @@ void vm_put_upper_memory(uchar* buffer, int size)
 
 	for (int cid = 0; cid < cartIO_N; ++cid)
 	{
-		if (ptr >= end)
-			DOOM("upper buffer truncated at field %d", cid);
+		ASSERT_RT(ptr < end, "upper buffer truncated at field %d", cid);
 		uchar* field_ptr = statics_val_ptr + cartIO_layout_ptr[cid];
 		uchar expected_tid = *field_ptr;
 		uchar token = *ptr; ptr += 1;
@@ -2656,9 +2602,9 @@ void vm_put_upper_memory(uchar* buffer, int size)
 				int arr_len = As(ptr, int); ptr += 4;
 				if (!(elem_tid == Boolean || elem_tid == Byte || elem_tid == SByte || elem_tid == 3 ||
 					elem_tid == Int16 || elem_tid == UInt16 || elem_tid == Int32 || elem_tid == UInt32 || elem_tid == Single))
-					DOOM("upper put: array element type %d not allowed", elem_tid);
+					ASSERT_LANG(0, "upper put: array element type %d not allowed", elem_tid);
 				int elem_sz = get_type_sz(elem_tid);
-				if (ptr + elem_sz * arr_len > end) DOOM("upper buffer array payload overflow");
+				ASSERT_RT(ptr + elem_sz * arr_len <= end, "upper buffer array payload overflow");
 				int rid = newarr((short)arr_len, elem_tid);
 				struct array_val* arr = heap_obj[rid].pointer;
 				memcpy(&arr->payload, ptr, elem_sz * arr_len);
@@ -2668,29 +2614,26 @@ void vm_put_upper_memory(uchar* buffer, int size)
 			}
 			else
 			{
-				DOOM("upper put: expected ReferenceID payload (string/array/ref), got token %d", token);
+				ASSERT_LANG(0, "upper put: expected ReferenceID payload (string/array/ref), got token %d", token);
 			}
 		}
 		else
 		{
-			if (token != expected_tid)
-				DOOM("put cart_io:%d expected type %d, recv:%d\n", cid, expected_tid, token);
+			ASSERT_LANG(token == expected_tid, "put cart_io:%d expected type %d, recv:%d", cid, expected_tid, token);
 			int sz = get_type_sz(expected_tid);
-			if (ptr + sz > end) DOOM("upper buffer primitive overflow");
+			ASSERT_RT(ptr + sz <= end, "upper buffer primitive overflow");
 			memcpy(field_ptr + 1, ptr, sz);
 			ptr += sz;
 		}
 	}
 
-	if (ptr != end)
-		DOOM("upper buffer size mismatch: leftover %d bytes", (int)(end - ptr));
+	ASSERT_RT(ptr == end, "upper buffer size mismatch: leftover %d bytes", (int)(end - ptr));
 }
 
 int lowerUploadSz;
 uchar* vm_get_lower_memory()
 {
-	if (new_stack_depth != 0)
-		DOOM("Must perform get_lower_memory after VM execution!");
+	ASSERT_LANG(new_stack_depth == 0, "Must perform get_lower_memory after VM execution");
 	uchar* lowerUpload = stack0;
 	uchar* lptr = lowerUpload;
 
@@ -2726,7 +2669,7 @@ uchar* vm_get_lower_memory()
 				uchar elem_tid = arr->typeid;
 				if (!(elem_tid == Boolean || elem_tid == Byte || elem_tid == SByte || elem_tid == 3 ||
 					elem_tid == Int16 || elem_tid == UInt16 || elem_tid == Int32 || elem_tid == UInt32 || elem_tid == Single))
-					DOOM("lower get: array element type %d not allowed", elem_tid);
+					ASSERT_LANG(0, "lower get: array element type %d not allowed", elem_tid);
 				*lptr = ArrayHeader; lptr += 1;
 				*lptr = elem_tid; lptr += 1;
 				As(lptr, int) = arr->len; lptr += 4;
@@ -2736,7 +2679,7 @@ uchar* vm_get_lower_memory()
 			}
 			else
 			{
-				DOOM("lower get: ReferenceID points to unsupported header %d", *header);
+				ASSERT_LANG(0, "lower get: ReferenceID points to unsupported header %d", *header);
 			}
 		}
 		else
@@ -2761,12 +2704,10 @@ void vm_put_buffer(uchar* buffer, int size, uchar type, int aux0, int aux1)
 {
 	enter_critical();
 	int myslot = writing_buf->N_slots;
-	if (myslot >= SLOT_NUMBER)
-		DOOM("device IO buffer slots overflown!");
+	ASSERT_RT(myslot < SLOT_NUMBER, "device IO buffer slots overflown");
 	writing_buf->N_slots += 1;
 	int myoffset = writing_buf->offset;
-	if (writing_buf->offset + size > BUF_SZ)
-		DOOM("device IO buffer size overflown!");
+	ASSERT_RT(writing_buf->offset + size <= BUF_SZ, "device IO buffer size overflown");
 	writing_buf->offset += size;
 	leave_critical();
 
@@ -2852,18 +2793,18 @@ void vm_sort_slots() {
 
 
 // PUSH
-#define PUSH_STACK_INT8(val) **reptr = SByte; As(*reptr + 1, int) = val; *reptr+=8;
-#define PUSH_STACK_UINT8(val) **reptr = Byte; As(*reptr + 1, int) = val; *reptr+=8;
-#define PUSH_STACK_INT16(val) **reptr = Int16; As(*reptr + 1, int) = val; *reptr+=8;
-#define PUSH_STACK_UINT16(val) **reptr = UInt16; As(*reptr + 1, int) = val; *reptr+=8;
-#define PUSH_STACK_INT(val) **reptr = Int32; As(*reptr + 1, int) = val; *reptr+=8;
-#define PUSH_STACK_UINT(val) **reptr = UInt32; As(*reptr + 1, int) = val; *reptr+=8;
-#define PUSH_STACK_FLOAT_D(val) **reptr = Single; As(*reptr + 1, float) = val; *reptr+=8;
+#define PUSH_STACK_INT8(val) memset(*reptr, 0, 8); **reptr = SByte; As(*reptr + 1, int) = val; *reptr+=8;
+#define PUSH_STACK_UINT8(val) memset(*reptr, 0, 8); **reptr = Byte; As(*reptr + 1, int) = val; *reptr+=8;
+#define PUSH_STACK_INT16(val) memset(*reptr, 0, 8); **reptr = Int16; As(*reptr + 1, int) = val; *reptr+=8;
+#define PUSH_STACK_UINT16(val) memset(*reptr, 0, 8); **reptr = UInt16; As(*reptr + 1, int) = val; *reptr+=8;
+#define PUSH_STACK_INT(val) memset(*reptr, 0, 8); **reptr = Int32; As(*reptr + 1, int) = val; *reptr+=8;
+#define PUSH_STACK_UINT(val) memset(*reptr, 0, 8); **reptr = UInt32; As(*reptr + 1, int) = val; *reptr+=8;
+#define PUSH_STACK_FLOAT_D(val) memset(*reptr, 0, 8); **reptr = Single; As(*reptr + 1, float) = val; *reptr+=8;
 
 #define PUSH_STACK_FLOAT_M(val) { **reptr = Single; int iv = *(int*)(&(val)); As(*reptr + 1, int) = *(int*)(&(iv)); *reptr+=8; }
 
 // not on reference id: it's heap object ID, not address!!!
-#define PUSH_STACK_REFERENCEID(val) **reptr = ReferenceID; As(*reptr + 1, int) = val; *reptr+=8;
+#define PUSH_STACK_REFERENCEID(val) memset(*reptr, 0, 8); **reptr = ReferenceID; As(*reptr + 1, int) = val; *reptr+=8;
 
 #undef PUSH_STACK_INDIRECT
 #define POP {(*reptr)-=8;}
@@ -2879,7 +2820,9 @@ static uchar* pop_value_type_slot(uchar** reptr, const char* where);
 #define STACK_VALUE_SIZE STACK_STRIDE
 typedef struct { uchar bytes[STACK_VALUE_SIZE]; } stack_value_t;
 
-INLINE void stack_value_copy(stack_value_t* dst, const uchar* src) { memcpy(dst->bytes, src, STACK_VALUE_SIZE); }
+INLINE void stack_value_copy(stack_value_t* dst, const uchar* src) { 
+	memcpy(dst->bytes, src, STACK_VALUE_SIZE); 
+}
 INLINE void stack_value_store(uchar* dst, const stack_value_t* value) { memcpy(dst, value->bytes, STACK_VALUE_SIZE); }
 INLINE uchar stack_value_type(const stack_value_t* value) { return value->bytes[0]; }
 INLINE void push_stack_value(uchar** reptr, const stack_value_t* value) { memcpy(*reptr, value->bytes, STACK_VALUE_SIZE); *reptr += STACK_STRIDE; }
@@ -2904,24 +2847,21 @@ INLINE uchar* builtin_field_ptr_by_index(struct object_val* obj, int clsidx, int
 INLINE int* builtin_field_int_ptr(struct object_val* obj, int clsidx, int field_idx)
 {
 	uchar* field = builtin_field_ptr_by_index(obj, clsidx, field_idx);
-	if (field[0] != Int32)
-		DOOM("Field %d of clsidx %d is not Int32 (type=%d)\n", field_idx, clsidx, field[0]);
+	ASSERT_LANG(field[0] == Int32, "Field %d of clsidx %d is not Int32 (type=%d)", field_idx, clsidx, field[0]);
 	return (int*)(field + 1);
 }
 
 INLINE int builtin_field_get_reference(struct object_val* obj, int clsidx, int field_idx)
 {
 	uchar* field = builtin_field_ptr_by_index(obj, clsidx, field_idx);
-	if (field[0] != ReferenceID)
-		DOOM("Field %d of clsidx %d is not ReferenceID (type=%d)\n", field_idx, clsidx, field[0]);
+	ASSERT_LANG(field[0] == ReferenceID, "Field %d of clsidx %d is not ReferenceID (type=%d)", field_idx, clsidx, field[0]);
 	return *(int*)(field + 1);
 }
 
 INLINE void builtin_field_set_reference(struct object_val* obj, int clsidx, int field_idx, int ref_id)
 {
 	uchar* field = builtin_field_ptr_by_index(obj, clsidx, field_idx);
-	if (field[0] != ReferenceID)
-		DOOM("Field %d of clsidx %d is not ReferenceID (type=%d)\n", field_idx, clsidx, field[0]);
+	ASSERT_LANG(field[0] == ReferenceID, "Field %d of clsidx %d is not ReferenceID (type=%d)", field_idx, clsidx, field[0]);
 	*(int*)(field + 1) = ref_id;
 }
 
@@ -2937,26 +2877,34 @@ INLINE void builtin_field_set_int(struct object_val* obj, int clsidx, int field_
 
 INLINE struct object_val* expect_builtin_obj(int ref_id, int clsidx, const char* where)
 {
-	if (ref_id <= 0 || ref_id >= heap_newobj_id)
-		DOOM("%s: invalid reference id %d\n", where, ref_id);
+	ASSERT_LANG(ref_id > 0 && ref_id < heap_newobj_id, "%s: invalid reference id %d", where, ref_id);
 	struct object_val* obj = (struct object_val*)heap_obj[ref_id].pointer;
 	if (obj == NULL || obj->header != ObjectHeader)
-		DOOM("%s: reference %d does not point to an object (header=%d)\n", where, ref_id, obj ? obj->header : -1);
+		ASSERT_LANG(0, "%s: reference %d does not point to an object (header=%d)", where, ref_id, obj ? obj->header : -1);
 	if (obj->clsid != BUILTIN_CLSID(clsidx))
-		DOOM("%s: builtin object expected clsid %d but got %d\n", where, BUILTIN_CLSID(clsidx), obj->clsid);
+		ASSERT_LANG(0, "%s: builtin object expected clsid %d but got %d", where, BUILTIN_CLSID(clsidx), obj->clsid);
 	return obj;
+}
+
+// Fast unchecked cast for performance-critical paths where type safety is guaranteed by compiler
+INLINE struct object_val* cast_builtin_obj(int ref_id)
+{
+	return (struct object_val*)heap_obj[ref_id].pointer;
+}
+
+INLINE struct array_val* cast_array(int ref_id)
+{
+	return (struct array_val*)heap_obj[ref_id].pointer;
 }
 
 INLINE struct array_val* expect_array(int ref_id, uchar expected_type, const char* where)
 {
-	if (ref_id <= 0 || ref_id >= heap_newobj_id)
-		DOOM("%s: invalid array reference id %d\n", where, ref_id);
+	ASSERT_LANG(ref_id > 0 && ref_id < heap_newobj_id, "%s: invalid array reference id %d", where, ref_id);
 	uchar* header = heap_obj[ref_id].pointer;
 	if (header == NULL || *header != ArrayHeader)
-		DOOM("%s: reference %d does not point to an array (header=%d)\n", where, ref_id, header ? *header : -1);
+		ASSERT_LANG(0, "%s: reference %d does not point to an array (header=%d)", where, ref_id, header ? *header : -1);
 	struct array_val* arr = (struct array_val*)header;
-	if (expected_type != 0xFF && arr->typeid != expected_type)
-		DOOM("%s: expected array type %d but got %d\n", where, expected_type, arr->typeid);
+	ASSERT_LANG(expected_type == 0xFF || arr->typeid == expected_type, "%s: expected array type %d but got %d", where, expected_type, arr->typeid);
 	return arr;
 }
 
@@ -3177,90 +3125,64 @@ static void dis_append_string_id(dis_handler_ctx* ctx, int str_id, const char* w
 static void dis_format_stack_value(dis_handler_ctx* ctx, stack_value_t* value, struct string_val* format, const char* where);
 static dis_handler_ctx* dis_get_ctx_from_slot(uchar* slot, const char* where);
 
-void push_int(uchar** reptr, int value) {
+INLINE void push_int(uchar** reptr, int value) {
 	PUSH_STACK_INT(value);
 }
 
-void push_float(uchar** reptr, float value) {
+INLINE void push_float(uchar** reptr, float value) {
 	PUSH_STACK_FLOAT_D(value);
 }
 
-void push_bool(uchar** reptr, bool value) {
+INLINE void push_bool(uchar** reptr, bool value) {
 	PUSH_STACK_INT8(value);
 }
 
-int pop_int(uchar** reptr) {
+INLINE int pop_int(uchar** reptr) {
 	POP;
-	uchar typeid = **reptr;
-	if (typeid != Int32) {
-		DOOM("Type mismatch: expected Int32, got %d\n", typeid);
-	}
+	ASSERT_LANG(**reptr == Int32, "Type mismatch: expected Int32, got %d", **reptr);
 	return *(int*)(*reptr + 1);
 }
 
-float pop_float(uchar** reptr) {
+INLINE float pop_float(uchar** reptr) {
 	POP;
-	uchar typeid = **reptr;
-	if (typeid != Single) {
-		DOOM("Type mismatch: expected Single, got %d\n", typeid);
-	}
-	int itmp = *(int*)(*reptr + 1);
-	float tmp = *(float*)(&itmp);
-	return tmp;
+	ASSERT_LANG(**reptr == Single, "Type mismatch: expected Single, got %d", **reptr);
+	return *(float*)(*reptr + 1);
 }
 
-bool pop_bool(uchar** reptr) {
+INLINE bool pop_bool(uchar** reptr) {
 	POP;
-	uchar typeid = **reptr;
-	if (typeid != 0) {  // Assuming 0 is the typeid for Boolean
-		DOOM("Type mismatch: expected Boolean, got %d\n", typeid);
-	}
+	ASSERT_LANG(**reptr == 0, "Type mismatch: expected Boolean, got %d", **reptr);
 	return *(bool*)(*reptr + 1);
 }
 
 // New helper functions for other types
-short pop_short(uchar** reptr) {
+INLINE short pop_short(uchar** reptr) {
 	POP;
-	uchar typeid = **reptr;
-	if (typeid != Int16) {
-		DOOM("Type mismatch: expected Int16, got %d\n", typeid);
-	}
+	ASSERT_LANG(**reptr == Int16, "Type mismatch: expected Int16, got %d", **reptr);
 	return *(short*)(*reptr + 1);
 }
 
-char pop_sbyte(uchar** reptr) {
+INLINE char pop_sbyte(uchar** reptr) {
 	POP;
-	uchar typeid = **reptr;
-	if (typeid != SByte) {
-		DOOM("Type mismatch: expected SByte, got %d\n", typeid);
-	}
+	ASSERT_LANG(**reptr == SByte, "Type mismatch: expected SByte, got %d", **reptr);
 	return *(char*)(*reptr + 1);
 }
 
-unsigned char pop_byte(uchar** reptr) {
+INLINE unsigned char pop_byte(uchar** reptr) {
 	POP;
-	uchar typeid = **reptr;
-	if (typeid != Byte) {
-		DOOM("Type mismatch: expected Byte, got %d\n", typeid);
-	}
+	ASSERT_LANG(**reptr == Byte, "Type mismatch: expected Byte, got %d", **reptr);
 	return *(*reptr + 1);
 }
 
-long long pop_long(uchar** reptr) {
+INLINE long long pop_long(uchar** reptr) {
 	POP;
-	uchar typeid = **reptr;
-	if (typeid != 9) {  // Assuming 9 is the typeid for Int64
-		DOOM("Type mismatch: expected Int64, got %d\n", typeid);
-	}
+	ASSERT_LANG(**reptr == 9, "Type mismatch: expected Int64, got %d", **reptr);
 	return *(long long*)(*reptr + 1);
 }
 
-int pop_reference(uchar** reptr) {
+INLINE int pop_reference(uchar** reptr) {
 	POP;
-	uchar typeid = **reptr;
-	if (typeid != ReferenceID) {
-		DOOM("Type mismatch: expected ReferenceID, got %d\n", typeid);
-	}
+	ASSERT_LANG(**reptr == ReferenceID, "Type mismatch: expected ReferenceID, got %d", **reptr);
 	return *(int*)(*reptr + 1);
 }
 
@@ -3827,12 +3749,10 @@ static uchar* pop_value_type_slot(uchar** reptr, const char* where)
 {
     POP;
     uchar* addr = *reptr;
-    if (*addr != Address)
-        DOOM("%s: expected Address for struct, got type %d", where, *addr);
+    ASSERT_LANG(*addr == Address, "%s: expected Address for struct, got type %d", where, *addr);
 	uchar target_type = TypedAddrGetType(addr);
 	uchar* jmp = TypedAddrAsValPtr(addr);
-	if (target_type!=JumpAddress)
-		DOOM("%s: expected JumpAddress to reference, got type %d", where, target_type);
+	ASSERT_LANG(target_type == JumpAddress, "%s: expected JumpAddress to reference, got type %d", where, target_type);
     return mem0 + As(jmp, int);
 }
 
@@ -3994,9 +3914,7 @@ void builtin_String_Substring_2(uchar** reptr) {
 void builtin_String_get_Length(uchar** reptr) {
 	int str_id = pop_reference(reptr);
 	struct string_val* str = (struct string_val*)heap_obj[str_id].pointer;
-	if (*(uchar*)str != StringHeader)
-		DOOM("substring require string");
-
+	ASSERT_LANG(*(uchar*)str == StringHeader, "String.get_Length requires string");
 	push_int(reptr, str->str_len);
 }
 
@@ -4246,7 +4164,7 @@ void builtin_Boolean_ToString(uchar** reptr) {
 void builtin_Int32_ToString(uchar** reptr) {
 	POP;
 	uchar typeid = **reptr;
-	DIEIF(typeid != 6 && typeid != Address) { DOOM("Bad input type, got %d", typeid) }
+	ASSERT_LANG(typeid == 6 || typeid == Address, "Bad input type, got %d", typeid);
 
 	int value;
 	if (typeid == Address)
@@ -4269,7 +4187,7 @@ void builtin_Int32_ToString(uchar** reptr) {
 void builtin_Int16_ToString(uchar** reptr) {
 	POP;
 	uchar typeid = **reptr;
-	DIEIF(typeid != 4 && typeid != Address) { DOOM("Bad input type, got %d", typeid) }
+	ASSERT_LANG(typeid == 4 || typeid == Address, "Bad input type, got %d", typeid);
 
 	short value;
 	if (typeid == Address)
@@ -4292,7 +4210,7 @@ void builtin_Int16_ToString(uchar** reptr) {
 void builtin_Single_ToString(uchar** reptr) {
 	POP;
 	uchar typeid = **reptr;
-	DIEIF(typeid != 8 && typeid != Address) { DOOM("Bad input type, got %d", typeid) }
+	ASSERT_LANG(typeid == 8 || typeid == Address, "Bad input type, got %d", typeid);
 
 	float value;
 	if (typeid == Address)
@@ -4311,7 +4229,7 @@ void builtin_Single_ToString(uchar** reptr) {
 void builtin_Byte_ToString(uchar** reptr) {
 	POP;
 	uchar typeid = **reptr;
-	DIEIF(typeid != Byte && typeid != Address) { DOOM("Bad input type, got %d", typeid) }
+	ASSERT_LANG(typeid == Byte || typeid == Address, "Bad input type, got %d", typeid);
 
 	unsigned char value;
 	if (typeid == Address)
@@ -4330,7 +4248,7 @@ void builtin_Byte_ToString(uchar** reptr) {
 void builtin_Char_ToString(uchar** reptr) {
 	POP;
 	uchar typeid = **reptr;
-	DIEIF(typeid != 3 && typeid != Address) { DOOM("Bad input type, got %d", typeid) }
+	ASSERT_LANG(typeid == 3 || typeid == Address, "Bad input type, got %d", typeid);
 
 	unsigned short value;
 	if (typeid == Address)
@@ -4350,7 +4268,7 @@ void builtin_Char_ToString(uchar** reptr) {
 void builtin_UInt16_ToString(uchar** reptr) {
 	POP;
 	uchar typeid = **reptr;
-	DIEIF(typeid != UInt16 && typeid != Address) { DOOM("Bad input type, got %d", typeid) }
+	ASSERT_LANG(typeid == UInt16 || typeid == Address, "Bad input type, got %d", typeid);
 
 	unsigned short value;
 	if (typeid == Address)
@@ -4369,7 +4287,7 @@ void builtin_UInt16_ToString(uchar** reptr) {
 void builtin_UInt32_ToString(uchar** reptr) {
 	POP;
 	uchar typeid = **reptr;
-	DIEIF(typeid != UInt32 && typeid != Address) { DOOM("Bad input type, got %d", typeid) }
+	ASSERT_LANG(typeid == UInt32 || typeid == Address, "Bad input type, got %d", typeid);
 
 	unsigned int value;
 	if (typeid == Address)
@@ -4387,15 +4305,11 @@ void builtin_UInt32_ToString(uchar** reptr) {
 
 void delegate_ctor(uchar** reptr, unsigned short clsid)
 {
-    // Expect stack: target(object or 0), method pointer (top)
-    POP; // bring top-of-stack into view
-    if (**reptr != MethodPointer) DOOM("require a method pointer!");
+    POP;
+    ASSERT_LANG(**reptr == MethodPointer, "delegate_ctor requires method pointer");
     struct method_pointer* mp = (struct method_pointer*)(*reptr + 1);
-	if (mp->type == 1 && mp->id >= methods_N) {
-		DOOM("invalid custom method id_%d\n", mp->id);
-	}
-	else if (mp->type == 0)
-		DOOM("builtin method as action not supported");
+	ASSERT_LANG(mp->type != 1 || mp->id < methods_N, "invalid custom method id_%d", mp->id);
+	ASSERT_LANG(mp->type != 0, "builtin method as action not supported");
     int obj_id = pop_reference(reptr);
 
     // If target object is null (static delegate to instance method singleton), try to instantiate from method metadata
@@ -4415,25 +4329,21 @@ void delegate_ctor(uchar** reptr, unsigned short clsid)
 	// Set the fields of the Action
 	struct object_val* del = (struct object_val*)heap_obj[builtin_arg0].pointer;
 	uchar* heap = (&del->payload);
-	if (del->clsid != clsid) DOOM("wrong type of clsid, expect %x, got %x", clsid, del->clsid); // check clsid identifier.
+	ASSERT_LANG(del->clsid == clsid, "wrong type of clsid, expect %x, got %x", clsid, del->clsid);
 	HEAP_WRITE_REFERENCEID(obj_id);
 	HEAP_WRITE_INT(mp->id);
 }
 
 void delegate_ivk(uchar** reptr, unsigned short clsid, int argN)
 {
-    // Stack layout before: [..., delegate_ref, arg0, arg1, ... argN-1]
-    // We transform in-place to [..., this_ref, arg0, arg1, ...]
-    if (argN < 0) DOOM("delegate ivk: bad argN");
-    uchar* top = *reptr - STACK_STRIDE; // argN-1 (or delegate if argN==0)
+    ASSERT_LANG(argN >= 0, "delegate ivk: bad argN");
+    uchar* top = *reptr - STACK_STRIDE;
     uchar* lower = argN > 0 ? (*reptr - (argN + 1) * STACK_STRIDE) : (*reptr - STACK_STRIDE);
-    // lower currently holds the delegate reference
-    if (lower < stack_ptr[new_stack_depth - 1]->evaluation_st_ptr) DOOM("delegate ivk stack underflow");
-    if (lower[0] != ReferenceID) DOOM("delegate ivk expects delegate ref on stack, got %d", lower[0]);
+    ASSERT_LANG(lower >= stack_ptr[new_stack_depth - 1]->evaluation_st_ptr, "delegate ivk stack underflow");
+    ASSERT_LANG(lower[0] == ReferenceID, "delegate ivk expects delegate ref on stack, got %d", lower[0]);
     int refid = *(int*)(lower + 1);
-    struct object_val* action = (struct object_val*)heap_obj[refid].pointer;
-	if (action->clsid != clsid)
-		DOOM("not an required delegate type:%d\n", clsid);
+    struct object_val* action = cast_builtin_obj(refid);
+	ASSERT_LANG(action->clsid == clsid, "wrong delegate type: expected %d got %d", clsid, action->clsid);
 
 	// Extract the object and method pointer
 	int this_id = *(int*)(&action->payload + 1);
@@ -4685,7 +4595,7 @@ void builtin_String_Join_IEnumerable(uchar** reptr) {
 
 	uchar* array_header = heap_obj[array_id].pointer;
 	if (*array_header != ArrayHeader) {
-		DOOM("String.Join expects an array, got type %d", *array_header);
+		ASSERT_LANG(0, "String.Join expects an array, got type %d", *array_header);
 	}
 
 	struct array_val* arr = (struct array_val*)array_header;
@@ -4838,7 +4748,7 @@ void builtin_String_Join_ObjectArray(uchar** reptr) {
 
 	uchar* array_header = heap_obj[array_id].pointer;
 	if (*array_header != ArrayHeader) {
-		DOOM("String.Join expects an array, got type %d", *array_header);
+		ASSERT_LANG(0, "String.Join expects an array, got type %d", *array_header);
 	}
 
 	struct array_val* arr = (struct array_val*)array_header;
@@ -4931,10 +4841,10 @@ void builtin_Enumerable_Select(uchar** reptr) {
         struct object_val* obj = (struct object_val*)source_header;
         if (obj->clsid == BUILTIN_CLSID(BUILTIN_CLSIDX_LIST)) { is_list = true; list_obj = obj; }
     } else {
-        DOOM("Enumerable.Select expects array or List source, got type %d", *source_header);
+		ASSERT_LANG(0, "Enumerable.Select expects array or List source, got type %d", *source_header);
     }
     struct object_val* selector = (struct object_val*)heap_obj[selector_id].pointer;
-    if (selector->clsid != 0xf003) { DOOM("Enumerable.Select expects a Func<T, TResult> delegate, got class ID %d", selector->clsid); }
+    ASSERT_LANG(selector->clsid == 0xf003, "Enumerable.Select expects a Func<T, TResult> delegate, got class ID %d", selector->clsid);
 
     int delegate_this_id = *(int*)(&selector->payload + 1);
     int delegate_method_id = *(int*)(&selector->payload + get_val_sz(ReferenceID) + 1);
@@ -5026,61 +4936,50 @@ void builtin_List_ctor(uchar** reptr) {
 }
 
 void builtin_List_Add(uchar** reptr) {
-	// stack: value(T), this(List`1)
-	// Pop value into a temp stack_value to preserve raw payload
 	stack_value_t value;
 	POP; stack_value_copy(&value, *reptr);
 	int this_id = pop_reference(reptr);
-	struct object_val* list_obj = expect_builtin_obj(this_id, BUILTIN_CLSIDX_LIST, "List.Add");
+	struct object_val* list_obj = cast_builtin_obj(this_id);
 
 	int count = list_get_count(list_obj);
 	int capacity = list_get_capacity(list_obj);
 	int storage_ref = list_get_storage_ref(list_obj);
-	struct array_val* storage_arr = expect_array(storage_ref, Byte, "List.Add storage");
+	struct array_val* storage_arr = cast_array(storage_ref);
 	uchar* storage = &storage_arr->payload;
 
-	// Determine/validate element type
 	int elem_type = list_get_element_type(list_obj);
 	uchar val_type = stack_value_type(&value);
 	if (elem_type == 0) {
-		// Set element type on first Add
 		list_set_element_type(list_obj, val_type);
 		elem_type = val_type;
-	} else if (elem_type != val_type) {
-		DOOM("List.Add type mismatch: list elem=%d, value=%d", elem_type, val_type);
 	}
+	ASSERT_LANG(elem_type == val_type, "List.Add type mismatch: list elem=%d, value=%d", elem_type, val_type);
 
-	// Ensure capacity
 	if (count >= capacity) {
-		int new_capacity = capacity * 2;
+		int new_capacity = capacity << 1;  // Bit shift is faster than multiply
 		int new_storage_ref = newarr(new_capacity * STACK_STRIDE, Byte);
-		struct array_val* new_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
-		memcpy(&new_arr->payload, storage, capacity * STACK_STRIDE);
+		struct array_val* new_arr = cast_array(new_storage_ref);
+		if (count > 0) memcpy(&new_arr->payload, storage, count * STACK_STRIDE);
 		list_set_storage_ref(list_obj, new_storage_ref);
 		list_set_capacity(list_obj, new_capacity);
-		storage_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
-		storage = &storage_arr->payload;
+		storage = &new_arr->payload;
 	}
 
-	// Write value at end
 	stack_value_store(storage + count * STACK_STRIDE, &value);
 	list_set_count(list_obj, count + 1);
 }
 
 void builtin_List_get_Count(uchar** reptr) {
-	// stack: this(List`1)
 	int this_id = pop_reference(reptr);
-	struct object_val* list_obj = expect_builtin_obj(this_id, BUILTIN_CLSIDX_LIST, "List.get_Count");
-	push_int(reptr, list_get_count(list_obj));
+	push_int(reptr, list_get_count(cast_builtin_obj(this_id)));
 }
 
 void builtin_List_get_Item(uchar** reptr) {
-	// stack: index(Int32), this(List`1)
 	int index = pop_int(reptr);
 	int this_id = pop_reference(reptr);
-	struct object_val* list_obj = expect_builtin_obj(this_id, BUILTIN_CLSIDX_LIST, "List.get_Item");
+	struct object_val* list_obj = cast_builtin_obj(this_id);
 	int count = list_get_count(list_obj);
-	if (index < 0 || index >= count) DOOM("List.get_Item out of range: %d/%d", index, count);
+	ASSERT_RT(index >= 0 && index < count, "List index out of range: %d/%d", index, count);
 	struct array_val* storage_arr;
 	uchar* storage = list_storage_bytes(list_obj, &storage_arr);
 	stack_value_t tmp;
@@ -5089,17 +4988,16 @@ void builtin_List_get_Item(uchar** reptr) {
 }
 
 void builtin_List_set_Item(uchar** reptr) {
-	// stack: value(T), index(Int32), this(List`1)
 	stack_value_t value; POP; stack_value_copy(&value, *reptr);
 	int index = pop_int(reptr);
 	int this_id = pop_reference(reptr);
-	struct object_val* list_obj = expect_builtin_obj(this_id, BUILTIN_CLSIDX_LIST, "List.set_Item");
+	struct object_val* list_obj = cast_builtin_obj(this_id);
 	int count = list_get_count(list_obj);
-	if (index < 0 || index >= count) DOOM("List.set_Item out of range: %d/%d", index, count);
+	ASSERT_RT(index >= 0 && index < count, "List index out of range: %d/%d", index, count);
 	int elem_type = list_get_element_type(list_obj);
 	uchar val_type = stack_value_type(&value);
 	if (elem_type == 0) { list_set_element_type(list_obj, val_type); elem_type = val_type; }
-	if (elem_type != val_type) DOOM("List.set_Item type mismatch: %d vs %d", elem_type, val_type);
+	ASSERT_LANG(elem_type == val_type, "List.set_Item type mismatch: %d vs %d", elem_type, val_type);
 	struct array_val* storage_arr;
 	uchar* storage = list_storage_bytes(list_obj, &storage_arr);
 	stack_value_store(storage + index * STACK_STRIDE, &value);
@@ -5220,7 +5118,7 @@ void builtin_Queue_ctor(uchar** reptr) {
 void builtin_Queue_Enqueue(uchar** reptr) {
 	stack_value_t value; POP; stack_value_copy(&value, *reptr);
 	int this_id = pop_reference(reptr);
-	struct object_val* q = expect_builtin_obj(this_id, BUILTIN_CLSIDX_QUEUE, "Queue.Enqueue");
+	struct object_val* q = cast_builtin_obj(this_id);
 	int count = queue_get_count(q);
 	int capacity = queue_get_capacity(q);
 	int head = queue_get_head(q);
@@ -5255,9 +5153,9 @@ void builtin_Queue_Enqueue(uchar** reptr) {
 
 void builtin_Queue_Dequeue(uchar** reptr) {
 	int this_id = pop_reference(reptr);
-	struct object_val* q = expect_builtin_obj(this_id, BUILTIN_CLSIDX_QUEUE, "Queue.Dequeue");
+	struct object_val* q = cast_builtin_obj(this_id);
 	int count = queue_get_count(q);
-	if (count <= 0) DOOM("Queue.Dequeue on empty queue");
+	ASSERT_RT(count > 0, "Queue is empty");
 	int capacity = queue_get_capacity(q);
 	int head = queue_get_head(q);
 	struct array_val* storage_arr; uchar* storage = queue_storage_bytes(q, &storage_arr);
@@ -5269,9 +5167,9 @@ void builtin_Queue_Dequeue(uchar** reptr) {
 
 void builtin_Queue_Peek(uchar** reptr) {
 	int this_id = pop_reference(reptr);
-	struct object_val* q = expect_builtin_obj(this_id, BUILTIN_CLSIDX_QUEUE, "Queue.Peek");
+	struct object_val* q = cast_builtin_obj(this_id);
 	int count = queue_get_count(q);
-	if (count <= 0) DOOM("Queue.Peek on empty queue");
+	ASSERT_RT(count > 0, "Queue is empty");
 	int head = queue_get_head(q);
 	struct array_val* storage_arr; uchar* storage = queue_storage_bytes(q, &storage_arr);
 	stack_value_t tmp; stack_value_copy(&tmp, storage + head * STACK_STRIDE);
@@ -5280,8 +5178,7 @@ void builtin_Queue_Peek(uchar** reptr) {
 
 void builtin_Queue_get_Count(uchar** reptr) {
 	int this_id = pop_reference(reptr);
-	struct object_val* q = expect_builtin_obj(this_id, BUILTIN_CLSIDX_QUEUE, "Queue.get_Count");
-	push_int(reptr, queue_get_count(q));
+	push_int(reptr, queue_get_count(cast_builtin_obj(this_id)));
 }
 
 // Stack<T> builtin methods
@@ -5298,13 +5195,13 @@ void builtin_Stack_ctor(uchar** reptr) {
 void builtin_Stack_Push(uchar** reptr) {
 	stack_value_t value; POP; stack_value_copy(&value, *reptr);
 	int this_id = pop_reference(reptr);
-	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_STACK, "Stack.Push");
+	struct object_val* s = cast_builtin_obj(this_id);
 	int count = stack_get_count(s);
 	int capacity = stack_get_capacity(s);
 	int elem_type = stack_get_element_type(s);
 	uchar val_type = stack_value_type(&value);
 	if (elem_type == 0) { stack_set_element_type(s, val_type); elem_type = val_type; }
-	if (elem_type != val_type) DOOM("Stack.Push type mismatch: %d vs %d", elem_type, val_type);
+	ASSERT_LANG(elem_type == val_type, "Stack.Push type mismatch: %d vs %d", elem_type, val_type);
 	struct array_val* storage_arr; uchar* storage = stack_storage_bytes(s, &storage_arr);
 	if (count >= capacity) {
 		int new_capacity = capacity * 2;
@@ -5322,9 +5219,9 @@ void builtin_Stack_Push(uchar** reptr) {
 
 void builtin_Stack_Pop(uchar** reptr) {
 	int this_id = pop_reference(reptr);
-	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_STACK, "Stack.Pop");
+	struct object_val* s = cast_builtin_obj(this_id);
 	int count = stack_get_count(s);
-	if (count <= 0) DOOM("Stack.Pop on empty stack");
+	ASSERT_RT(count > 0, "Stack is empty");
 	struct array_val* storage_arr; uchar* storage = stack_storage_bytes(s, &storage_arr);
 	stack_value_t tmp; stack_value_copy(&tmp, storage + (count - 1) * STACK_STRIDE);
 	stack_set_count(s, count - 1);
@@ -5333,9 +5230,9 @@ void builtin_Stack_Pop(uchar** reptr) {
 
 void builtin_Stack_Peek(uchar** reptr) {
 	int this_id = pop_reference(reptr);
-	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_STACK, "Stack.Peek");
+	struct object_val* s = cast_builtin_obj(this_id);
 	int count = stack_get_count(s);
-	if (count <= 0) DOOM("Stack.Peek on empty stack");
+	ASSERT_RT(count > 0, "Stack is empty");
 	struct array_val* storage_arr; uchar* storage = stack_storage_bytes(s, &storage_arr);
 	stack_value_t tmp; stack_value_copy(&tmp, storage + (count - 1) * STACK_STRIDE);
 	push_stack_value(reptr, &tmp);
@@ -5343,15 +5240,25 @@ void builtin_Stack_Peek(uchar** reptr) {
 
 void builtin_Stack_get_Count(uchar** reptr) {
 	int this_id = pop_reference(reptr);
-	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_STACK, "Stack.get_Count");
-	push_int(reptr, stack_get_count(s));
+	push_int(reptr, stack_get_count(cast_builtin_obj(this_id)));
 }
 
 // Dictionary<TKey,TValue> builtin methods
 static int dict_find_index(struct object_val* d, uchar* storage, int count, const stack_value_t* key) {
+	uchar key_type = key->bytes[0];
 	for (int i = 0; i < count; ++i) {
 		uchar* kp = storage + (i * 2) * STACK_STRIDE;
-		if (memcmp(kp, key->bytes, STACK_STRIDE) == 0) return i;
+		// Compare type first
+		if (kp[0] != key_type) continue;
+		// For primitive types, compare only meaningful bytes
+		int cmp_size = STACK_STRIDE;
+		switch (key_type) {
+			case SByte: case Byte: cmp_size = 2; break;  // 1 byte type + 1 byte value
+			case Int16: case UInt16: cmp_size = 3; break;  // 1 byte type + 2 bytes value
+			case Int32: case UInt32: case Single: cmp_size = 5; break;  // 1 byte type + 4 bytes value
+			// ReferenceID and others use full 8 bytes
+		}
+		if (memcmp(kp, key->bytes, cmp_size) == 0) return i;
 	}
 	return -1;
 }
@@ -5371,39 +5278,41 @@ void builtin_Dictionary_Add(uchar** reptr) {
 	stack_value_t val; POP; stack_value_copy(&val, *reptr);
 	stack_value_t key; POP; stack_value_copy(&key, *reptr);
 	int this_id = pop_reference(reptr);
-	struct object_val* d = expect_builtin_obj(this_id, BUILTIN_CLSIDX_DICTIONARY, "Dictionary.Add");
+	struct object_val* d = cast_builtin_obj(this_id);
 	int count = dict_get_count(d);
 	int capacity = dict_get_capacity(d);
 	int kt = dict_get_key_type(d); int vt = dict_get_value_type(d);
 	if (kt == 0) { dict_set_key_type(d, stack_value_type(&key)); kt = stack_value_type(&key); }
 	if (vt == 0) { dict_set_value_type(d, stack_value_type(&val)); vt = stack_value_type(&val); }
-	if (kt != stack_value_type(&key) || vt != stack_value_type(&val)) DOOM("Dictionary.Add type mismatch");
-	struct array_val* storage_arr; uchar* storage = dict_storage_bytes(d, &storage_arr);
+	ASSERT_LANG(kt == stack_value_type(&key) && vt == stack_value_type(&val), "Dictionary.Add type mismatch");
+	int storage_ref = dict_get_storage_ref(d);
+	struct array_val* storage_arr = cast_array(storage_ref);
+	uchar* storage = &storage_arr->payload;
 	int idx = dict_find_index(d, storage, count, &key);
-	if (idx >= 0) DOOM("Dictionary.Add duplicate key");
+	ASSERT_LANG(idx < 0, "Dictionary.Add duplicate key");
 	if (count >= capacity) {
-		int new_capacity = capacity * 2;
+		int new_capacity = capacity << 1;
 		int new_storage_ref = newarr(new_capacity * 2 * STACK_STRIDE, Byte);
-		struct array_val* new_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
-		memcpy(&new_arr->payload, storage, capacity * 2 * STACK_STRIDE);
+		struct array_val* new_arr = cast_array(new_storage_ref);
+		if (count > 0) memcpy(&new_arr->payload, storage, count * 2 * STACK_STRIDE);
 		dict_set_storage_ref(d, new_storage_ref);
 		dict_set_capacity(d, new_capacity);
-		storage_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
-		storage = &storage_arr->payload;
+		storage = &new_arr->payload;
 	}
-	stack_value_store(storage + (count * 2) * STACK_STRIDE, &key);
-	stack_value_store(storage + (count * 2 + 1) * STACK_STRIDE, &val);
+	uchar* key_slot = storage + (count << 1) * STACK_STRIDE;
+	stack_value_store(key_slot, &key);
+	stack_value_store(key_slot + STACK_STRIDE, &val);
 	dict_set_count(d, count + 1);
 }
 
 void builtin_Dictionary_get_Item(uchar** reptr) {
 	stack_value_t key; POP; stack_value_copy(&key, *reptr);
 	int this_id = pop_reference(reptr);
-	struct object_val* d = expect_builtin_obj(this_id, BUILTIN_CLSIDX_DICTIONARY, "Dictionary.get_Item");
+	struct object_val* d = cast_builtin_obj(this_id);
 	int count = dict_get_count(d);
 	struct array_val* storage_arr; uchar* storage = dict_storage_bytes(d, &storage_arr);
 	int idx = dict_find_index(d, storage, count, &key);
-	if (idx < 0) DOOM("Dictionary.get_Item key not found");
+	ASSERT_RT(idx >= 0, "Dictionary key not found");
 	stack_value_t tmp; stack_value_copy(&tmp, storage + (idx * 2 + 1) * STACK_STRIDE);
 	push_stack_value(reptr, &tmp);
 }
@@ -5412,38 +5321,40 @@ void builtin_Dictionary_set_Item(uchar** reptr) {
 	stack_value_t val; POP; stack_value_copy(&val, *reptr);
 	stack_value_t key; POP; stack_value_copy(&key, *reptr);
 	int this_id = pop_reference(reptr);
-	struct object_val* d = expect_builtin_obj(this_id, BUILTIN_CLSIDX_DICTIONARY, "Dictionary.set_Item");
+	struct object_val* d = cast_builtin_obj(this_id);
 	int count = dict_get_count(d);
 	int capacity = dict_get_capacity(d);
 	int kt = dict_get_key_type(d); int vt = dict_get_value_type(d);
 	if (kt == 0) { dict_set_key_type(d, stack_value_type(&key)); kt = stack_value_type(&key); }
 	if (vt == 0) { dict_set_value_type(d, stack_value_type(&val)); vt = stack_value_type(&val); }
-	if (kt != stack_value_type(&key) || vt != stack_value_type(&val)) DOOM("Dictionary.set_Item type mismatch");
-	struct array_val* storage_arr; uchar* storage = dict_storage_bytes(d, &storage_arr);
+	ASSERT_LANG(kt == stack_value_type(&key) && vt == stack_value_type(&val), "Dictionary.set_Item type mismatch");
+	int storage_ref = dict_get_storage_ref(d);
+	struct array_val* storage_arr = cast_array(storage_ref);
+	uchar* storage = &storage_arr->payload;
 	int idx = dict_find_index(d, storage, count, &key);
 	if (idx >= 0) {
 		stack_value_store(storage + (idx * 2 + 1) * STACK_STRIDE, &val);
 		return;
 	}
 	if (count >= capacity) {
-		int new_capacity = capacity * 2;
+		int new_capacity = capacity << 1;
 		int new_storage_ref = newarr(new_capacity * 2 * STACK_STRIDE, Byte);
-		struct array_val* new_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
-		memcpy(&new_arr->payload, storage, capacity * 2 * STACK_STRIDE);
+		struct array_val* new_arr = cast_array(new_storage_ref);
+		if (count > 0) memcpy(&new_arr->payload, storage, count * 2 * STACK_STRIDE);
 		dict_set_storage_ref(d, new_storage_ref);
 		dict_set_capacity(d, new_capacity);
-		storage_arr = (struct array_val*)heap_obj[new_storage_ref].pointer;
-		storage = &storage_arr->payload;
+		storage = &new_arr->payload;
 	}
-	stack_value_store(storage + (count * 2) * STACK_STRIDE, &key);
-	stack_value_store(storage + (count * 2 + 1) * STACK_STRIDE, &val);
+	uchar* key_slot = storage + (count << 1) * STACK_STRIDE;
+	stack_value_store(key_slot, &key);
+	stack_value_store(key_slot + STACK_STRIDE, &val);
 	dict_set_count(d, count + 1);
 }
 
 void builtin_Dictionary_Remove(uchar** reptr) {
 	stack_value_t key; POP; stack_value_copy(&key, *reptr);
 	int this_id = pop_reference(reptr);
-	struct object_val* d = expect_builtin_obj(this_id, BUILTIN_CLSIDX_DICTIONARY, "Dictionary.Remove");
+	struct object_val* d = cast_builtin_obj(this_id);
 	int count = dict_get_count(d);
 	struct array_val* storage_arr; uchar* storage = dict_storage_bytes(d, &storage_arr);
 	int idx = dict_find_index(d, storage, count, &key);
@@ -5458,24 +5369,30 @@ void builtin_Dictionary_Remove(uchar** reptr) {
 void builtin_Dictionary_ContainsKey(uchar** reptr) {
 	stack_value_t key; POP; stack_value_copy(&key, *reptr);
 	int this_id = pop_reference(reptr);
-	struct object_val* d = expect_builtin_obj(this_id, BUILTIN_CLSIDX_DICTIONARY, "Dictionary.ContainsKey");
+	struct object_val* d = cast_builtin_obj(this_id);
 	int count = dict_get_count(d);
 	struct array_val* storage_arr; uchar* storage = dict_storage_bytes(d, &storage_arr);
-	int idx = dict_find_index(d, storage, count, &key);
-	push_bool(reptr, idx >= 0);
+	push_bool(reptr, dict_find_index(d, storage, count, &key) >= 0);
 }
 
 void builtin_Dictionary_get_Count(uchar** reptr) {
 	int this_id = pop_reference(reptr);
-	struct object_val* d = expect_builtin_obj(this_id, BUILTIN_CLSIDX_DICTIONARY, "Dictionary.get_Count");
-	push_int(reptr, dict_get_count(d));
+	push_int(reptr, dict_get_count(cast_builtin_obj(this_id)));
 }
 
 // HashSet<T> builtin methods
 static int hset_find_index(struct object_val* s, uchar* storage, int count, const stack_value_t* val) {
+	uchar val_type = val->bytes[0];
 	for (int i = 0; i < count; ++i) {
 		uchar* p = storage + i * STACK_STRIDE;
-		if (memcmp(p, val->bytes, STACK_STRIDE) == 0) return i;
+		if (p[0] != val_type) continue;
+		int cmp_size = STACK_STRIDE;
+		switch (val_type) {
+			case SByte: case Byte: cmp_size = 2; break;
+			case Int16: case UInt16: cmp_size = 3; break;
+			case Int32: case UInt32: case Single: cmp_size = 5; break;
+		}
+		if (memcmp(p, val->bytes, cmp_size) == 0) return i;
 	}
 	return -1;
 }
@@ -5493,7 +5410,7 @@ void builtin_HashSet_ctor(uchar** reptr) {
 void builtin_HashSet_Add(uchar** reptr) {
 	stack_value_t value; POP; stack_value_copy(&value, *reptr);
 	int this_id = pop_reference(reptr);
-	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_HASHSET, "HashSet.Add");
+	struct object_val* s = cast_builtin_obj(this_id);
 	int count = hset_get_count(s);
 	int capacity = hset_get_capacity(s);
 	int elem_type = hset_get_element_type(s);
@@ -5520,7 +5437,7 @@ void builtin_HashSet_Add(uchar** reptr) {
 void builtin_HashSet_Remove(uchar** reptr) {
 	stack_value_t value; POP; stack_value_copy(&value, *reptr);
 	int this_id = pop_reference(reptr);
-	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_HASHSET, "HashSet.Remove");
+	struct object_val* s = cast_builtin_obj(this_id);
 	int count = hset_get_count(s);
 	struct array_val* storage_arr; uchar* storage = hset_storage_bytes(s, &storage_arr);
 	int idx = hset_find_index(s, storage, count, &value);
@@ -5533,7 +5450,7 @@ void builtin_HashSet_Remove(uchar** reptr) {
 void builtin_HashSet_Contains(uchar** reptr) {
 	stack_value_t value; POP; stack_value_copy(&value, *reptr);
 	int this_id = pop_reference(reptr);
-	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_HASHSET, "HashSet.Contains");
+	struct object_val* s = cast_builtin_obj(this_id);
 	int count = hset_get_count(s);
 	struct array_val* storage_arr; uchar* storage = hset_storage_bytes(s, &storage_arr);
 	int idx = hset_find_index(s, storage, count, &value);
@@ -5542,8 +5459,7 @@ void builtin_HashSet_Contains(uchar** reptr) {
 
 void builtin_HashSet_get_Count(uchar** reptr) {
 	int this_id = pop_reference(reptr);
-	struct object_val* s = expect_builtin_obj(this_id, BUILTIN_CLSIDX_HASHSET, "HashSet.get_Count");
-	push_int(reptr, hset_get_count(s));
+	push_int(reptr, hset_get_count(cast_builtin_obj(this_id)));
 }
 
 
@@ -5651,8 +5567,7 @@ void builtin_DefaultInterpolatedStringHandler_AppendFormatted_Value_Format(uchar
 		if (format_id <= 0 || format_id >= heap_newobj_id)
 			DOOM("DefaultInterpolatedStringHandler.AppendFormatted<T,String>: invalid format reference %d", format_id);
 		format = (struct string_val*)heap_obj[format_id].pointer;
-		if (*((uchar*)format) != StringHeader)
-			DOOM("DefaultInterpolatedStringHandler.AppendFormatted<T,String>: format arg not string (header %d)", *((uchar*)format));
+		ASSERT_LANG(*((uchar*)format) == StringHeader, "DefaultInterpolatedStringHandler.AppendFormatted format arg not string (header %d)", *((uchar*)format));
 	}
 	char tmp[256];
 	// Build format like {0:fmt}
@@ -5688,12 +5603,10 @@ void builtin_Enumerable_ToList(uchar** reptr) {
 }
 
 void builtin_Enumerable_ToArray(uchar** reptr) {
-	// stack: source(IEnumerable`1 -> expect array)
 	int source_id = pop_reference(reptr);
 	if (source_id == 0) { PUSH_STACK_REFERENCEID(0); return; }
 	uchar* header = heap_obj[source_id].pointer;
-	if (*header != ArrayHeader) { DOOM("Enumerable.ToArray expects array source, got %d", *header); }
-	// Return the same array (identity) since arrays are already contiguous
+	ASSERT_LANG(*header == ArrayHeader, "Enumerable.ToArray expects array source, got %d", *header);
 	PUSH_STACK_REFERENCEID(source_id);
 }
 
@@ -5714,10 +5627,10 @@ void builtin_Enumerable_Where(uchar** reptr) {
         struct object_val* obj = (struct object_val*)source_header;
         if (obj->clsid == BUILTIN_CLSID(BUILTIN_CLSIDX_LIST)) { is_list = true; list_obj = obj; }
     } else {
-        DOOM("Enumerable.Where expects array or List source, got %d", *source_header);
+		ASSERT_LANG(0, "Enumerable.Where expects array or List source, got %d", *source_header);
     }
     struct object_val* predicate = (struct object_val*)heap_obj[predicate_id].pointer;
-    if (!(predicate->clsid == 0xf002 || predicate->clsid == 0xf003)) { DOOM("Where expects a Func<T,bool> delegate, got class ID %d", predicate->clsid); }
+    ASSERT_LANG(predicate->clsid == 0xf002 || predicate->clsid == 0xf003, "Where expects a Func<T,bool> delegate, got class ID %d", predicate->clsid);
 
     int pred_this_id = *(int*)(&predicate->payload + 1);
     int pred_method_id = *(int*)(&predicate->payload + get_val_sz(ReferenceID) + 1);
@@ -5794,9 +5707,9 @@ void builtin_Enumerable_Sum(uchar** reptr) {
     int source_id = pop_reference(reptr);
     if (source_id == 0) { PUSH_STACK_INT(0); return; }
     uchar* header = heap_obj[source_id].pointer;
-    if (*header != ArrayHeader) { DOOM("Sum expects array source, got %d", *header); }
+    ASSERT_LANG(*header == ArrayHeader, "Sum expects array source, got %d", *header);
     struct array_val* arr = (struct array_val*)header;
-    if (arr->typeid != Int32) { DOOM("Sum only supports Int32 sequences, got type %d", arr->typeid); }
+    ASSERT_LANG(arr->typeid == Int32, "Sum only supports Int32 sequences, got type %d", arr->typeid);
     int sum = 0; int sz = get_type_sz(Int32);
     for (int i = 0; i < arr->len; ++i) sum += *(int*)(&arr->payload + i * sz);
     PUSH_STACK_INT(sum);
@@ -5807,10 +5720,10 @@ void builtin_Enumerable_Max(uchar** reptr) {
     int source_id = pop_reference(reptr);
     if (source_id == 0) { PUSH_STACK_INT(0); return; }
     uchar* header = heap_obj[source_id].pointer;
-    if (*header != ArrayHeader) { DOOM("Max expects array source, got %d", *header); }
+    ASSERT_LANG(*header == ArrayHeader, "Max expects array source, got %d", *header);
     struct array_val* arr = (struct array_val*)header;
-    if (arr->len == 0) { DOOM("Max on empty sequence"); }
-    if (arr->typeid != Int32) { DOOM("Max only supports Int32 sequences, got type %d", arr->typeid); }
+    ASSERT_RT(arr->len > 0, "Sequence contains no elements");
+    ASSERT_LANG(arr->typeid == Int32, "Max only supports Int32 sequences, got type %d", arr->typeid);
     int sz = get_type_sz(Int32); int m = *(int*)(&arr->payload + 0 * sz);
     for (int i = 1; i < arr->len; ++i) { int v = *(int*)(&arr->payload + i * sz); if (v > m) m = v; }
     PUSH_STACK_INT(m);
@@ -5821,10 +5734,10 @@ void builtin_Enumerable_Min(uchar** reptr) {
     int source_id = pop_reference(reptr);
     if (source_id == 0) { PUSH_STACK_INT(0); return; }
     uchar* header = heap_obj[source_id].pointer;
-    if (*header != ArrayHeader) { DOOM("Min expects array source, got %d", *header); }
+    ASSERT_LANG(*header == ArrayHeader, "Min expects array source, got %d", *header);
     struct array_val* arr = (struct array_val*)header;
-    if (arr->len == 0) { DOOM("Min on empty sequence"); }
-    if (arr->typeid != Int32) { DOOM("Min only supports Int32 sequences, got type %d", arr->typeid); }
+    ASSERT_RT(arr->len > 0, "Sequence contains no elements");
+    ASSERT_LANG(arr->typeid == Int32, "Min only supports Int32 sequences, got type %d", arr->typeid);
     int sz = get_type_sz(Int32); int m = *(int*)(&arr->payload + 0 * sz);
     for (int i = 1; i < arr->len; ++i) { int v = *(int*)(&arr->payload + i * sz); if (v < m) m = v; }
     PUSH_STACK_INT(m);
@@ -5844,7 +5757,7 @@ void builtin_Enumerable_DefaultIfEmpty(uchar** reptr) {
         return;
     }
     uchar* header = heap_obj[source_id].pointer;
-    if (*header != ArrayHeader) { DOOM("DefaultIfEmpty expects array source, got %d", *header); }
+    ASSERT_LANG(*header == ArrayHeader, "DefaultIfEmpty expects array source, got %d", *header);
     struct array_val* arr = (struct array_val*)header;
     if (arr->len > 0) { PUSH_STACK_REFERENCEID(source_id); return; }
     int rid = newarr(1, def_type);
@@ -6057,7 +5970,7 @@ void setup_builtin_methods() {
 	builtin_methods[bn++] = builtin_DefaultInterpolatedStringHandler_AppendFormatted_Value_Format; //171
 	builtin_methods[bn++] = builtin_DefaultInterpolatedStringHandler_ToStringAndClear; //172
 
-	INFO("System builtin methods n=%d", bn);
+	DBG("System builtin methods n=%d", bn);
 	add_additional_builtins();
 
 	if (bn >= NUM_BUILTIN_METHODS) {
@@ -6190,7 +6103,7 @@ __declspec(dllexport) void test(uchar* bin, int len)
 		uchar* mem = vm_get_lower_memory();
 		int len = vm_get_lower_memory_size();
 		//printf(">>> %d finished, mem swap...\n", i);
-		print_hex(vm_get_lower_memory(), vm_get_lower_memory_size());
+		//print_hex(vm_get_lower_memory(), vm_get_lower_memory_size());
 
 		if (stateCallback != 0)
 			stateCallback(mem, len);
