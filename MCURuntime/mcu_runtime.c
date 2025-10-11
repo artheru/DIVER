@@ -70,9 +70,6 @@ VAL_OUT(ptr);
 // Runtime assertions for safety checks (always active)
 #define ASSERT_RT(expr, ...) if (!(expr)) { char err_tmp[256]={0}; int sz = snprintf(err_tmp,sizeof(err_tmp),__VA_ARGS__); report_error(cur_il_offset, err_tmp); }
 
-// Deprecated macros - kept for backward compatibility during transition
-#define DOOM(...) ASSERT_RT(0, __VA_ARGS__)
-
 /*
  * memory layout:
  * {                                                                  } is downloaded from Medulla.
@@ -547,22 +544,22 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
 #define HEAP_WRITE_INT(val) *heap=Int32; As(heap+1, int)=val; heap+=get_val_sz(Int32);
 #define HEAP_WRITE_REFERENCEID(val) *heap=ReferenceID; As(heap+1, int)=val; heap+=get_val_sz(ReferenceID);
 
-// PUSH 
-#define PUSH_STACK_INT8(val) memset(eptr, 0, STACK_STRIDE); *eptr = SByte; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
-#define PUSH_STACK_UINT8(val) memset(eptr, 0, STACK_STRIDE); *eptr = Byte; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
-#define PUSH_STACK_INT16(val) memset(eptr, 0, STACK_STRIDE); *eptr = Int16; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
-#define PUSH_STACK_UINT16(val) memset(eptr, 0, STACK_STRIDE); *eptr = UInt16; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
-#define PUSH_STACK_INT(val) memset(eptr, 0, STACK_STRIDE); *eptr = Int32; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
-#define PUSH_STACK_UINT(val) memset(eptr, 0, STACK_STRIDE); *eptr = UInt32; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
+// PUSH - optimized to avoid unnecessary memset
+#define PUSH_STACK_INT8(val) *eptr = SByte; As(eptr + 1, int) = val; ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
+#define PUSH_STACK_UINT8(val) *eptr = Byte; As(eptr + 1, int) = val; ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
+#define PUSH_STACK_INT16(val) *eptr = Int16; As(eptr + 1, int) = val; ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
+#define PUSH_STACK_UINT16(val) *eptr = UInt16; As(eptr + 1, int) = val; ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
+#define PUSH_STACK_INT(val) *eptr = Int32; As(eptr + 1, int) = val; ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
+#define PUSH_STACK_UINT(val) *eptr = UInt32; As(eptr + 1, int) = val; ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
 
 // now our stack has eptr+1 8B aligned.
-#define PUSH_STACK_FLOAT_D(val) *eptr = Single; As(eptr + 1, float) = (val); eptr+=STACK_STRIDE;
-#define PUSH_STACK_FLOAT_M(val) { int ival = *(int*)&(val); *eptr = Single; As(eptr + 1, int) = *(int*)&(ival); eptr+=STACK_STRIDE; }
+#define PUSH_STACK_FLOAT_D(val) *eptr = Single; As(eptr + 1, float) = (val); ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
+#define PUSH_STACK_FLOAT_M(val) { *eptr = Single; As(eptr + 1, int) = val; ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE; }
 
 #define PUSH_STACK_METHODHANDLER(val) *eptr = MethodPointer; As(eptr + 1, struct method_pointer) = (val); eptr+=STACK_STRIDE;
 
 // not on reference id: it's heap object ID, not address!!!
-#define PUSH_STACK_REFERENCEID(val) *eptr = ReferenceID; As(eptr + 1, int) = val; eptr+=STACK_STRIDE;
+#define PUSH_STACK_REFERENCEID(val) *eptr = ReferenceID; As(eptr + 1, int) = val; ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
 
 // address is starting at mem0;
 #define PUSH_STACK_ADDRESS(val, typeid) *eptr = Address; As(eptr + 1, int) = (int)(val-mem0); *(eptr+5)=typeid; eptr+=STACK_STRIDE;
@@ -2792,19 +2789,19 @@ void vm_sort_slots() {
 #define BUILTIN_CLSID(idx) (BUILTIN_CLSID_BASE + (idx))
 
 
-// PUSH
-#define PUSH_STACK_INT8(val) memset(*reptr, 0, 8); **reptr = SByte; As(*reptr + 1, int) = val; *reptr+=8;
-#define PUSH_STACK_UINT8(val) memset(*reptr, 0, 8); **reptr = Byte; As(*reptr + 1, int) = val; *reptr+=8;
-#define PUSH_STACK_INT16(val) memset(*reptr, 0, 8); **reptr = Int16; As(*reptr + 1, int) = val; *reptr+=8;
-#define PUSH_STACK_UINT16(val) memset(*reptr, 0, 8); **reptr = UInt16; As(*reptr + 1, int) = val; *reptr+=8;
-#define PUSH_STACK_INT(val) memset(*reptr, 0, 8); **reptr = Int32; As(*reptr + 1, int) = val; *reptr+=8;
-#define PUSH_STACK_UINT(val) memset(*reptr, 0, 8); **reptr = UInt32; As(*reptr + 1, int) = val; *reptr+=8;
-#define PUSH_STACK_FLOAT_D(val) memset(*reptr, 0, 8); **reptr = Single; As(*reptr + 1, float) = val; *reptr+=8;
+// PUSH - optimized to avoid unnecessary memset
+#define PUSH_STACK_INT8(val) **reptr = SByte; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
+#define PUSH_STACK_UINT8(val) **reptr = Byte; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
+#define PUSH_STACK_INT16(val) **reptr = Int16; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
+#define PUSH_STACK_UINT16(val) **reptr = UInt16; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
+#define PUSH_STACK_INT(val) **reptr = Int32; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
+#define PUSH_STACK_UINT(val) **reptr = UInt32; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
+#define PUSH_STACK_FLOAT_D(val) **reptr = Single; As(*reptr + 1, float) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
 
-#define PUSH_STACK_FLOAT_M(val) { **reptr = Single; int iv = *(int*)(&(val)); As(*reptr + 1, int) = *(int*)(&(iv)); *reptr+=8; }
+#define PUSH_STACK_FLOAT_M(val) { **reptr = Single; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8; }
 
 // not on reference id: it's heap object ID, not address!!!
-#define PUSH_STACK_REFERENCEID(val) memset(*reptr, 0, 8); **reptr = ReferenceID; As(*reptr + 1, int) = val; *reptr+=8;
+#define PUSH_STACK_REFERENCEID(val) **reptr = ReferenceID; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
 
 #undef PUSH_STACK_INDIRECT
 #define POP {(*reptr)-=8;}
@@ -3759,11 +3756,9 @@ static uchar* pop_value_type_slot(uchar** reptr, const char* where)
 void do_job(uchar** reptr, int len, uchar** arg_ptr)
 {
 	int format_str_id = pop_reference(reptr);
-	if (format_str_id == 0)
-		DOOM("format string is nullpointer?");
+	ASSERT_LANG(format_str_id != 0, "format string is null");
 	uchar* header = heap_obj[format_str_id].pointer;
-	if (*header != StringHeader)
-		DOOM("format not a string!");
+	ASSERT_LANG(*header == StringHeader, "format argument is not a string (header=%d)", *header);
 
 	char* format = &((struct string_val*)header)->payload;
 
@@ -3805,15 +3800,12 @@ void builtin_String_Format_3(uchar** reptr) {
 
 void builtin_String_Format_Array(uchar** reptr) {
 	int args_array_id = pop_reference(reptr);
-	if (args_array_id == 0)
-		DOOM("format argument is nullpointer array?");
+	ASSERT_RT(args_array_id != 0, "format arguments array is null");
 	uchar* args[16];
 	uchar* header = heap_obj[args_array_id].pointer;
-	if (*header != ArrayHeader)
-		DOOM("args not a array!");
+	ASSERT_LANG(*header == ArrayHeader, "format arguments is not an array (header=%d)", *header);
 	struct array_val* arr = header;
-	if (arr->typeid != BoxedObject)
-		DOOM("args not an object array!");
+	ASSERT_LANG(arr->typeid == BoxedObject, "format arguments array is not object[] (typeid=%d)", arr->typeid);
 	for (int i = 0; i < arr->len; ++i)
 		args[i] = &arr->payload + i * get_type_sz(BoxedObject);
 	do_job(reptr, arr->len, args);
@@ -3823,7 +3815,7 @@ void builtin_String_Concat_2(uchar** reptr) {
 	int str2_id = pop_reference(reptr);
 	int str1_id = pop_reference(reptr);
 
-	if (str2_id == 0 || str1_id == 0) DOOM("concat of nullpointer");
+	ASSERT_LANG(str1_id != 0 && str2_id != 0, "String.Concat arguments cannot be null");
 	struct string_val* str1 = (struct string_val*)heap_obj[str1_id].pointer;
 	struct string_val* str2 = (struct string_val*)heap_obj[str2_id].pointer;
 
@@ -3845,7 +3837,7 @@ void builtin_String_Concat_3(uchar** reptr) {
 	int str2_id = pop_reference(reptr);
 	int str1_id = pop_reference(reptr);
 
-	if (str3_id == 0 || str2_id == 0 || str1_id == 0) DOOM("concat of nullpointer");
+	ASSERT_LANG(str1_id != 0 && str2_id != 0 && str3_id != 0, "String.Concat arguments cannot be null");
 	struct string_val* str1 = (struct string_val*)heap_obj[str1_id].pointer;
 	struct string_val* str2 = (struct string_val*)heap_obj[str2_id].pointer;
 	struct string_val* str3 = (struct string_val*)heap_obj[str3_id].pointer;
@@ -3870,7 +3862,7 @@ void builtin_String_Concat_4(uchar** reptr) {
 	int str2_id = pop_reference(reptr);
 	int str1_id = pop_reference(reptr);
 
-	if (str4_id == 0 || str3_id == 0 || str2_id == 0 || str1_id == 0) DOOM("concat of nullpointer");
+	ASSERT_LANG(str1_id != 0 && str2_id != 0 && str3_id != 0 && str4_id != 0, "String.Concat arguments cannot be null");
 	struct string_val* str1 = (struct string_val*)heap_obj[str1_id].pointer;
 	struct string_val* str2 = (struct string_val*)heap_obj[str2_id].pointer;
 	struct string_val* str3 = (struct string_val*)heap_obj[str3_id].pointer;
@@ -3896,10 +3888,9 @@ void builtin_String_Substring_2(uchar** reptr) {
 	int startIndex = pop_int(reptr);
 	int str_id = pop_reference(reptr);
 
-	if (str_id == 0) DOOM("substring of nullpointer");
+	ASSERT_RT(str_id != 0, "String.Substring called on null");
 	struct string_val* str = (struct string_val*)heap_obj[str_id].pointer;
-	if (*(uchar*)str != StringHeader)
-		DOOM("substring require string");
+	ASSERT_LANG(*(uchar*)str == StringHeader, "String.Substring called on non-string (header=%d)", *(uchar*)str);
 
 	if (startIndex < 0 || startIndex + length > str->str_len) {
 		// Handle error: out of range
@@ -3956,11 +3947,9 @@ void builtin_RunOnMCU_WriteStream(uchar** reptr) {
 	int args_array_id = pop_reference(reptr);
 
 	uchar* header = heap_obj[args_array_id].pointer;
-	if (*header != ArrayHeader)
-		DOOM("args not a array!");
+	ASSERT_LANG(*header == ArrayHeader, "WriteStream data is not an array (header=%d)", *header);
 	struct array_val* arr = header;
-	if (arr->typeid != Byte)
-		DOOM("array is not byte[]");
+	ASSERT_LANG(arr->typeid == Byte, "WriteStream requires byte[] (typeid=%d)", arr->typeid);
 
 	enter_critical();
 	int n_offset = writing_buf->offset;
@@ -3986,14 +3975,9 @@ void builtin_RunOnMCU_WriteEvent(uchar** reptr) {
 	int args_array_id = pop_reference(reptr);
 
 	uchar* header = heap_obj[args_array_id].pointer;
-	if ((int)header == -1)
-		DOOM("write event must not be null");
-
-	if (*header != ArrayHeader)
-		DOOM("args not a array!");
+	ASSERT_LANG(*header == ArrayHeader, "WriteEvent data is not an array (header=%d)", *header);
 	struct array_val* arr = header;
-	if (arr->typeid != Byte)
-		DOOM("array is not byte[]");
+	ASSERT_LANG(arr->typeid == Byte, "WriteEvent requires byte[] (typeid=%d)", arr->typeid);
 
 	enter_critical();
 	int n_offset = writing_buf->offset;
@@ -4017,11 +4001,9 @@ void builtin_RunOnMCU_ReadSnapshot(uchar** reptr) {
 void builtin_RunOnMCU_WriteSnapshot(uchar** reptr) {
 	int args_array_id = pop_reference(reptr);
 	uchar* header = heap_obj[args_array_id].pointer;
-	if (*header != ArrayHeader)
-		DOOM("args not a array!");
+	ASSERT_LANG(*header == ArrayHeader, "WriteSnapshot data is not an array (header=%d)", *header);
 	struct array_val* arr = header;
-	if (arr->typeid != Byte)
-		DOOM("array is not byte[]");
+	ASSERT_LANG(arr->typeid == Byte, "WriteSnapshot requires byte[] (typeid=%d)", arr->typeid);
 
 	// don't have to have same snapshot layout.
 	enter_critical();
@@ -4053,9 +4035,8 @@ void builtin_RunOnMCU_GetSecondsFromStart(uchar** reptr) {
 void builtin_ValueTuple2_ctor(uchar** reptr) {
 
 	struct stack_frame_header* my_stack = stack_ptr[new_stack_depth - 1];
-	if (my_stack->evaluation_st_ptr > *reptr)
-		DOOM("WTF?")
-		uchar* before = *reptr;
+	ASSERT_LANG(my_stack->evaluation_st_ptr <= *reptr, "ValueTuple2 ctor stack underflow");
+	uchar* before = *reptr;
 	POP;
 	uchar* v2 = *reptr;
 	POP;
@@ -4079,8 +4060,7 @@ void builtin_ValueTuple2_ctor(uchar** reptr) {
 
 void builtin_ValueTuple3_ctor(uchar** reptr) {
 	struct stack_frame_header* my_stack = stack_ptr[new_stack_depth - 1];
-	if (my_stack->evaluation_st_ptr > *reptr)
-		DOOM("ValueTuple3 ctor stack corrupted");
+	ASSERT_LANG(my_stack->evaluation_st_ptr <= *reptr, "ValueTuple3 ctor stack underflow");
 
 	POP;
 	uchar* v3 = *reptr;
@@ -4109,8 +4089,7 @@ void builtin_ValueTuple3_ctor(uchar** reptr) {
 
 void builtin_ValueTuple4_ctor(uchar** reptr) {
 	struct stack_frame_header* my_stack = stack_ptr[new_stack_depth - 1];
-	if (my_stack->evaluation_st_ptr > *reptr)
-		DOOM("ValueTuple4 ctor stack corrupted");
+	ASSERT_LANG(my_stack->evaluation_st_ptr <= *reptr, "ValueTuple4 ctor stack underflow");
 
 	POP;
 	uchar* v4 = *reptr;
@@ -4144,7 +4123,7 @@ void builtin_ValueTuple4_ctor(uchar** reptr) {
 void builtin_RuntimeHelpers_InitializeArray(uchar** reptr) {
 	POP;
 	// address
-	if (**reptr != Address) DOOM("require address for arg2");
+	ASSERT_LANG(**reptr == Address, "InitializeArray requires address for arg2 (got type %d)", **reptr);
 	uchar* addr = TypedAddrAsValPtr(*reptr);
 
 	int array_id = pop_reference(reptr);
@@ -4909,7 +4888,7 @@ void builtin_Enumerable_Select(uchar** reptr) {
         }
         vm_push_stack(delegate_method_id, -1, reptr);
         POP;
-        if (**reptr != result_type) { DOOM("Select: result type changed within sequence (%d->%d)", result_type, **reptr); }
+        ASSERT_RT(**reptr == result_type, "Select: result type changed within sequence (%d->%d)", result_type, **reptr);
         if (result_type == ReferenceID) {
             int result_id = *(int*)(*reptr + 1);
             *(int*)(&result_arr->payload + i * get_type_sz(ReferenceID)) = result_id;
@@ -5009,7 +4988,7 @@ void builtin_List_RemoveAt(uchar** reptr) {
 	int this_id = pop_reference(reptr);
 	struct object_val* list_obj = expect_builtin_obj(this_id, BUILTIN_CLSIDX_LIST, "List.RemoveAt");
 	int count = list_get_count(list_obj);
-	if (index < 0 || index >= count) DOOM("List.RemoveAt out of range: %d/%d", index, count);
+	ASSERT_RT(index >= 0 && index < count, "List.RemoveAt index out of range: %d/%d", index, count);
 	struct array_val* storage_arr;
 	uchar* storage = list_storage_bytes(list_obj, &storage_arr);
 	int tail = count - 1;
@@ -5066,12 +5045,12 @@ void builtin_List_InsertRange(uchar** reptr) {
 	int insert_count = src->len;
 	if (insert_count == 0) return;
 	int count = list_get_count(list_obj);
-	if (index < 0 || index > count) DOOM("List.InsertRange index out of range: %d/%d", index, count);
+	ASSERT_RT(index >= 0 && index <= count, "List.InsertRange index out of range: %d/%d", index, count);
 
 	// If element type not set, set from first element of source
 	int elem_type = list_get_element_type(list_obj);
 	if (elem_type == 0) { list_set_element_type(list_obj, src->typeid == ReferenceID ? ReferenceID : src->typeid); elem_type = list_get_element_type(list_obj); }
-	if (src->typeid != elem_type) DOOM("List.InsertRange type mismatch: list=%d src=%d", elem_type, src->typeid);
+	ASSERT_RT(src->typeid == elem_type, "List.InsertRange type mismatch: list=%d src=%d", elem_type, src->typeid);
 
 	int capacity = list_get_capacity(list_obj);
 	int needed = count + insert_count;
@@ -5126,7 +5105,7 @@ void builtin_Queue_Enqueue(uchar** reptr) {
 	int elem_type = queue_get_element_type(q);
 	uchar val_type = stack_value_type(&value);
 	if (elem_type == 0) { queue_set_element_type(q, val_type); elem_type = val_type; }
-	if (elem_type != val_type) DOOM("Queue.Enqueue type mismatch: %d vs %d", elem_type, val_type);
+	ASSERT_RT(elem_type == val_type, "Queue.Enqueue type mismatch: %d vs %d", elem_type, val_type);
 	struct array_val* storage_arr; uchar* storage = queue_storage_bytes(q, &storage_arr);
 	if (count >= capacity) {
 		int new_capacity = capacity * 2;
@@ -5416,7 +5395,7 @@ void builtin_HashSet_Add(uchar** reptr) {
 	int elem_type = hset_get_element_type(s);
 	uchar val_type = stack_value_type(&value);
 	if (elem_type == 0) { hset_set_element_type(s, val_type); elem_type = val_type; }
-	if (elem_type != val_type) DOOM("HashSet.Add type mismatch: %d vs %d", elem_type, val_type);
+	ASSERT_RT(elem_type == val_type, "HashSet.Add type mismatch: %d vs %d", elem_type, val_type);
 	struct array_val* storage_arr; uchar* storage = hset_storage_bytes(s, &storage_arr);
 	if (hset_find_index(s, storage, count, &value) >= 0) { push_bool(reptr, false); return; }
 	if (count >= capacity) {
@@ -5511,7 +5490,7 @@ void builtin_DefaultInterpolatedStringHandler_AppendLiteral(uchar** reptr)
 	if (str_id != 0)
 	{
 		struct string_val* str = (struct string_val*)heap_obj[str_id].pointer;
-		if (*((uchar*)str) != StringHeader) DOOM("AppendLiteral expects string");
+		ASSERT_LANG(*((uchar*)str) == StringHeader, "AppendLiteral expects string (header=%d)", *((uchar*)str));
 		dis_obj_ensure_capacity(obj, str->str_len);
 		struct array_val* arr; uchar* bytes = dis_obj_storage_bytes(obj, &arr);
 		int len = dis_obj_get_len(obj);
@@ -5528,7 +5507,7 @@ void builtin_DefaultInterpolatedStringHandler_AppendFormatted_String(uchar** rep
 	if (str_id != 0)
 	{
 		struct string_val* str = (struct string_val*)heap_obj[str_id].pointer;
-		if (*((uchar*)str) != StringHeader) DOOM("AppendFormatted(string) expects string");
+		ASSERT_LANG(*((uchar*)str) == StringHeader, "AppendFormatted(string) expects string (header=%d)", *((uchar*)str));
 		dis_obj_ensure_capacity(obj, str->str_len);
 		struct array_val* arr; uchar* bytes = dis_obj_storage_bytes(obj, &arr);
 		int len = dis_obj_get_len(obj);
@@ -5564,10 +5543,9 @@ void builtin_DefaultInterpolatedStringHandler_AppendFormatted_Value_Format(uchar
 	struct string_val* format = NULL;
 	if (format_id != 0)
 	{
-		if (format_id <= 0 || format_id >= heap_newobj_id)
-			DOOM("DefaultInterpolatedStringHandler.AppendFormatted<T,String>: invalid format reference %d", format_id);
+		ASSERT_LANG(format_id > 0 && format_id < heap_newobj_id, "AppendFormatted: invalid format reference %d", format_id);
 		format = (struct string_val*)heap_obj[format_id].pointer;
-		ASSERT_LANG(*((uchar*)format) == StringHeader, "DefaultInterpolatedStringHandler.AppendFormatted format arg not string (header %d)", *((uchar*)format));
+		ASSERT_LANG(*((uchar*)format) == StringHeader, "AppendFormatted format arg not string (header %d)", *((uchar*)format));
 	}
 	char tmp[256];
 	// Build format like {0:fmt}
@@ -5670,7 +5648,7 @@ void builtin_Enumerable_Where(uchar** reptr) {
         } else if (rtype == Int32 || rtype == UInt32 || rtype == Int16 || rtype == UInt16 || rtype == SByte || rtype == Byte) {
             keep = (*(int*)(*reptr + 1)) != 0;
         } else {
-            DOOM("Where predicate must return Boolean, got %d", rtype);
+            ASSERT_LANG(0, "Where predicate must return Boolean, got %d", rtype);
         }
         if (keep) {
             if (src_type == ReferenceID) {
@@ -5973,9 +5951,7 @@ void setup_builtin_methods() {
 	DBG("System builtin methods n=%d", bn);
 	add_additional_builtins();
 
-	if (bn >= NUM_BUILTIN_METHODS) {
-		DOOM("Too many built-in methods! Increase NUM_BUILTIN_METHODS");
-	}
+	ASSERT_RT(bn < NUM_BUILTIN_METHODS, "Too many built-in methods (%d >= %d)! Increase NUM_BUILTIN_METHODS", bn, NUM_BUILTIN_METHODS);
 
 
 }
