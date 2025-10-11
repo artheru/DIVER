@@ -377,3 +377,8 @@ tmp_ref/
 /DiverTest/TestLogic.diver
 /DiverTest/TestLogic.diver.map.json
 /DiverTest/TestLogic.cs.full
+/DiverTest/native/code.bin
+/DiverTest/native/code.dll
+/DiverTest/native/code.exp
+/DiverTest/native/code.json
+/DiverTest/native/code.lib
