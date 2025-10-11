@@ -97,10 +97,9 @@ namespace DiverTest
         private int test = 3;
         private byte[] cache = new byte[64 * 32];
 
-        //[RequireNativeCode]
+        [RequireNativeCode]
         static byte[] RenderPattern(byte[] buffer, float bias)
         {
-            Console.WriteLine("use rp");
             int width = 64;
             int height = 32;
             int output = 0;
@@ -113,13 +112,6 @@ namespace DiverTest
                     if (value > 0.3)
                     {
                         buffer[(y / 8) * width + x] |= (byte)(1 << (y % 8));
-                        if (output++ == 5)
-                            Console.WriteLine($"set buffer{(y / 8) * width + x}|={(byte)(1 << (y % 8))}");
-                    }
-                    else
-                    {
-                        if (output++ == 10)
-                            Console.WriteLine("no set");
                     }
                 }
             }

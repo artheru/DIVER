@@ -1,4 +1,4 @@
-﻿#ifndef IS_MCU
+#ifndef IS_MCU
 #include "mcu_runtime.h"
 #define INLINE static inline
 #else
@@ -16,6 +16,7 @@
 
 #include <windows.h>
 #include <dbghelp.h>
+#include <malloc.h>
 
 #pragma comment(lib, "dbghelp.lib")
 #endif
@@ -26,11 +27,35 @@
 #include <stdlib.h>   // atoi/iota
 #include <math.h>     // all
 #include <stdint.h>
+#include <wchar.h>
 
 //hint: all structs are 1 bytes aligned.
 #pragma pack(push, 1)
 
 int cur_il_offset;
+
+// Native CCoder integration metadata
+static uchar* native_blob_ptr = NULL;
+static uchar* native_exec_blob = NULL;
+static int native_blob_size = 0;
+static int native_alignment = 1;
+static int native_arch_id = 0;
+static int native_methods = 0;
+static int* native_entry_offsets = NULL;
+static uchar* native_extra_meta = NULL;
+static uchar* native_aux_counts = NULL;
+static unsigned short* native_aux_offsets = NULL;
+static uchar* native_flags = NULL;
+static unsigned short* native_ccids = NULL;
+static void** native_method_ptrs = NULL;
+static int native_exec_blob_owned = 0;
+#ifdef _WIN32
+static HMODULE native_module = NULL;
+static wchar_t native_module_path[MAX_PATH] = { 0 };
+#endif
+
+static void release_native_metadata(void);
+static void parse_native_chunk(uchar* chunk_ptr, int chunk_size);
 
 
 #ifdef _DEBUG
@@ -259,6 +284,7 @@ struct object_val
 #define  Boolean 0
 #define  Byte 1
 #define  SByte 2
+#define  Char 3
 #define  Int16 4
 #define  UInt16 5
 #define  Int32 6
@@ -463,7 +489,495 @@ void parse_virt_methods()
 	virt_table = ptr + vmethods_N * 2;
 }
 
+static void release_native_metadata(void)
+{
+    if (native_aux_counts)
+    {
+        free(native_aux_counts);
+        native_aux_counts = NULL;
+    }
+    if (native_aux_offsets)
+    {
+        free(native_aux_offsets);
+        native_aux_offsets = NULL;
+    }
+    if (native_flags)
+    {
+        free(native_flags);
+        native_flags = NULL;
+    }
+    if (native_ccids)
+    {
+        free(native_ccids);
+        native_ccids = NULL;
+    }
+    if (native_method_ptrs)
+    {
+        free(native_method_ptrs);
+        native_method_ptrs = NULL;
+    }
+#ifdef _WIN32
+    if (native_module)
+    {
+        FreeLibrary(native_module);
+        native_module = NULL;
+    }
+    if (native_module_path[0])
+    {
+        DeleteFileW(native_module_path);
+        native_module_path[0] = 0;
+    }
+    if (native_exec_blob_owned && native_exec_blob)
+    {
+        VirtualFree(native_exec_blob, 0, MEM_RELEASE);
+    }
+#endif
+    native_exec_blob = NULL;
+    native_exec_blob_owned = 0;
+    native_blob_ptr = NULL;
+    native_blob_size = 0;
+    native_alignment = 1;
+    native_arch_id = 0;
+    native_methods = 0;
+    native_entry_offsets = NULL;
+    native_extra_meta = NULL;
+}
 
+static int read_int_safe(uchar** ptr, uchar* end)
+{
+	if (*ptr + sizeof(int) > end)
+		return 0;
+	int val = As(*ptr, int);
+	*ptr += sizeof(int);
+	return val;
+}
+
+static void parse_native_chunk(uchar* chunk_ptr, int chunk_size)
+{
+	release_native_metadata();
+	if (chunk_ptr == NULL || chunk_size <= 0)
+		return;
+
+	uchar* ptr = chunk_ptr;
+	uchar* end = chunk_ptr + chunk_size;
+
+	if (ptr + 5 * sizeof(int) > end)
+		return;
+
+	native_arch_id = read_int_safe(&ptr, end);
+	native_alignment = read_int_safe(&ptr, end);
+	native_methods = read_int_safe(&ptr, end);
+	int code_size = read_int_safe(&ptr, end);
+	int extra_meta_size = read_int_safe(&ptr, end);
+
+	if (native_methods <= 0 || native_methods > 4096)
+		return;
+
+	if (methods_N > 0 && native_methods > methods_N)
+		native_methods = methods_N;
+
+    if (ptr + native_methods * (int)sizeof(int) > end)
+        return;
+
+    native_entry_offsets = (int*)ptr;
+    ptr += native_methods * sizeof(int);
+
+	if (extra_meta_size < 0 || ptr + extra_meta_size > end)
+		extra_meta_size = 0;
+
+	native_extra_meta = ptr;
+	ptr += extra_meta_size;
+
+	if (code_size < 0 || ptr + code_size > end)
+		code_size = (int)(end - ptr);
+
+	native_blob_ptr = ptr;
+	native_blob_size = code_size;
+
+    if (native_methods > 0)
+    {
+        native_aux_counts = (uchar*)malloc(native_methods);
+        native_aux_offsets = (unsigned short*)malloc(native_methods * sizeof(unsigned short));
+        native_flags = (uchar*)malloc(native_methods);
+        native_ccids = (unsigned short*)malloc(native_methods * sizeof(unsigned short));
+        native_method_ptrs = (void**)calloc(native_methods, sizeof(void*));
+
+        if (native_aux_counts == NULL || native_aux_offsets == NULL || native_flags == NULL || native_ccids == NULL || native_method_ptrs == NULL)
+        {
+            release_native_metadata();
+            return;
+        }
+
+        uchar* meta_ptr = native_extra_meta;
+        uchar* meta_end = native_extra_meta + extra_meta_size;
+        for (int i = 0; i < native_methods; ++i)
+        {
+            uchar count = 0;
+            if (meta_ptr < meta_end)
+            {
+                count = *meta_ptr++;
+            }
+            native_aux_counts[i] = count;
+
+            uchar flags = 0;
+            if (meta_ptr < meta_end)
+            {
+                flags = *meta_ptr++;
+            }
+            native_flags[i] = flags;
+
+            unsigned short ccid = 0xFFFF;
+            if ((flags & 0x01) != 0)
+            {
+                if (meta_ptr + sizeof(unsigned short) <= meta_end)
+                {
+                    ccid = *(unsigned short*)meta_ptr;
+                    meta_ptr += sizeof(unsigned short);
+                }
+                else
+                {
+                    ccid = 0xFFFF;
+                    meta_ptr = meta_end;
+                }
+            }
+            native_ccids[i] = ccid;
+
+            if (count > 0 && meta_ptr + count <= meta_end)
+            {
+                native_aux_offsets[i] = (unsigned short)(meta_ptr - native_extra_meta);
+                meta_ptr += count;
+            }
+            else
+            {
+                native_aux_offsets[i] = 0xFFFF;
+                if (count > 0)
+                    meta_ptr = meta_end;
+            }
+        }
+    }
+
+#ifdef _WIN32
+	if (native_arch_id == 1 && native_blob_size > 0)
+	{
+		native_exec_blob = (uchar*)VirtualAlloc(NULL, native_blob_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+		if (native_exec_blob)
+		{
+			memcpy(native_exec_blob, native_blob_ptr, native_blob_size);
+			DWORD oldProtect;
+			if (VirtualProtect(native_exec_blob, native_blob_size, PAGE_EXECUTE_READ, &oldProtect))
+			{
+				native_exec_blob_owned = 1;
+			}
+			else
+			{
+				VirtualFree(native_exec_blob, 0, MEM_RELEASE);
+				native_exec_blob = NULL;
+			}
+		}
+	}
+	else if (native_arch_id != 1)
+	{
+		native_exec_blob = NULL;
+		native_exec_blob_owned = 0;
+	}
+#else
+	if (native_arch_id == 1)
+		native_exec_blob = native_blob_ptr;
+	else
+		native_exec_blob = NULL;
+#endif
+}
+
+#ifdef _WIN32
+static int ensure_pe_module_loaded(void)
+{
+	if (native_arch_id != 2)
+		return 0;
+	if (native_module)
+		return 1;
+	if (native_blob_ptr == NULL || native_blob_size <= 0)
+		return 0;
+
+	wchar_t temp_dir[MAX_PATH];
+	if (!GetTempPathW(MAX_PATH, temp_dir))
+		return 0;
+
+	wchar_t temp_file[MAX_PATH];
+	if (!GetTempFileNameW(temp_dir, L"DVR", 0, temp_file))
+		return 0;
+
+	DeleteFileW(temp_file);
+	wcsncpy(native_module_path, temp_file, MAX_PATH - 1);
+	native_module_path[MAX_PATH - 1] = 0;
+	wchar_t* dot = wcsrchr(native_module_path, L'.');
+	if (dot)
+		wcscpy(dot, L".dll");
+	else if (wcslen(native_module_path) < MAX_PATH - 4)
+		wcscat(native_module_path, L".dll");
+
+	FILE* fp = _wfopen(native_module_path, L"wb");
+	if (!fp)
+	{
+		native_module_path[0] = 0;
+		return 0;
+	}
+	size_t written = fwrite(native_blob_ptr, 1, native_blob_size, fp);
+	fclose(fp);
+	if (written != (size_t)native_blob_size)
+	{
+		DeleteFileW(native_module_path);
+		native_module_path[0] = 0;
+		return 0;
+	}
+
+	native_module = LoadLibraryW(native_module_path);
+	if (!native_module)
+	{
+		DeleteFileW(native_module_path);
+		native_module_path[0] = 0;
+		return 0;
+	}
+
+	return 1;
+}
+#endif
+
+static int native_try_execute(int method_id, struct stack_frame_header* my_stack, uchar expected_ret_type, short expected_ret_clsid, uchar** reptr, short n_args)
+{
+    int executed = 0;
+    int total_slots = n_args;
+    if (total_slots < 0)
+        total_slots = 0;
+    int slot_width = (native_arch_id == 1) ? 4 : (int)(sizeof(void*) > 4 ? sizeof(void*) : 4);
+    uchar* arg_buffer = NULL;
+
+    if (native_arch_id == 0)
+        goto cleanup;
+    if (method_id < 0 || method_id >= native_methods)
+        goto cleanup;
+    if (native_flags && (native_flags[method_id] & 0x01) == 0)
+        goto cleanup;
+    if (native_aux_counts && native_aux_counts[method_id] > 0)
+        goto cleanup; // extra args not yet supported
+    if (expected_ret_type == ReferenceID || expected_ret_type == JumpAddress)
+        goto cleanup; // reference returns not yet supported
+
+    if (native_arch_id == 1)
+    {
+        if (native_exec_blob == NULL || native_entry_offsets == NULL)
+            goto cleanup;
+        if (native_entry_offsets[method_id] < 0 || native_entry_offsets[method_id] >= native_blob_size)
+            goto cleanup;
+        if (sizeof(void*) != 4)
+            goto cleanup; // raw blobs are 32-bit only
+    }
+#ifdef _WIN32
+    else if (native_arch_id == 2)
+    {
+        if (!ensure_pe_module_loaded())
+            goto cleanup;
+    }
+#endif
+    else
+    {
+        goto cleanup;
+    }
+
+    if (total_slots > 0)
+    {
+        arg_buffer = (uchar*)malloc(total_slots * slot_width);
+        if (arg_buffer == NULL)
+            goto cleanup;
+        memset(arg_buffer, 0, total_slots * slot_width);
+    }
+
+    uchar* arg_ptr = my_stack->args;
+    for (int i = 0; i < n_args; ++i)
+    {
+        uchar typeid = *arg_ptr;
+        uchar* payload = arg_ptr + 1;
+        uchar* dst = arg_buffer + i * slot_width;
+        switch (typeid)
+        {
+        case Boolean:
+        case Byte:
+        case SByte:
+        case Char:
+        case Int16:
+        case UInt16:
+        case Int32:
+        case UInt32:
+        {
+            int sz = get_type_sz(typeid);
+            memcpy(dst, payload, sz);
+            break;
+        }
+        case Single:
+        {
+            memcpy(dst, payload, sizeof(float));
+            break;
+        }
+        case ReferenceID:
+        {
+            int rid = As(payload, int);
+            void* ptr_val = NULL;
+            if (rid > 0)
+            {
+                struct object_val* header = heap_obj[rid].pointer;
+                if (header)
+                {
+                    if (header->header == ArrayHeader)
+                        ptr_val = &((struct array_val*)header)->payload;
+                    else if (header->header == StringHeader)
+                        ptr_val = &((struct string_val*)header)->payload;
+                    else
+                        ptr_val = &header->payload;
+                }
+            }
+            memcpy(dst, &ptr_val, sizeof(void*));
+            break;
+        }
+        default:
+            goto cleanup;
+        }
+        arg_ptr += get_val_sz(typeid);
+    }
+
+    if (native_arch_id == 1)
+    {
+        uchar* func_entry = native_exec_blob + native_entry_offsets[method_id];
+
+        if (expected_ret_type == 0xFF || expected_ret_type == Metadata)
+        {
+            typedef void (__cdecl* native_void)(uchar*);
+            native_void fn = (native_void)func_entry;
+            fn(arg_buffer);
+            executed = 1;
+        }
+        else if (expected_ret_type == Single)
+        {
+            typedef float (__cdecl* native_float)(uchar*);
+            native_float fn = (native_float)func_entry;
+            float result = fn(arg_buffer);
+            if (reptr && *reptr)
+            {
+                uchar* dst = *reptr;
+                *dst = Single;
+                memcpy(dst + 1, &result, sizeof(float));
+                *reptr += STACK_STRIDE;
+            }
+            executed = 1;
+        }
+        else
+        {
+            typedef int (__cdecl* native_int)(uchar*);
+            native_int fn = (native_int)func_entry;
+            int result = fn(arg_buffer);
+            if (reptr && *reptr)
+            {
+                uchar* dst = *reptr;
+                *dst = expected_ret_type;
+                switch (expected_ret_type)
+                {
+                case Boolean:
+                case Byte:
+                case SByte:
+                    dst[1] = (uchar)result;
+                    break;
+                case Char:
+                case Int16:
+                    As(dst + 1, short) = (short)result;
+                    break;
+                case UInt16:
+                    As(dst + 1, unsigned short) = (unsigned short)result;
+                    break;
+                case Int32:
+                case UInt32:
+                default:
+                    As(dst + 1, int) = result;
+                    break;
+                }
+                *reptr += STACK_STRIDE;
+            }
+            executed = 1;
+        }
+    }
+#ifdef _WIN32
+    else if (native_arch_id == 2)
+    {
+        if (!native_method_ptrs[method_id])
+        {
+            unsigned short ccid = native_ccids ? native_ccids[method_id] : 0xFFFF;
+            if (ccid == 0xFFFF)
+                goto cleanup;
+            char fname[32];
+            snprintf(fname, sizeof(fname), "cfun%u", (unsigned)ccid);
+            FARPROC proc = GetProcAddress(native_module, fname);
+            if (!proc)
+                goto cleanup;
+            native_method_ptrs[method_id] = proc;
+        }
+
+        void* fnptr = native_method_ptrs[method_id];
+        if (expected_ret_type == 0xFF || expected_ret_type == Metadata)
+        {
+            typedef void (__cdecl* native_void)(uchar*);
+            ((native_void)fnptr)(arg_buffer);
+            executed = 1;
+        }
+        else if (expected_ret_type == Single)
+        {
+            typedef float (__cdecl* native_float)(uchar*);
+            float result = ((native_float)fnptr)(arg_buffer);
+            if (reptr && *reptr)
+            {
+                uchar* dst = *reptr;
+                *dst = Single;
+                memcpy(dst + 1, &result, sizeof(float));
+                *reptr += STACK_STRIDE;
+            }
+            executed = 1;
+        }
+        else
+        {
+            typedef int (__cdecl* native_int)(uchar*);
+            int result = ((native_int)fnptr)(arg_buffer);
+            if (reptr && *reptr)
+            {
+                uchar* dst = *reptr;
+                *dst = expected_ret_type;
+                switch (expected_ret_type)
+                {
+                case Boolean:
+                case Byte:
+                case SByte:
+                    dst[1] = (uchar)result;
+                    break;
+                case Char:
+                case Int16:
+                    As(dst + 1, short) = (short)result;
+                    break;
+                case UInt16:
+                    As(dst + 1, unsigned short) = (unsigned short)result;
+                    break;
+                case Int32:
+                case UInt32:
+                default:
+                    As(dst + 1, int) = result;
+                    break;
+                }
+                *reptr += STACK_STRIDE;
+            }
+            executed = 1;
+        }
+    }
+#endif
+
+cleanup:
+    if (arg_buffer)
+        free(arg_buffer);
+    return executed;
+}
 int get_virt_method_actual_methodID(int vmethod_id, int cls_id)
 {
 	uchar* ptr = virt_table + *((short*)(virt_ptr + 2) + vmethod_id);
@@ -488,6 +1002,7 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
 
 	heap_newobj_id = 1;
 	ladderlogic_this_refid = 0;
+	release_native_metadata();
 	uchar* ptr = mem0 = vm_memory;
 	auto interval = ReadInt;
 	entry_method_id = ReadInt;
@@ -496,19 +1011,22 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
 	auto code_chunk_sz = ReadInt;
 	auto virt_chunk_sz = ReadInt;
 	auto static_desc_sz = ReadInt;
+	auto native_chunk_sz = ReadInt;
 	ladderlogic_this_clsid = ReadInt;
 
 	program_desc_ptr = ptr;
 	code_ptr = program_desc_ptr + program_desc_sz;
 	virt_ptr = code_ptr + code_chunk_sz;
 	statics_desc_ptr = virt_ptr + virt_chunk_sz;
-	statics_val_ptr = statics_desc_ptr + static_desc_sz + static_desc_sz;
+	uchar* native_ptr = statics_desc_ptr + static_desc_sz;
+	statics_val_ptr = native_ptr + native_chunk_sz;
 
 	heap_tail = vm_memory + vm_memory_size;
 
 	parse_program_desc();
 	parse_methods();
 	parse_virt_methods();
+	parse_native_chunk(native_ptr, native_chunk_sz);
 
 
 	DBG("interval=%d, nstatics=%d, this_clsid=%d\n", interval, statics_amount, ladderlogic_this_clsid);
@@ -866,6 +1384,9 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 	my_stack->evaluation_st_ptr = my_stack->evaluation_pointer = (((int)(sptr - mem0 + 3) >> 2) << 2) + mem0 + 3;
 
 	DBG(">>> Stack Custom Method %d, pop %d vals\n", method_id, n_args);
+
+	if (native_try_execute(method_id, my_stack, expected_ret_type, expected_ret_clsid, reptr, n_args))
+		goto exited;
 
 	// start running:
 	while (1)

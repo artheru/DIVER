@@ -12,12 +12,13 @@ import pathlib
 def check_tools():
     global arm_embedded_toolchain_prefix
 
-    if shutil.which('./arm_ram_overlay.ld') is None:
-        print(f'Error: The linker script file is missing')
-        sys.exit(1)
-
     script_path = os.path.abspath(__file__)
     script_dir = os.path.dirname(script_path)
+    linker_script = os.path.join(script_dir, 'arm_ram_overlay.ld')
+    if not os.path.exists(linker_script):
+        print(f'Error: The linker script file is missing: {linker_script}')
+        sys.exit(1)
+
     arm_embedded_toolchain_dir = os.path.join(
         script_dir, 'arm_embedded_toolchain')
     arm_gcc_path = os.path.join(
@@ -79,7 +80,7 @@ def compile_and_link(c_files, output_elf):
             '-fPIC',  # Position Independent Code for relocatable functions
             '-ffreestanding', '-nostdlib', '-nodefaultlibs', '-nostartfiles',
             '-mcpu=cortex-m4', '-mthumb', '-mfloat-abi=hard', '-mfpu=fpv4-sp-d16',
-            '-Tarm_ram_overlay.ld',
+            f'-T{os.path.join(os.path.dirname(os.path.abspath(__file__)), "arm_ram_overlay.ld")}',
             '-lm',  # Link math library for math.h functions
         ] + c_files
 

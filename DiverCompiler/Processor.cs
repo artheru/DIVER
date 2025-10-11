@@ -14,6 +14,7 @@ using System.IO;
 using FieldAttributes = Mono.Cecil.FieldAttributes;
 using System.Security.Cryptography;
 using static System.Net.Mime.MediaTypeNames;
+using System.Text.RegularExpressions;
 
 namespace MCURoutineCompiler;
 
@@ -30,6 +31,18 @@ internal partial class Processor
         public (string FieldName, int offset, byte typeid)[] IOs;
         public byte[] diver_src;
         public byte[] diver_map;
+        public byte[] native_blob;
+        public int[] native_entry_offsets;
+        public int native_alignment;
+        public int native_arch_id;
+    }
+
+    private sealed class NativeManifestInfo
+    {
+        public Dictionary<string, int> Functions { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public int Alignment { get; set; } = 1;
+        public string Type { get; set; }
+        public string Machine { get; set; }
     }
 
     string GetNameNonGeneric(MethodReference methodRef)
@@ -533,7 +546,339 @@ internal partial class Processor
     }
 
     private CCoder cc = new();
-     
+
+    private sealed class NativeCompilationResult
+    {
+        public byte[] Blob;
+        public int[] EntryOffsets;
+        public int Alignment;
+        public int ArchitectureId;
+        public Dictionary<int, string> MethodFunctionNames = new();
+        public string ManifestType;
+        public string ManifestMachine;
+    }
+
+    private static string LocateOnPath(string fileName)
+    {
+        if (Path.IsPathRooted(fileName) && File.Exists(fileName))
+            return fileName;
+
+        var pathEnv = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrWhiteSpace(pathEnv))
+            return null;
+
+        foreach (var path in pathEnv.Split(Path.PathSeparator))
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(path)) continue;
+                var candidate = Path.Combine(path.Trim(), fileName);
+                if (File.Exists(candidate))
+                    return candidate;
+            }
+            catch
+            {
+                // ignore malformed entries
+            }
+        }
+        return null;
+    }
+
+    private string FindPythonExecutable()
+    {
+        string[] candidates =
+        {
+            "py.exe",
+            "python.exe",
+            "python3.exe"
+        };
+
+        foreach (var exe in candidates)
+        {
+            var located = LocateOnPath(exe);
+            if (located != null)
+                return located;
+        }
+
+        return null;
+    }
+
+    private NativeCompilationResult TryCompileNativeCode(MethodEntry[] allMethods)
+    {
+        try
+        {
+            if (allMethods == null || allMethods.Length == 0)
+                return null;
+
+            bmw.WriteWarning(
+                $">> Native codes:{string.Join(",", allMethods.Where(p => p.ccoder != null && p.ccoder.CError == "none").Select(p => p.name))}");
+
+            if (!allMethods.Any(m => m?.ccoder != null && m.ccoder.CError == "none"))
+                return null; // nothing to compile
+
+            var nativeDir = Path.Combine(Environment.CurrentDirectory, "native");
+            var cSourcePath = Path.Combine(nativeDir, "code.c");
+            if (!File.Exists(cSourcePath))
+            {
+                bmw?.WriteWarning($"CCoder: generated source not found at {cSourcePath}, skip native compilation.");
+                return null;
+            }
+
+            var compilerAssemblyDir = Path.GetDirectoryName(typeof(Processor).Assembly.Location) ?? Environment.CurrentDirectory;
+            var scriptPath = Path.Combine(compilerAssemblyDir, "native", "compile_native_binary.py");
+            if (!File.Exists(scriptPath))
+            {
+                bmw?.WriteWarning($"CCoder: compile script missing at {scriptPath}, skip native compilation.");
+                return null;
+            }
+
+            var pythonExe = FindPythonExecutable();
+            if (pythonExe == null)
+            {
+                bmw?.WriteWarning("CCoder: Python executable not found on PATH, skip native compilation.");
+                return null;
+            }
+
+            var distPrefix = Path.Combine(nativeDir, "code");
+            var psi = new ProcessStartInfo
+            {
+                FileName = pythonExe,
+                Arguments = $"\"{scriptPath}\" \"{distPrefix}\" \"{cSourcePath}\"",
+                WorkingDirectory = nativeDir,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            using (var proc = System.Diagnostics.Process.Start(psi))
+            {
+                if (proc == null)
+                {
+                    bmw?.WriteWarning("CCoder: failed to start native compiler process.");
+                    return null;
+                }
+
+                string stdout = proc.StandardOutput.ReadToEnd();
+                string stderr = proc.StandardError.ReadToEnd();
+                proc.WaitForExit();
+
+                if (proc.ExitCode != 0)
+                {
+                    bmw?.WriteWarning($"CCoder: native compilation failed (exit {proc.ExitCode}).\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}");
+                    return null;
+                }
+                else if (!string.IsNullOrWhiteSpace(stdout))
+                {
+                    bmw?.WriteWarning($"CCoder: {stdout.Trim()}");
+                }
+                if (!string.IsNullOrWhiteSpace(stderr))
+                {
+                    bmw?.WriteWarning($"CCoder stderr: {stderr.Trim()}");
+                }
+            }
+
+            var binPath = distPrefix + ".bin";
+            var jsonPath = distPrefix + ".json";
+            if (!File.Exists(binPath) || !File.Exists(jsonPath))
+            {
+                bmw?.WriteWarning($"CCoder: expected outputs missing (.bin/.json). binExists={File.Exists(binPath)}, jsonExists={File.Exists(jsonPath)}");
+                return null;
+            }
+
+            byte[] blob = File.ReadAllBytes(binPath);
+
+            var manifestText = File.ReadAllText(jsonPath);
+            var manifest = ParseNativeManifest(manifestText);
+
+            var entryOffsets = Enumerable.Repeat(-1, allMethods.Length).ToArray();
+            var fnNames = new Dictionary<int, string>();
+
+            foreach (var m in allMethods)
+            {
+                if (m?.ccoder == null || m.ccoder.CError != "none")
+                    continue;
+
+                var fname = $"cfun{m.ccoder.myid}";
+                if (manifest.Functions.TryGetValue(fname, out var entry))
+                {
+                    if (entry >= 0)
+                        entryOffsets[m.registry] = entry;
+                    fnNames[m.registry] = fname;
+                }
+                else if (manifest.Functions.Count > 0)
+                {
+                    bmw?.WriteWarning($"CCoder: native manifest missing entry for {fname}, method {m.name} (id {m.registry}).");
+                }
+            }
+
+            int alignment = manifest.Alignment <= 0 ? 1 : manifest.Alignment;
+            int archId = 1;
+            var typeText = manifest.Type ?? string.Empty;
+            var machineText = manifest.Machine ?? string.Empty;
+            if (typeText.IndexOf("pe", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                typeText.IndexOf("dll", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                machineText.IndexOf("x64", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                machineText.IndexOf("amd64", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                archId = 2; // PE/Windows DLL
+            }
+            else if (blob.Length == 0)
+            {
+                archId = 0;
+            }
+
+            return new NativeCompilationResult
+            {
+                Blob = blob,
+                EntryOffsets = entryOffsets,
+                Alignment = alignment,
+                ArchitectureId = archId,
+                MethodFunctionNames = fnNames,
+                ManifestType = manifest.Type,
+                ManifestMachine = manifest.Machine
+            };
+        }
+        catch (Exception ex)
+        {
+            bmw?.WriteWarning($"CCoder: native compilation threw exception {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+    }
+
+    private byte[] BuildNativeChunk(NativeCompilationResult nativeResult, MethodEntry[] methods)
+    {
+        int methodCount = methods?.Length ?? 0;
+        var offsets = nativeResult.EntryOffsets ?? Enumerable.Repeat(-1, methodCount).ToArray();
+        if (offsets.Length != methodCount)
+        {
+            var resized = Enumerable.Repeat(-1, methodCount).ToArray();
+            Array.Copy(offsets, resized, Math.Min(offsets.Length, methodCount));
+            offsets = resized;
+        }
+
+        var blob = nativeResult.Blob ?? Array.Empty<byte>();
+        int archId = nativeResult.ArchitectureId;
+        int alignment = nativeResult.Alignment <= 0 ? 1 : nativeResult.Alignment;
+
+        var extraMeta = new List<byte>();
+        if (methodCount > 0 && methods != null)
+        {
+            for (int i = 0; i < methodCount; i++)
+            {
+                var m = methods[i];
+                var auxArgs = (m?.ccoder?.additional_Args?.ToArray()) ?? Array.Empty<(string name, string argtype)>();
+                var ordered = auxArgs.OrderBy(a => a.name, StringComparer.Ordinal).ToArray();
+                if (ordered.Length > byte.MaxValue)
+                    throw new WeavingException($"Method {m?.name} has too many CCoder auxiliary arguments ({ordered.Length}).");
+
+                byte flags = 0;
+                ushort ccid = 0xFFFF;
+                int registry = m?.registry ?? i;
+                bool hasNative = false;
+                if (nativeResult.MethodFunctionNames.TryGetValue(registry, out _))
+                {
+                    hasNative = true;
+                }
+                else if (registry >= 0 && registry < offsets.Length && offsets[registry] >= 0)
+                {
+                    hasNative = true;
+                }
+                if (hasNative)
+                {
+                    flags |= 0x01;
+                    ccid = (ushort)(m?.ccoder?.myid ?? 0);
+                }
+
+                extraMeta.Add((byte)ordered.Length); // aux count
+                extraMeta.Add(flags);
+                if ((flags & 0x01) != 0)
+                {
+                    extraMeta.Add((byte)(ccid & 0xFF));
+                    extraMeta.Add((byte)(ccid >> 8));
+                }
+
+                foreach (var arg in ordered)
+                    extraMeta.Add(MapExtraArgKind(arg.name));
+            }
+        }
+
+        while (extraMeta.Count % 4 != 0)
+            extraMeta.Add(0xFF); // padding
+
+        int extraMetaSize = extraMeta.Count;
+
+        var buffer = new List<byte>(20 + methodCount * sizeof(int) + extraMetaSize + blob.Length);
+        buffer.AddRange(BitConverter.GetBytes(archId));
+        buffer.AddRange(BitConverter.GetBytes(alignment));
+        buffer.AddRange(BitConverter.GetBytes(methodCount));
+        buffer.AddRange(BitConverter.GetBytes(blob.Length));
+        buffer.AddRange(BitConverter.GetBytes(extraMetaSize));
+        foreach (var offset in offsets)
+            buffer.AddRange(BitConverter.GetBytes(offset));
+        buffer.AddRange(extraMeta);
+        buffer.AddRange(blob);
+        return buffer.ToArray();
+    }
+
+    private byte MapExtraArgKind(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+            return 0;
+        if (name.EndsWith("_arr_stride_lb", StringComparison.Ordinal))
+            return 1;
+        if (name.EndsWith("_static", StringComparison.Ordinal))
+            return 2;
+        return 0;
+    }
+
+    private NativeManifestInfo ParseNativeManifest(string jsonText)
+    {
+        var info = new NativeManifestInfo();
+        if (string.IsNullOrWhiteSpace(jsonText))
+            return info;
+
+        var alignMatch = Regex.Match(jsonText, "\"alignment\"\\s*:\\s*(\\d+)", RegexOptions.IgnoreCase);
+        if (alignMatch.Success && int.TryParse(alignMatch.Groups[1].Value, out var alignValue))
+            info.Alignment = alignValue;
+
+        var funcMatches = Regex.Matches(jsonText, "\"name\"\\s*:\\s*\"(?<name>[^\"]+)\"[^{}]*?\"entry_point\"\\s*:\\s*(?<entry>\\d+)", RegexOptions.IgnoreCase);
+        foreach (Match match in funcMatches)
+        {
+            var name = match.Groups["name"].Value;
+            if (!int.TryParse(match.Groups["entry"].Value, out var entry))
+                continue;
+            info.Functions[name] = entry;
+        }
+
+        if (info.Functions.Count == 0)
+        {
+            // fallback: simple array ["cfun0","cfun1",...]
+            var simpleMatches = Regex.Matches(jsonText, "\"functions\"\\s*:\\s*\\[(?<payload>[^\\]]*)\\]", RegexOptions.IgnoreCase);
+            foreach (Match sm in simpleMatches)
+            {
+                var payload = sm.Groups["payload"].Value;
+                var nameMatches = Regex.Matches(payload, "\"(?<fname>[^\"]+)\"");
+                foreach (Match nm in nameMatches)
+                {
+                    var fname = nm.Groups["fname"].Value;
+                    if (!info.Functions.ContainsKey(fname))
+                        info.Functions[fname] = -1;
+                }
+            }
+        }
+
+        var typeMatch = Regex.Match(jsonText, "\"type\"\\s*:\\s*\"(?<type>[^\"]+)\"", RegexOptions.IgnoreCase);
+        if (typeMatch.Success)
+            info.Type = typeMatch.Groups["type"].Value;
+
+        var machineMatch = Regex.Match(jsonText, "\"machine\"\\s*:\\s*\"(?<machine>[^\"]+)\"", RegexOptions.IgnoreCase);
+        if (machineMatch.Success)
+            info.Machine = machineMatch.Groups["machine"].Value;
+
+        return info;
+    }
+
     public MethodEntry Process(MethodDefinition method, MethodReference methodRef=null, int scanInterval=1000)
     {
         if (isRoot) 
@@ -1054,6 +1399,13 @@ internal partial class Processor
                             #define u4 unsigned int
                             #define r4 float
                             #define ptr void*
+                            #define ARG_SLOT ((int)(sizeof(void*) > 4 ? sizeof(void*) : 4))
+                            #define ARG_AT(type, base, idx) (*(type*)((base) + (idx)*ARG_SLOT))
+                            #if defined(_WIN32)
+                            #define NATIVE_API __declspec(dllexport)
+                            #else
+                            #define NATIVE_API
+                            #endif
 
                             // function begins
                             
@@ -1073,7 +1425,7 @@ internal partial class Processor
                         retN = CCoder.CCTyping[m.retBytes[0]];
                     }
                     var fcname = m.ccoder.myid;
-                    allCCodes += $"{retN} cfun{fcname}(u1* args);\n";
+                    allCCodes += $"NATIVE_API {retN} cfun{fcname}(u1* args);\n";
                 }
             }
 
@@ -1100,13 +1452,13 @@ internal partial class Processor
                     var fcname = m.ccoder.myid;
 
                     var arg_set = $"int argN=0;\n{
-                        string.Join("\n", m.argumentList.Select((p, ai) => $"{CCoder.CCTyping[p.typeID]} arg{ai} = *({CCoder.CCTyping[p.typeID]}*)&args[(argN++)*4];"))}{
+                        string.Join("\n", m.argumentList.Select((p, ai) => $"{CCoder.CCTyping[p.typeID]} arg{ai} = ARG_AT({CCoder.CCTyping[p.typeID]}, args, argN++);"))}{
                             (m.ccoder.additional_Args.Count == 0 ? "" : $"\n{
-                                string.Join("\n", m.ccoder.additional_Args.Select(p => $"{p.argtype} {p.name} = *({p.argtype}*)&args[(argN++)*4];"))}")}";
+                                string.Join("\n", m.ccoder.additional_Args.OrderBy(p => p.name, StringComparer.Ordinal).Select(p => $"{p.argtype} {p.name} = ARG_AT({p.argtype}, args, argN++);"))}")}";
 
                     var cCode =
                         $"// {m.name}\n" +
-                        $"{retN} cfun{fcname}(u1* args){{\n" +
+                        $"NATIVE_API {retN} cfun{fcname}(u1* args){{\n" +
                         $"//args:\n{arg_set}\n" +
                         $"//stack_vars:\n{string.Join(";\n", m.ccoder.stackVars)};\n " +
                         $"//local_vars:\n{string.Join(";\n", m.variableList.Select((p, ai) => $"{CCoder.CCTyping[p.typeID]} var{ai}"))};\n" +
@@ -1119,9 +1471,21 @@ internal partial class Processor
                     //bmw.WriteWarning($"CCode error of {m.name}: {m.ccoder.CError}");
                 }
             }
-             
+              
             Directory.CreateDirectory("native");
             File.WriteAllText($"native\\code.c", allCCodes);
+
+            var nativeResult = TryCompileNativeCode(all_methods) ?? new NativeCompilationResult
+            {
+                Blob = Array.Empty<byte>(),
+                EntryOffsets = Enumerable.Repeat(-1, all_methods.Length).ToArray(),
+                Alignment = 1,
+                ArchitectureId = 0
+            };
+            if (nativeResult.EntryOffsets == null || nativeResult.EntryOffsets.Length != all_methods.Length)
+            {
+                nativeResult.EntryOffsets = Enumerable.Repeat(-1, all_methods.Length).ToArray();
+            }
 
 
             (bool main, byte[]meta, byte[]code)[] codes = all_methods.Select(mi => (
@@ -1216,6 +1580,8 @@ internal partial class Processor
                 })
             ]; 
 
+            byte[] native_chunk = BuildNativeChunk(nativeResult, all_methods);
+
 
 
             // virtual method calls:
@@ -1282,13 +1648,14 @@ internal partial class Processor
                 ..BitConverter.GetBytes(code_chunk.Length),
                 ..BitConverter.GetBytes(virts.Length), 
                 ..BitConverter.GetBytes(statics_descriptor.Length),
+                ..BitConverter.GetBytes(native_chunk.Length),
                 ..BitConverter.GetBytes(this_clsID), // this.
-                ..program_desc, ..code_chunk, ..virts, ..statics_descriptor];
+                ..program_desc, ..code_chunk, ..virts, ..statics_descriptor, ..native_chunk];
 
             // Build .diver source and map
             try
             {
-                int headerLen = 8 * 4;
+                int headerLen = 9 * 4;
                 int methodsN = all_methods.Length;
                 int methodDetailBase = headerLen + program_desc.Length + 2 + methodsN * 8;
 
@@ -1358,7 +1725,11 @@ internal partial class Processor
                     bytes = dll,
                     IOs = SI.cart_io_list.Select(p => (p, SI.sfield_offset.field_offset[p].offset, SI.sfield_offset.field_offset[p].typeid)).ToArray(),
                     diver_src = Encoding.UTF8.GetBytes(diver.ToString()),
-                    diver_map = Encoding.UTF8.GetBytes(map.ToString())
+                    diver_map = Encoding.UTF8.GetBytes(map.ToString()),
+                    native_blob = nativeResult.Blob ?? Array.Empty<byte>(),
+                    native_entry_offsets = nativeResult.EntryOffsets ?? Array.Empty<int>(),
+                    native_alignment = nativeResult.Alignment,
+                    native_arch_id = nativeResult.ArchitectureId
                 };
             }
             catch
@@ -1368,7 +1739,11 @@ internal partial class Processor
                     bytes = dll,
                     IOs = SI.cart_io_list.Select(p => (p, SI.sfield_offset.field_offset[p].offset, SI.sfield_offset.field_offset[p].typeid)).ToArray(),
                     diver_src = Encoding.UTF8.GetBytes(string.Empty),
-                    diver_map = Encoding.UTF8.GetBytes("[]")
+                    diver_map = Encoding.UTF8.GetBytes("[]"),
+                    native_blob = nativeResult.Blob ?? Array.Empty<byte>(),
+                    native_entry_offsets = nativeResult.EntryOffsets ?? Array.Empty<int>(),
+                    native_alignment = nativeResult.Alignment,
+                    native_arch_id = nativeResult.ArchitectureId
                 };
             }
              
