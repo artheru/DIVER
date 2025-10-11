@@ -115,7 +115,7 @@ builtin_method_t builtin_methods[NUM_BUILTIN_METHODS];
 #define ReadString (char*)(ptr + 2); ptr += *((unsigned short*)ptr) + 2
 #define ReadBool *((bool*)ptr); ptr += 1
 #define ReadByte *((unsigned char*)ptr); ptr += 1
-// #define ReadFloat *((float*)ptr); ptr += 4
+// #define ReadFloat *((float*)ptr); ptr += 4 // comment out because float need special loading.
 #define ReadArr(type, len) (type*)ptr; ptr += len * sizeof(type);
 
 struct method_index
@@ -553,8 +553,10 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
 #define PUSH_STACK_UINT(val) *eptr = UInt32; As(eptr + 1, int) = val; ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
 
 // now our stack has eptr+1 8B aligned.
-#define PUSH_STACK_FLOAT_D(val) *eptr = Single; As(eptr + 1, float) = (val); ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
-#define PUSH_STACK_FLOAT_M(val) { *eptr = Single; As(eptr + 1, int) = val; ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE; }
+
+// float is very tricky, it need alignment in MCU memory, so we first copy out then write again.
+//#define PUSH_STACK_FLOAT_D(val) *eptr = Single; As(eptr + 1, float) = (val); ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
+#define PUSH_STACK_FLOAT_M(val) { int ival = *(int*)&(val); *eptr = Single; As(eptr + 1, int) = *(int*)&(ival); eptr+=STACK_STRIDE; }
 
 #define PUSH_STACK_METHODHANDLER(val) *eptr = MethodPointer; As(eptr + 1, struct method_pointer) = (val); eptr+=STACK_STRIDE;
 
@@ -1393,7 +1395,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				DBG
 				("IL_Arithmetic float operation: %02X, %f=>%f=>%f\n", op, a, b, result);
 
-				PUSH_STACK_FLOAT_D(result);
+				PUSH_STACK_FLOAT_M(result);
 				break;
 			}
 			default:
@@ -1417,8 +1419,10 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 			}
 			case Single:
 			{
-				float tmp = -*(float*)(eptr + 1);
-				PUSH_STACK_FLOAT_D(tmp);
+				int tmp;
+				tmp = As(eptr + 1, int);
+				float result = As(&tmp, float);
+				PUSH_STACK_FLOAT_M(result);
 				break;
 			}
 			default:
@@ -1632,7 +1636,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				break;
 			default: ASSERT_LANG(0, "Unsupported conversion to Single");
 			}
-			PUSH_STACK_FLOAT_D(value);
+			PUSH_STACK_FLOAT_M(value);
 			DBG
 			("ConvR4: %02X\n", ic);
 			break;
@@ -1653,7 +1657,7 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 				break;
 			default: ASSERT_LANG(0, "Unsupported unsigned conversion to Single");
 			}
-			PUSH_STACK_FLOAT_D(value);
+			PUSH_STACK_FLOAT_M(value);
 			DBG
 			("ConvR_un: %02X\n", ic);
 			break;
@@ -2797,9 +2801,9 @@ void vm_sort_slots() {
 #define PUSH_STACK_UINT16(val) **reptr = UInt16; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
 #define PUSH_STACK_INT(val) **reptr = Int32; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
 #define PUSH_STACK_UINT(val) **reptr = UInt32; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
-#define PUSH_STACK_FLOAT_D(val) **reptr = Single; As(*reptr + 1, float) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
-
-#define PUSH_STACK_FLOAT_M(val) { **reptr = Single; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8; }
+//#define PUSH_STACK_FLOAT_D(val) **reptr = Single; As(*reptr + 1, float) = val; *reptr+=8;
+// special way to push float because of memory alignment issue.
+#define PUSH_STACK_FLOAT_M(val) { **reptr = Single; int iv = *(int*)(&(val)); As(*reptr + 1, int) = *(int*)(&(iv)); *reptr+=8; }
 
 // not on reference id: it's heap object ID, not address!!!
 #define PUSH_STACK_REFERENCEID(val) **reptr = ReferenceID; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
@@ -3128,7 +3132,7 @@ INLINE void push_int(uchar** reptr, int value) {
 }
 
 INLINE void push_float(uchar** reptr, float value) {
-	PUSH_STACK_FLOAT_D(value);
+	PUSH_STACK_FLOAT_M(value);
 }
 
 INLINE void push_bool(uchar** reptr, bool value) {
@@ -4533,6 +4537,7 @@ void builtin_BitConverter_ToSingle(uchar** reptr) {
 	int array_id = pop_reference(reptr);
 	struct array_val* arr = heap_obj[array_id].pointer;
 	float value;
+	// just copy the mem 4B.
 	*(int*)&value = *(int*)(&arr->payload + startIndex);
 	push_float(reptr, value);
 }
@@ -6069,7 +6074,7 @@ __declspec(dllexport) void test(uchar* bin, int len)
 	printf("====START TEST===:\r\n");
 	vm_set_program(bin, len);
 
-	for (int i = 0; i < 100000; ++i)
+	for (int i = 0; i < 10; ++i)
 	{ 
 		char buffer[38];
 		vm_put_snapshot_buffer(buffer, 38);

@@ -87,14 +87,44 @@ namespace DiverTest
             }
         } 
 
-        public TestLogic()
-        {
+        public TestLogic() 
+        { 
             vv.b = new TI(this);
             testDict = new Dictionary<int, string>();
         }
 
         private Func<int, int> act = null;
         private int test = 3;
+        private byte[] cache = new byte[64 * 32];
+
+        //[RequireNativeCode]
+        static byte[] RenderPattern(byte[] buffer, float bias)
+        {
+            Console.WriteLine("use rp");
+            int width = 64;
+            int height = 32;
+            int output = 0;
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    double value = Math.Sin(x * 0.1 + bias) * Math.Cos(y * 0.1 - bias);
+                    if (value > 0.3)
+                    {
+                        buffer[(y / 8) * width + x] |= (byte)(1 << (y % 8));
+                        if (output++ == 5)
+                            Console.WriteLine($"set buffer{(y / 8) * width + x}|={(byte)(1 << (y % 8))}");
+                    }
+                    else
+                    {
+                        if (output++ == 10)
+                            Console.WriteLine("no set");
+                    }
+                }
+            }
+            return buffer;
+        }
 
         public override void Operation(int iteration)
         {
@@ -133,6 +163,8 @@ namespace DiverTest
                 Console.WriteLine($"iteration={iteration}, GG!");
                 testDict[act(iteration) % 100] = $"{new TI(this).GG()}.xxx";
             }
+
+            RunOnMCU.WriteSnapshot(RenderPattern(cache, iteration));
             Console.WriteLine($"{iteration}:arr=[{string.Join(",", arr)}], upload={cart.str}..");
         }
     }
