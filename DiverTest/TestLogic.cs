@@ -44,7 +44,7 @@ namespace DiverTest
         {
             private TestLogic ll;
 
-            public TI(TestLogic ll)
+            public TI(TestLogic ll) 
             {
                 this.ll = ll;
             }
@@ -85,11 +85,12 @@ namespace DiverTest
                 };
                 Running = null;
             }
-        }
+        } 
 
         public TestLogic()
         {
             vv.b = new TI(this);
+            testDict = new Dictionary<int, string>();
         }
 
         private Func<int, int> act = null;
@@ -97,12 +98,9 @@ namespace DiverTest
 
         public override void Operation(int iteration)
         {
-            if (iteration >= 6) return;
-            if (testDict == null) testDict = new Dictionary<int, string>();
-            if (vv.b == null) vv.b = new TI(this);
             // ============ TEST AsLowerIO/AsUpperIO (Cart read/write) ============
             var ls = new List<int>();
-            for (int i = 0; i < iteration; ++i)
+            for (int i = 0; i < Math.Min(iteration,20); ++i)
             {
                 ls.Add(i);
                 testDict[i % 5] = $"i={i}";
@@ -123,7 +121,8 @@ namespace DiverTest
 
             int I(int id)
             {
-                ls.Add(99);
+                if (ls.Count > 100) ls.Clear();
+                ls.Add(99); 
                 return ls[id % ls.Count] + 100;
             }
 
@@ -132,7 +131,7 @@ namespace DiverTest
             if (iteration % 3 == 1)
             {
                 Console.WriteLine($"iteration={iteration}, GG!");
-                testDict[act(iteration)] = $"{new TI(this).GG()}.xxx";
+                testDict[act(iteration) % 100] = $"{new TI(this).GG()}.xxx";
             }
             Console.WriteLine($"{iteration}:arr=[{string.Join(",", arr)}], upload={cart.str}..");
         }

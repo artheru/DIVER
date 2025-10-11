@@ -2355,6 +2355,7 @@ void clean_up()
 {
 	DBG("Starting heap cleanup\n");
 
+	int prev_obj_n = heap_newobj_id;
 	// Reset all new_id to -1
 	for (int i = 1; i < heap_newobj_id; i++)
 		heap_obj[i].new_id = -1;
@@ -2516,7 +2517,7 @@ void clean_up()
 		}
 	}
 	heap_newobj_id = lastobj + 1;
-	DBG("Heap cleanup complete. New heap size: %d\n", lastobj);
+	DBG("Heap cleanup complete. objcnt: %d->%d, size=%dB\n", prev_obj_n, lastobj, heap_tail - tail);
 
 
 	for (int i = 1; i < heap_newobj_id; ++i)
@@ -6065,11 +6066,11 @@ __declspec(dllexport) void put_upper(uchar* buf, int len)
 }
 __declspec(dllexport) void test(uchar* bin, int len)
 {
-	printf("====START TEST===\r\n");
+	printf("====START TEST===:\r\n");
 	vm_set_program(bin, len);
 
-	for (int i = 0; i < 10; ++i)
-	{
+	for (int i = 0; i < 100000; ++i)
+	{ 
 		char buffer[38];
 		vm_put_snapshot_buffer(buffer, 38);
 		char bufferevent[8] = { i & 0xff,1,2,3,5,8,13,21 };
