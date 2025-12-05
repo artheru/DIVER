@@ -9,6 +9,12 @@
 #define INLINE __attribute__((always_inline)) static inline
 #endif
 
+#ifdef IS_MCU
+#define MCU_FASTMEM attribute((section(".ccm")))
+#else
+#define MCU_FASTMEM
+#endif
+
 // allow unsafe strings...
 #ifdef _MSC_VER
 #define _CRT_SECURE_NO_WARNINGS
