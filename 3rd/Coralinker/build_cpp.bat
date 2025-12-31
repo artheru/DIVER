@@ -1,1 +1,0 @@
-REM Should invoke arm-gcc to compile for actual MCU.

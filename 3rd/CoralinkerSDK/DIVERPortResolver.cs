@@ -2,9 +2,10 @@
 using System.Management;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
+
 // For Windows WMI
 
-namespace DiverTest.DIVER.CoralinkerAdaption;
+namespace CoralinkerSDK;
 
 public class SerialPortResolver
 {

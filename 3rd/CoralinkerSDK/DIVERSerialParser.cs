@@ -1,8 +1,7 @@
-﻿using System;
-using System.IO.Ports;
+﻿using System.IO.Ports;
 using System.Text;
 
-namespace DiverTest.DIVER.CoralinkerAdaption;
+namespace CoralinkerSDK;
 
 public delegate void FunctionOnPackageReceivedType(DIVERSerialPackage package);
 
