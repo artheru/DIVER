@@ -1232,6 +1232,10 @@ internal partial class Processor
                     typeid = tMap.pObject.typeid;
                     mysz = 6; //1B typeid+4B max data-width. 
                 } 
+                else if (ftype.FullName == "System.String")
+                {
+                    typeid = tMap.hString.typeid;
+                }
                 else if (tMapDict.TryGetValue(ftype.Name, out var typing))
                 {
                     mysz = typing.size + 1;

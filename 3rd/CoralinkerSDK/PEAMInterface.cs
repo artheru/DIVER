@@ -24,6 +24,8 @@ public class PEAMInterface
     {
         public byte[] asmBytes;
         public string metaJson;
+        public string diverSrc;
+        public string diverMapJson;
         public string mcuUri;
         public string name;
     }
@@ -32,7 +34,12 @@ public class PEAMInterface
     {
         foreach (var nodeConfiguration in configurations)
         {
-            StartNode(nodeConfiguration.asmBytes, nodeConfiguration.metaJson, nodeConfiguration.mcuUri,
+            StartNode(
+                nodeConfiguration.asmBytes,
+                nodeConfiguration.metaJson,
+                nodeConfiguration.diverSrc,
+                nodeConfiguration.diverMapJson,
+                nodeConfiguration.mcuUri,
                 nodeConfiguration.name);
         }
 
@@ -184,7 +191,7 @@ public class PEAMInterface
                 }
                     
                 if (tup.fields[cid].isUpper) continue;
-                tup.fields[cid].fi.SetValue(this, value);
+                tup.fields[cid].fi.SetValue(Target, value);
             }
 
             // ok to send current data.
@@ -195,7 +202,7 @@ public class PEAMInterface
             {
                 bw.Write((short)cid);
                 bw.Write((byte)tup.fields[cid].typeid);
-                var val = tup.fields[cid].fi.GetValue(this);
+                var val = tup.fields[cid].fi.GetValue(Target);
                 switch (tup.fields[cid].typeid)
                 {
                     case 0:
@@ -231,16 +238,16 @@ public class PEAMInterface
             SendUpperData(mcuUri, sends.ToArray());
         }
         else
-            Console.WriteLine($"warning: {mcuUri} received lowerIOData but not registered", $"DIVER-{tup.name}");
+            Console.WriteLine($"warning: {mcuUri} received lowerIOData but not registered");
 
     }
 
-    private void NotifyErrorData(int il_offset, string error)
+    private void NotifyErrorData(string mcuUri, int il_offset, string error)
     {
-        DIVERVehicle.PrintDebugInfo(il_offset, msg); // todo: resemble DIVERInterface.cs
+        DebugInfoPrinter.PrintDebugInfo(mcuUri, il_offset, error);
     }
 
-    private void StartNode(byte[] asmBytes, string metaJson, string mcuUri, string name="NoName")
+    private void StartNode(byte[] asmBytes, string metaJson, string diverSrc, string diverMapJson, string mcuUri, string name="NoName")
     {
         Console.WriteLine($"Set logic {name}(len={asmBytes.Length}) to run on MCU-VM @ device {mcuUri}");
 
@@ -250,6 +257,7 @@ public class PEAMInterface
                 $"Already have logic for {mcuUri}: {name}(len={mcu_logics[mcuUri].asmBytes.Length})");
         mcu_logics[mcuUri] = new LogicInfo()
             { fields = fields, name = name, asmBytes = asmBytes, meta_json = metaJson };
+        DebugInfoPrinter.Set(mcuUri, diverSrc, diverMapJson, name);
         foreach (var pField in fields)
         {
             pField.fi = Target.GetType().GetField(pField.field);
@@ -279,4 +287,108 @@ public class PEAMInterface
         public byte[] asmBytes;
     }
     private Dictionary<string, LogicInfo> mcu_logics = new();
+
+    /// <summary>
+    /// Placeholder hook: call this when the MCU reports an execution fault with an IL offset.
+    /// </summary>
+    internal void NotifyExecutionError(string mcuUri, int ilOffset, string message)
+    {
+        NotifyErrorData(mcuUri, ilOffset, message);
+    }
+}
+
+internal static class DebugInfoPrinter
+{
+    private static readonly object Gate = new();
+    private static readonly Dictionary<string, (string diver, string map, string logic)> Store = new();
+
+    public static void Set(string uri, string diver, string map, string logicName)
+    {
+        lock (Gate) Store[uri] = (diver, map, logicName);
+    }
+
+    private sealed class MapEntry { public int a; public int m; public int l; public string n; }
+
+    private static (string method, int line, int winStart, int winEnd) ResolveByOffset(string mapJson, int abs)
+    {
+        try
+        {
+            var entries = JsonConvert.DeserializeObject<List<MapEntry>>(mapJson);
+            if (entries != null && entries.Count > 0)
+            {
+                MapEntry best = null;
+                int bestDelta = int.MaxValue;
+                foreach (var e in entries)
+                {
+                    int d = abs - e.a;
+                    if (d >= 0 && d < bestDelta)
+                    {
+                        bestDelta = d;
+                        best = e;
+                        if (d == 0) break;
+                    }
+                }
+                if (best != null)
+                {
+                    int ws = Math.Max(1, best.l - 5);
+                    int we = best.l + 5;
+                    return (best.n ?? "?", best.l, ws, we);
+                }
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return ("?", 1, 1, 10);
+    }
+
+    private static void PrintWindow(string diver, int start, int end)
+    {
+        using var sr = new StringReader(diver);
+        int ln = 0;
+        while (true)
+        {
+            var line = sr.ReadLine();
+            if (line == null) break;
+            if (line.StartsWith("===")) continue;
+            ln++;
+            if (ln < start) continue;
+            if (ln > end) break;
+            Console.WriteLine(line);
+        }
+    }
+
+    public static void PrintDebugInfo(string mcuUri, int il_offset, string msg)
+    {
+        try
+        {
+            if (!TryGet(mcuUri, out var any) && !TryGetAny(out any))
+                return;
+
+            var (method, line, windowStart, windowEnd) = ResolveByOffset(any.map, il_offset);
+
+            Console.WriteLine($"[DIVER] Fault in method {method} @0x{il_offset:X} (.diver line {line}) on {mcuUri}: {msg}");
+            PrintWindow(any.diver, windowStart, windowEnd);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DIVER] Error handling fault: {ex.Message}");
+        }
+    }
+
+    private static bool TryGet(string uri, out (string diver, string map, string logic) v)
+    {
+        lock (Gate) return Store.TryGetValue(uri, out v);
+    }
+
+    private static bool TryGetAny(out (string diver, string map, string logic) v)
+    {
+            lock (Gate)
+            {
+                foreach (var kv in Store) { v = kv.Value; return true; }
+                v = default; return false;
+            }
+    }
 }

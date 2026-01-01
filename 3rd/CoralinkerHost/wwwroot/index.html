@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Coralinker DIVER Host</title>
+  <!-- Cache-bust app assets so browser always picks up latest UI changes during development -->
+  <link rel="stylesheet" href="app.css?v=20260101" />
+  <!-- Font Awesome removed for offline use - using text labels instead -->
+</head>
+<body>
+  <div id="newProjectDialog" class="modal hidden">
+    <div class="modalCard">
+      <div class="modalHeader">
+        <div>Create New Project?</div>
+      </div>
+      <div class="modalBody">
+        <p>Choose an option:</p>
+        <button id="btnNewClear" class="dialogBtn">Clear and New</button>
+        <button id="btnNewExport" class="dialogBtn">Export then New</button>
+        <button id="btnNewCancel" class="dialogBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="newInputDialog" class="modal hidden">
+    <div class="modalCard">
+      <div class="modalHeader">
+        <div>New Input File</div>
+      </div>
+      <div class="modalBody">
+        <p>Enter file name (.cs will be added automatically):</p>
+        <input type="text" id="newInputName" class="dialogInput" placeholder="MyLogic" />
+        <button id="btnNewInputOK" class="dialogBtn">Create</button>
+        <button id="btnNewInputCancel" class="dialogBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="genericDialog" class="modal hidden" aria-modal="true" role="dialog">
+    <div class="modalCard">
+      <div class="modalHeader">
+        <div id="genericDialogTitle">Dialog</div>
+      </div>
+      <div id="genericDialogBody" class="modalBody"></div>
+      <div class="modalActions">
+        <button id="genericDialogCancel" class="iconBtn">Cancel</button>
+        <button id="genericDialogOk" class="iconBtn primary">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="app">
+    <div id="topLeft" class="panel">
+      <div id="tabBar" class="tabBar"></div>
+      <div id="graphWrap">
+        <div id="graphToolbox" class="graphToolbox">
+          <button id="btnAddNode" class="toolboxBtn" title="Add Node">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="2" y="2" width="16" height="16" rx="3" stroke="currentColor" stroke-width="1.5"/>
+              <line x1="10" y1="6" x2="10" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <line x1="6" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+        <canvas id="graphCanvas"></canvas>
+      </div>
+      <div id="tabEditor" class="tabEditorContainer hidden">
+        <div class="editorHeader">
+          <div id="tabEditorPath" class="editorPath">No file selected</div>
+          <div id="hexTools" class="hexTools hidden">
+            <span class="hexLabel">Addr</span>
+            <input id="hexAddr" class="hexAddr" placeholder="0x00000000" />
+            <button id="hexGo" class="iconBtn" title="Go to address">Go</button>
+            <span class="hexLabel">Cols</span>
+            <select id="hexCols" class="hexSelect" title="Bytes per row">
+              <option value="8">8</option>
+              <option value="16" selected>16</option>
+              <option value="32">32</option>
+            </select>
+            <span class="hexLabel">Group</span>
+            <select id="hexGroup" class="hexSelect" title="Group size (padding)">
+              <option value="4">4</option>
+              <option value="8" selected>8</option>
+              <option value="16">16</option>
+            </select>
+            <label class="hexToggle"><input id="hexInsertMode" type="checkbox" /> Insert</label>
+            <span id="hexStatus" class="hexStatus"></span>
+          </div>
+          <div class="editorBtns">
+            <button id="btnTabEditorDownload" class="iconBtn" title="Download">⬇</button>
+            <button id="btnTabEditorDelete" class="iconBtn danger" title="Delete">🗑</button>
+            <button id="btnTabEditorSave" class="iconBtn primary" title="Save (Ctrl+S)">💾</button>
+          </div>
+        </div>
+        <div id="tabMonacoHost" class="monacoHost hidden">
+          <div id="cmHost" class="cmHost"></div>
+          <div id="hexSplitHost" class="hexSplitHost hidden">
+            <div id="hexInspector" class="hexInspector" aria-label="Data inspector"></div>
+            <div class="hexMain">
+              <div id="hexScroll" class="hexScroll" tabindex="0" aria-label="Hex editor">
+                <div class="hexGrid">
+                  <div id="hexAddrCol" class="hexAddrCol" aria-label="Addresses"></div>
+                  <div id="hexHexCol" class="hexHexCol" aria-label="Hex bytes"></div>
+                  <div id="hexAsciiCol" class="hexAsciiCol" aria-label="ASCII"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="topRight" class="panel">
+      <div class="panelTitle">Assets</div>
+      <div id="assetsDrop" class="dropZone">
+        <div><i class="fa-solid fa-file-code"></i> Drop a <b>.cs</b> file here</div>
+        <div class="muted">Example: DiverTest/TestLogic.cs</div>
+      </div>
+      <div id="assetsTree" class="tree"></div>
+    </div>
+
+    <div id="bottomLeft" class="panel">
+    <div class="toolbar">
+      <button id="btnNew" class="iconBtn" title="New project">New</button>
+      <button id="btnSaveServer" class="iconBtn" title="Save on server">Save</button>
+      <button id="btnExport" class="iconBtn" title="Export to local">Export</button>
+      <button id="btnImport" class="iconBtn" title="Import from local">Import</button>
+      <input id="importFile" type="file" accept="application/json" class="hidden" />
+      <div class="spacer"></div>
+      <button id="btnConnectAll" class="iconBtn" title="Connect all (Pending)">Connect</button>
+      <button id="btnBuild" class="iconBtn" title="Build">Build</button>
+      <button id="btnClearTerminal" class="iconBtn" title="Clear terminal">Clear</button>
+      <button id="btnRun" class="iconBtn primary" title="Run">▶ Run</button>
+      <button id="btnStop" class="iconBtn danger" title="Stop">■ Stop</button>
+    </div>
+
+      <div class="panelTitle panelTitleRow">
+        <span>Terminal</span>
+        <span id="syncIndicator" class="syncIndicator syncSynced" title="Project sync status">Synced</span>
+      </div>
+      <div id="terminal" class="terminal"></div>
+      <div class="cmdRow">
+        <input id="cmdInput" placeholder="command" />
+        <button id="cmdSend" class="iconBtn" title="Send (Pending)">Send</button>
+      </div>
+    </div>
+
+    <div id="bottomRight" class="panel">
+      <div class="panelTitle">Variables</div>
+      <div id="vars" class="vars"></div>
+    </div>
+  </div>
+
+  <script src="lib/litegraph.min.js"></script>
+  <script>
+    // Monaco editor disabled for offline use - fallback to textarea
+    window.__monacoReady = Promise.resolve(false);
+    // Disable AMD to allow SignalR to load as global
+    window.define = undefined;
+  </script>
+  <script src="lib/signalr.min.js"></script>
+  <link rel="stylesheet" href="lib/codemirror/codemirror.min.css" />
+  <link rel="stylesheet" href="lib/codemirror/monokai.min.css" />
+  <script src="lib/codemirror/codemirror.min.js"></script>
+  <script src="lib/codemirror/clike.min.js"></script>
+  <script src="lib/codemirror/simple.min.js"></script>
+  <script src="app.js?v=20260101"></script>
+</body>
+</html>
+
+
