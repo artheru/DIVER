@@ -1,0 +1,3 @@
+[submodule "MCUSerialBridge/mcu/unilib"]
+	path = MCUSerialBridge/mcu/unilib
+	url = git@gitlab.com:lvzheming/embedded_universal_library.git

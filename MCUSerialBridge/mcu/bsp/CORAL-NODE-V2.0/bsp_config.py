@@ -1,0 +1,8 @@
+# 芯片型号
+CHIP_NAME = "STM32F405RG"
+
+# 预定义宏
+CPP_DEFINES = {
+    "HSE_VALUE": 12000000,
+    "FORCE_PLL_M": 12,
+}

@@ -1,0 +1,118 @@
+from unilib.script.embedded import define_env
+from SCons.Script import Command
+from unilib.script.pyocd import call_flash, call_rtt
+from unilib.script.gen_upg import generate_upg_scons
+import os
+import importlib.util
+
+# PDN（选择硬件）
+vars = Variables()
+vars.Add("PDN", "Board name", "FRLD-DIVERBK-V2")
+vars.Update(ARGUMENTS)
+PDN = ARGUMENTS.get('PDN')
+bsp_dir = f"./bsp/{PDN}"
+config_file = os.path.join(bsp_dir, "bsp_config.py")
+if not os.path.exists(config_file):
+    print("Error: bsp config not found:", config_file)
+    Exit(1)
+spec = importlib.util.spec_from_file_location("bsp_config", config_file)
+bsp_config = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(bsp_config)
+try:
+    ChipName = getattr(bsp_config, "CHIP_NAME")
+except AttributeError:
+    print("Error: bsp_config.py must define CHIP_NAME")
+    Exit(1)
+
+env = define_env()
+conf_defines = getattr(bsp_config, "CPP_DEFINES", {})
+default_defines = {
+    'DIRECT_CAN': 1,
+    'ASYNC_QUEUE_CAPACITY': 256,
+    'ASYNC_QUEUE_CAPACITY_LP': 2,
+    'CONSOLE_MAX_STR': 512,
+    'CONSOLE_UPSTREAM_BUFFER_SIZE': 4096,
+    'MEMPOOL_SIZE': 65536,
+}
+merged_defines = {**default_defines, **conf_defines, 'PRODUCTION_NAME': f'"{PDN}"'}
+env.Append(CPPDEFINES=merged_defines)
+
+env['application_shift'] = 0x0
+
+# Call the unilib SConscript, passing the environment and ChipName
+SConscript('unilib/SConscript', exports={'env': env, 'ChipName': ChipName})
+Import('peripherals')
+Import('midware')
+Import('version')
+
+sources = env.Glob(os.path.join(bsp_dir, "*.c")) + \
+    env.Glob('appl/source/*.c') + ['appl/appl.c']
+
+# Include paths
+includes = [
+    'bsp/include',
+    'appl/include',
+    '../c_core/include'
+]
+env.Append(CPPPATH=includes)
+
+# Build the firmware
+firmware = env.Program(
+    'build/firmware.elf',
+    sources,
+    LIBS=[midware, peripherals, version],
+    LIBPATH=['unilib/build']
+)
+env.Depends(firmware, [
+    peripherals,
+    midware,
+    version
+])
+Default(firmware)
+
+build_dir = 'build'
+env.Execute(Mkdir(build_dir))
+
+fm_path = os.path.abspath(os.path.join(build_dir, 'firmware'))
+
+# Post-build steps
+
+
+def post_build(target, source, env):
+    env.Execute(
+        f'arm-none-eabi-objcopy -O ihex {fm_path}.elf {fm_path}.hex')
+    env.Execute(
+        f'arm-none-eabi-objcopy -O binary {fm_path}.elf {fm_path}.bin')
+    env.Execute(
+        f'arm-none-eabi-size --format=berkeley {fm_path}.elf {fm_path}.hex')
+
+
+env.AddPostAction(firmware, post_build)
+
+# flash target for pyocd
+chip_name = env['chip_info'].name
+flash = Command(
+    'flash',  # Pseudo-target
+    firmware,
+    lambda target, source, env: call_flash(source=source, chip_name=chip_name)
+)
+# rtt log
+rtt = Command(
+    'rtt',
+    None,
+    lambda target, source, env: call_rtt(chip_name=chip_name)
+)
+env.Depends(flash, firmware)
+
+# upg target
+upg = Command(
+    'upg',
+    firmware,
+    lambda target, source, env: generate_upg_scons(source=source, pdn=PDN)
+)
+env.Depends(upg, firmware)
+
+env.Alias('rtt', rtt)
+env.Alias('flash', flash)
+env.Alias('upg', upg)
+

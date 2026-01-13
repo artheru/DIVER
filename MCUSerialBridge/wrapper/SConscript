@@ -1,0 +1,38 @@
+import os
+import sys
+from SCons.Script import Environment, Default, Action, Mkdir, Builder
+
+env = Environment()
+build_dir = '../build'
+env.Execute(Mkdir(build_dir))
+
+# C# 源文件
+cs_files = [
+    os.path.abspath('MCUSerialBridgeError.cs'),
+    os.path.abspath('MCUSerialBridgeCLR.cs'),
+    os.path.abspath('Test.cs'),
+]
+
+# 输出 exe
+testcs_exe = os.path.abspath(os.path.join(build_dir, 'TestCS.exe'))
+cs_compiler = 'csc'  # Windows 自带 csc
+cs_flags = f'/out:{testcs_exe}'
+
+cmd = f'{cs_compiler} {cs_flags} ' + ' '.join(cs_files)
+
+# SCons 构建
+env.Command(
+    target=testcs_exe,
+    source=cs_files,
+    action=cmd
+)
+Default(testcs_exe)
+
+# 运行别名
+def runcs(target, source, env):
+    exe_path = testcs_exe
+    print(f"[INFO] Running {exe_path}")
+    os.system(f'"{exe_path}"')
+
+env.Alias('runcs', testcs_exe, Action(runcs, cmdstr='[TEST] Run TestCS.exe'))
+env.AlwaysBuild('runcs')

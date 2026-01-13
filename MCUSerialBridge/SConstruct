@@ -1,0 +1,3 @@
+SConscript('c_core/SConscript')
+SConscript('wrapper/SConscript')
+SConscript('mcu/SConscript')

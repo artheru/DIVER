@@ -1,0 +1,72 @@
+import os
+import sys
+from SCons.Script import Environment, Default, Action, Mkdir, Builder
+
+env = Environment()
+build_dir = '../build'
+env.Execute(Mkdir(build_dir))
+
+# 使用 UTF-8 编译，解决中文注释 C4819 警告
+env.Append(CCFLAGS=['/utf-8'])
+
+# 脚本和输出路径
+gen_script = os.path.abspath(os.path.join('include', 'msb_error.py'))
+c_error_file = os.path.abspath(os.path.join('include', 'msb_error_c.h'))
+cs_error_file = os.path.abspath(os.path.join('../wrapper', 'MCUSerialBridgeError.cs'))
+python_exe = sys.executable
+gen_c_action = Action(f'"{python_exe}" "{gen_script}" c "{c_error_file}"',
+                      cmdstr='[GEN] Generating C error header')
+gen_c_builder = Builder(action=gen_c_action)
+gen_cs_action = Action(f'"{python_exe}" "{gen_script}" cs "{cs_error_file}"',
+                      cmdstr='[GEN] Generating C# error header')
+gen_cs_builder = Builder(action=gen_cs_action)
+env.Append(BUILDERS={'GenCError': gen_c_builder, 'GenCSError': gen_cs_builder})
+c_header = env.GenCError(c_error_file, gen_script)
+cs_header = env.GenCSError(cs_error_file, gen_script)
+
+# 核心库 (生成 DLL)
+core_dll = env.SharedLibrary(
+    target=os.path.join(build_dir, 'mcu_serial_bridge'),
+    source=[
+        'src/msb_handle.c',
+        'src/msb_packet.c',
+        'src/msb_thread.c',
+        'src/msb_bridge.c',
+    ],
+    CPPPATH=['include'],
+    CFLAGS=['/utf-8'],          # 编译 UTF-8
+    LINKFLAGS=['/DLL', '/nologo']  # DLL 标志
+)
+env.Depends(core_dll, c_header)
+env.Depends(core_dll, cs_header)
+
+Default(core_dll)
+
+
+# C 测试程序
+test_exe = env.Program(
+    target=os.path.join(build_dir, 'test'),
+    source=['test/test.c'],
+    CPPPATH=['include'],
+)
+
+
+def runc_test_exe(target, source, env):
+    # run alias
+    exe_path = source[0].abspath
+
+    if not os.path.exists(exe_path):
+        print(f"[ERROR] {exe_path} 不存在，请先构建")
+        return 1
+
+    print(f"[INFO] Running {exe_path}")
+    os.system(f'"{exe_path}"')
+    return None
+
+
+runc_alias = env.Alias(
+    'runc',
+    test_exe,
+    Action(runc_test_exe, cmdstr='[C TEST] Run')
+)
+env.AlwaysBuild(runc_alias)

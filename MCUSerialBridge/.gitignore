@@ -1,0 +1,125 @@
+# ==========================
+# Libraries
+# ==========================
+*.d
+*.slo
+*.lo
+*.o
+*.so
+*.so.*
+*.obj
+*.gch
+*.pch
+*.lai
+*.la
+*.a
+*.lib
+*.pyc
+*.dblite
+
+# ==========================
+# C/C++/Go Executables
+# ==========================
+*.exe
+*.exe~
+*.dll
+*.out
+*.app
+*.elf
+*.hex
+*.test
+*.exp
+*.pdb
+
+# ==========================
+# C# Build
+# ==========================
+*.exe.config
+*.user
+*.suo
+*.cache
+*.log
+
+# ==========================
+# CMake files
+# ==========================
+CMakeLists.txt.user
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Testing/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+.xmake
+
+# ==========================
+# Editor/IDE
+# ==========================
+.idea/
+.vscode/
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ==========================
+# Folders
+# ==========================
+vendor/
+build*/
+build/
+dist/
+runtime/
+tmp/
+temp/
+deploy/
+__pycache__/
+
+# ==========================
+# MacOS
+# ==========================
+.DS_Store
+
+# ==========================
+# Exceptions
+# ==========================
+# Keep deploy scripts
+!deploy/*.sh
+
+# ==========================
+# Docker and Setup
+# ==========================
+docker/
+setup/
+
+# ==========================
+# Doxygen
+# ==========================
+doxygen/html/
+
+# ==========================
+# Artifacts
+# ==========================
+artifacts/
+artifacts*
+*.tar.gz
+
+# ==========================
+# SCons
+# ==========================
+.sconsign.dblite
+
+# ==========================
+# Temporary Files
+# ==========================
+*.bak
+*.tmp
+*.swp
+
+
+msb_error_c.h
+MCUSerialBridgeError.cs
