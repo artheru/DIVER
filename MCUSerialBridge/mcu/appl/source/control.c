@@ -2,11 +2,13 @@
 
 #include "appl/packet.h"
 #include "appl/upload.h"
+#include "appl/vm.h"
 #include "bsp/digital_io.h"
 #include "bsp/ports.h"
 #include "common.h"
 #include "hal/nvic.h"
 #include "util/console.h"
+
 
 typedef struct {
     union {
@@ -388,7 +390,8 @@ MCUSerialBridgeError control_on_start(const uint8_t* data, uint32_t data_length)
             g_mcu_state.mode == MCU_Mode_DIVER ? "DIVER" : "Bridge",
             g_mcu_state.raw);
 
-    // TODO: 启动 DIVER 程序
+    console_printf_do("CONTROL: Calling VM Start Program\n");
+    vm_start_program();
 
     return MSB_Error_OK;
 }
@@ -439,8 +442,8 @@ MCUSerialBridgeError control_on_program(
 
     // 如果传入非零数据，检查是否有 DIVER runtime 支持
 #if !defined(HAS_DIVER_RUNTIME) || HAS_DIVER_RUNTIME == 0
-    console_printf_do(
-            "CONTROL: Program download rejected - DIVER runtime not available\n");
+    console_printf_do("CONTROL: Program download rejected - DIVER runtime not "
+                      "available\n");
     return MSB_Error_MCU_RuntimeNotAvailable;
 #endif
 

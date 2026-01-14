@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using MCUSerialBridgeCLR;
@@ -67,10 +68,77 @@ namespace MCUTestDIVER
 
             Log("=== DIVER Mode Test Start ===");
 
+            // Args (strict):
+            //   TestDIVER.exe <COMName> <baud> <program.bin>
+            //
+            // Example:
+            //   TestDIVER.exe COM18 1000000 D:\path\to\SimpleTestLogic.bin
+            if (args == null || args.Length < 3)
+            {
+                Log("Usage: TestDIVER.exe <COMName> <baud> <program.bin>");
+                Log("Example: TestDIVER.exe COM18 1000000 D:\\path\\to\\SimpleTestLogic.bin");
+                return;
+            }
+
+            string comPort = args[0];
+            if (string.IsNullOrWhiteSpace(comPort))
+            {
+                Log("Invalid COMName (empty).");
+                return;
+            }
+
+            if (!uint.TryParse(args[1], out uint baud) || baud == 0)
+            {
+                Log("Invalid baud: {0}", args[1]);
+                return;
+            }
+
+            string programPath = args[2];
+            if (string.IsNullOrWhiteSpace(programPath))
+            {
+                Log("Invalid program path (empty).");
+                return;
+            }
+
+            if (!File.Exists(programPath))
+            {
+                Log("Program file not found: {0}", programPath);
+                return;
+            }
+
+            byte[] programBytes;
+            try
+            {
+                programBytes = File.ReadAllBytes(programPath);
+            }
+            catch (Exception ex)
+            {
+                Log("Failed to read program file: {0}", ex.Message);
+                return;
+            }
+
+            if (programBytes == null || programBytes.Length == 0)
+            {
+                Log("Program file is empty: {0}", programPath);
+                return;
+            }
+
+            // MCU side buffer limit is currently 16KB (see mcu/appl/source/control.c PROGRAM_BUFFER_MAX_SIZE)
+            const int PROGRAM_MAX = 16 * 1024;
+            if (programBytes.Length > PROGRAM_MAX)
+            {
+                Log(
+                    "Program is too large: {0} bytes (max {1}). Please generate a smaller program or increase MCU PROGRAM_BUFFER_MAX_SIZE.",
+                    programBytes.Length,
+                    PROGRAM_MAX
+                );
+                return;
+            }
+
             var bridge = new MCUSerialBridge();
 
             // 1. Open
-            var err = bridge.Open("COM18", 1000000u);
+            var err = bridge.Open(comPort, baud);
             if (err != MCUSerialBridgeError.OK)
             {
                 Log("MSB Open FAILED: {0}", err.ToDescription());
@@ -79,7 +147,7 @@ namespace MCUTestDIVER
             Log("MSB Open OK");
 
             // 2. Reset
-            err = bridge.Reset();
+            err = bridge.Reset(200);
             if (err != MCUSerialBridgeError.OK)
             {
                 Log("MSB Reset FAILED: {0}", err.ToDescription());
@@ -136,17 +204,12 @@ namespace MCUTestDIVER
             }
             Log("MSB Configure OK");
 
-            // 6. Program - 下载测试程序 (DIVER 模式)
-            // 创建一个简单的测试程序数据 (实际应用中应该是编译后的 DIVER 程序)
-            byte[] testProgram = new byte[1644 + 3 + 19 + 1453 + 5 + 29];
-            for (int i = 0; i < testProgram.Length; i++)
-            {
-                testProgram[i] = (byte)(i & 0xFF);
-            }
+            // 6. Program - Download DIVER program (DIVER mode)
             Log("=== Programming DIVER ===");
-            Log("Program size: {0} bytes", testProgram.Length);
+            Log("Program file: {0}", programPath);
+            Log("Program size: {0} bytes", programBytes.Length);
 
-            err = bridge.Program(testProgram, 5000);
+            err = bridge.Program(programBytes, 5000);
             if (err != MCUSerialBridgeError.OK)
             {
                 Log("MSB Program FAILED: {0}", err.ToDescription());

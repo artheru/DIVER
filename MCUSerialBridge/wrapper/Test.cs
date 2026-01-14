@@ -72,7 +72,7 @@ namespace MCUTest
                 Log("MSB Open OK");
             }
 
-            err = bridge.Reset();
+            err = bridge.Reset(200);
             if (err != MCUSerialBridgeError.OK)
             {
                 Log("MSB Reset FAILED: {0}", err.ToDescription());
