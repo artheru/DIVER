@@ -1,6 +1,7 @@
 #include "appl/vm.h"
 //
 #include "common.h"
+#include "appl/control.h"
 #include "util/console.h"
 
 
@@ -89,7 +90,16 @@ void old_report_error(
 }
 
 void report_error(int il_offset, uchar* error_str) {
-    console_printf_do("ERROR: VMGlue, report_error, il_offset = %d, error_str = %s\n", il_offset, error_str);
+    console_printf_do(
+            "ERROR: VMGlue, report_error, il_offset = %d, error_str = %s\n",
+            il_offset,
+            error_str);
+
+    // Fail-fast: stop VM loop to avoid continuing execution after memory/stack corruption.
+    // vm_loop() checks g_mcu_state.running_state == MCU_RunState_Running.
+    g_mcu_state.running_state = MCU_RunState_Error;
+    g_mcu_state.is_programmed = 0;
+    console_printf_do("VMGlue: VM aborted, MCU state set to Error\n");
 }
 
 void print_line(uchar* error_str)  // should upload text info.

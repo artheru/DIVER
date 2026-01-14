@@ -9,3 +9,5 @@
 // before this, make sure the program is loaded.
 // program is runned in a low priority thread.
 void vm_start_program();
+
+void register_vm_core_dump();

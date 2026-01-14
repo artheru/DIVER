@@ -4,6 +4,7 @@
 //
 #include "appl/threads.h"
 #include "appl/version.h"
+#include "appl/vm.h"
 #include "bsp/bsp.h"
 
 
@@ -15,6 +16,8 @@ int main(void)
     init_bsp();
 
     init_version_info();
+
+    register_vm_core_dump();
 
     init_threads();
 
