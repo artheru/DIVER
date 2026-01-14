@@ -99,6 +99,22 @@ typedef enum {
     CommandVersion = 0x04,
 
     /**
+     * @brief 启用 Wire Tap 模式 (PC → MCU)
+     *
+     * 启用后，即使在 DIVER 模式下，端口收到的数据也会上报给 PC。
+     * 响应命令：0x85（同 seq）。
+     */
+    CommandEnableWireTap = 0x05,
+
+    /**
+     * @brief 启动 MCU 运行 (PC → MCU)
+     *
+     * 上位机命令 MCU 开始执行（DIVER 模式运行程序，或透传模式开始转发）。
+     * 响应命令：0x8F（同 seq）。
+     */
+    CommandStart = 0x0F,
+
+    /**
      * @brief 向 MCU 端口写数据命令 (PC → MCU)
      *
      * 上位机向下发数据到指定端口（串口/CAN 等）。MCU 执行写操作后需返回同 seq
@@ -128,6 +144,32 @@ typedef enum {
      * seq），并携带 4 字节输入数据。
      */
     CommandReadInput = 0x40,
+
+    /**
+     * @brief 下载程序到 MCU (PC → MCU)
+     *
+     * 上位机向 MCU 发送程序数据。如果数据长度为 0，MCU 进入透传模式；
+     * 如果数据长度非 0，MCU 进入 DIVER 模式并加载程序。
+     * 程序可能需要分片传输，使用 offset 和 total_len 字段标识。
+     * 响应命令：0xD0（同 seq）。
+     */
+    CommandProgram = 0x50,
+
+    /**
+     * @brief PC → MCU 内存交换 (UpperIO) (PC → MCU)
+     *
+     * PC 向 MCU 发送 UpperIO 数据（DIVER 模式下的输入变量）。
+     * 响应命令（同 seq）。
+     */
+    CommandMemoryUpperIO = 0x60,
+
+    /**
+     * @brief MCU → PC 内存交换上报 (LowerIO) (MCU → PC)
+     *
+     * MCU 主动上报 LowerIO 数据（DIVER 模式下的输出变量）。
+     * 无需确认响应。
+     */
+    CommandMemoryLowerIO = 0x70,
 
     /**
      * @brief 致命错误上报命令 (MCU → PC 或 PC → MCU)
@@ -350,6 +392,40 @@ typedef struct {
     u16 info;   /**< CANID / RTR / DLC */
     u8 data[8]; /**< CAN 数据 */
 } CANData;
+
+/* ===============================
+ * Program Packet
+ * =============================== */
+
+/**
+ * @brief 程序下载数据包结构
+ *
+ * 用于 CommandProgram，支持分片传输大程序。
+ */
+typedef struct {
+    u32 total_len; /**< 程序总长度（字节） */
+    u32 offset;    /**< 当前分片偏移量 */
+    u16 chunk_len; /**< 当前分片长度 */
+    u8 data[0];    /**< 可变长度程序数据 */
+} ProgramPacket;
+
+STATIC_ASSERT(
+        sizeof(ProgramPacket) == 10,
+        "ProgramPacket size must be 10 (packed)");
+
+/**
+ * @brief 内存交换数据包结构
+ *
+ * 用于 CommandMemoryExchange / CommandMemoryExchangeUpload。
+ */
+typedef struct {
+    u16 data_len; /**< 数据长度 */
+    u8 data[0];   /**< 可变长度交换数据 */
+} MemoryExchangePacket;
+
+STATIC_ASSERT(
+        sizeof(MemoryExchangePacket) == 2,
+        "MemoryExchangePacket size must be 2 (packed)");
 
 #pragma pack(pop)
 

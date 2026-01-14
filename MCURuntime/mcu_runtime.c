@@ -10,7 +10,7 @@
 #endif
 
 #ifdef IS_MCU
-#define MCU_FASTMEM attribute((section(".ccm")))
+#define MCU_FASTMEM attribute((section(".ccmram")))
 #else
 #define MCU_FASTMEM
 #endif

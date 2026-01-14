@@ -432,6 +432,45 @@ namespace MCUSerialBridgeCLR
             uint src_data_len,
             uint timeout_ms
         );
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern MCUSerialBridgeError msb_start(IntPtr handle, uint timeout_ms);
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern MCUSerialBridgeError msb_program(
+            IntPtr handle,
+            [In] byte[] program_bytes,
+            uint program_len,
+            uint timeout_ms
+        );
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern MCUSerialBridgeError msb_enable_wire_tap(
+            IntPtr handle,
+            uint timeout_ms
+        );
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern MCUSerialBridgeError msb_memory_exchange(
+            IntPtr handle,
+            [In] byte[] data,
+            uint data_len,
+            uint timeout_ms
+        );
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate void msb_on_memory_exchange_callback_function_t(
+            IntPtr data,
+            uint data_size,
+            IntPtr user_ctx
+        );
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern MCUSerialBridgeError msb_register_memory_exchange_callback(
+            IntPtr handle,
+            msb_on_memory_exchange_callback_function_t callback,
+            IntPtr user_ctx
+        );
     }
 
     /// <summary>
@@ -781,6 +820,8 @@ namespace MCUSerialBridgeCLR
             MCUSerialBridgeCoreAPI.msb_on_port_data_callback_function_t
         > _portCallbacks = [];
 
+        private MCUSerialBridgeCoreAPI.msb_on_memory_exchange_callback_function_t? _memoryExchangeCallback;
+
         /// <summary>
         /// 注册指定端口(Serial)的回调函数
         /// </summary>
@@ -877,6 +918,121 @@ namespace MCUSerialBridgeCLR
                 nativeHandle,
                 portIndex,
                 _portCallbacks[portIndex],
+                IntPtr.Zero
+            );
+        }
+
+        /// <summary>
+        /// 启动 MCU 运行（DIVER 模式或透传模式）
+        /// </summary>
+        /// <param name="timeout">超时时间（毫秒）</param>
+        /// <returns>错误码</returns>
+        public MCUSerialBridgeError Start(uint timeout = 200)
+        {
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            return MCUSerialBridgeCoreAPI.msb_start(nativeHandle, timeout);
+        }
+
+        /// <summary>
+        /// 设置程序到 MCU
+        /// </summary>
+        /// <param name="programBytes">
+        /// 程序字节数组
+        /// - 如果为 null 或空数组：MCU 切换到透传模式（through mode / direct packet communication）
+        /// - 如果非 null：MCU 切换到 DIVER 模式并加载程序
+        /// </param>
+        /// <param name="timeout">超时时间（毫秒）</param>
+        /// <returns>错误码</returns>
+        public MCUSerialBridgeError Program(byte[]? programBytes, uint timeout = 5000)
+        {
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            uint len = (programBytes == null) ? 0u : (uint)programBytes.Length;
+            return MCUSerialBridgeCoreAPI.msb_program(nativeHandle, programBytes, len, timeout);
+        }
+
+        /// <summary>
+        /// 启用 Wire Tap 模式
+        /// 启用后，即使在 DIVER 模式下，端口数据也会上传
+        /// </summary>
+        /// <param name="timeout">超时时间（毫秒），默认 200ms</param>
+        /// <returns>错误码</returns>
+        public MCUSerialBridgeError EnableWireTap(uint timeout = 200)
+        {
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            return MCUSerialBridgeCoreAPI.msb_enable_wire_tap(nativeHandle, timeout);
+        }
+
+        /// <summary>
+        /// PC → MCU 内存交换（UpperIO 数据，用于 DIVER 模式）
+        /// </summary>
+        /// <param name="data">要发送的数据</param>
+        /// <param name="timeout">超时时间（毫秒）</param>
+        /// <returns>错误码</returns>
+        public MCUSerialBridgeError MemoryExchange(byte[] data, uint timeout)
+        {
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            if (data == null || data.Length == 0)
+                return MCUSerialBridgeError.Win_InvalidParam;
+
+            return MCUSerialBridgeCoreAPI.msb_memory_exchange(
+                nativeHandle,
+                data,
+                (uint)data.Length,
+                timeout
+            );
+        }
+
+        /// <summary>
+        /// 注册 MCU → PC 内存交换回调（LowerIO 数据，用于 DIVER 模式）
+        /// </summary>
+        /// <param name="callback">接收数据回调，byte[] 为接收到的原始数据</param>
+        /// <returns>错误码</returns>
+        /// <remarks>
+        /// 注意事项：
+        /// 1. 回调会在底层 C 层线程中直接调用，请**不要在回调内阻塞**，例如等待 I/O 或 Sleep。
+        /// 2. 回调内**不能调用 MemoryExchange 等发送函数**，否则可能导致死锁。
+        /// 3. 回调内只能做轻量级操作，例如简单解析、统计或打标记。
+        /// 4. 若需要复杂处理（例如长时间解析、解码、存储数据库等），请**将数据入队到另一个线程**，再在后台处理。
+        /// 5. 数据可能随时到来，请保证回调尽快返回，避免影响后续帧接收。
+        /// </remarks>
+        public MCUSerialBridgeError RegisterMemoryExchangeCallback(Action<byte[]> callback)
+        {
+            if (callback == null)
+                return MCUSerialBridgeError.Win_InvalidParam;
+
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            // 包装 C# 回调为 P/Invoke 委托
+            void del(IntPtr data, uint data_size, IntPtr user_ctx)
+            {
+                try
+                {
+                    byte[] buffer = new byte[data_size];
+                    Marshal.Copy(data, buffer, 0, (int)data_size);
+                    callback(buffer);
+                }
+                catch
+                {
+                    // 解析失败直接忽略，保证回调不会抛异常阻塞 C 层线程
+                }
+            }
+
+            // 保存引用，防止 GC 回收
+            _memoryExchangeCallback = del;
+
+            // 调用 C 层注册
+            return MCUSerialBridgeCoreAPI.msb_register_memory_exchange_callback(
+                nativeHandle,
+                _memoryExchangeCallback,
                 IntPtr.Zero
             );
         }

@@ -124,6 +124,30 @@ DLL_EXPORT MCUSerialBridgeError msb_configure(
         uint32_t timeout_ms);
 
 /**
+ * @brief 启动 MCU 运行
+ *
+ * 命令 MCU 开始执行（DIVER 模式运行程序，或透传模式开始转发）。
+ *
+ * @param handle MCU 句柄
+ * @param timeout_ms 超时时间（毫秒）
+ * @return MCUSerialBridgeError 错误码
+ */
+DLL_EXPORT MCUSerialBridgeError
+msb_start(msb_handle* handle, uint32_t timeout_ms);
+
+/**
+ * @brief 启用 Wire Tap 模式
+ *
+ * 启用后，即使在 DIVER 模式下，端口收到的数据也会上报给 PC。
+ *
+ * @param handle MCU 句柄
+ * @param timeout_ms 超时时间（毫秒）
+ * @return MCUSerialBridgeError 错误码
+ */
+DLL_EXPORT MCUSerialBridgeError
+msb_enable_wire_tap(msb_handle* handle, uint32_t timeout_ms);
+
+/**
  * @brief 读取MCU IO输入
  *
  * @param handle MCU句柄
@@ -235,6 +259,72 @@ DLL_EXPORT MCUSerialBridgeError msb_write_port(
         uint32_t src_data_len,
         uint32_t timeout_ms);
 
+
+/**
+ * @brief 下载程序到 MCU
+ *
+ * 向 MCU 发送程序数据。如果 program_bytes 为 NULL 或 program_len 为 0，
+ * MCU 进入透传模式；否则进入 DIVER 模式并加载程序。
+ * 大程序会自动分片传输。
+ *
+ * @param handle MCU 句柄
+ * @param program_bytes 程序字节数据（可为 NULL）
+ * @param program_len 程序长度（字节）
+ * @param timeout_ms 超时时间（毫秒）
+ * @return MCUSerialBridgeError 错误码
+ */
+DLL_EXPORT MCUSerialBridgeError msb_program(
+        msb_handle* handle,
+        const uint8_t* program_bytes,
+        uint32_t program_len,
+        uint32_t timeout_ms);
+
+/**
+ * @brief PC → MCU 内存交换（UpperIO）
+ *
+ * 向 MCU 发送 UpperIO 数据（DIVER 模式下的输入变量）。
+ *
+ * @param handle MCU 句柄
+ * @param data 要发送的数据
+ * @param data_len 数据长度
+ * @param timeout_ms 超时时间（毫秒）
+ * @return MCUSerialBridgeError 错误码
+ */
+DLL_EXPORT MCUSerialBridgeError msb_memory_upper_io(
+        msb_handle* handle,
+        const uint8_t* data,
+        uint32_t data_len,
+        uint32_t timeout_ms);
+
+/**
+ * @brief 内存交换回调函数类型定义
+ *
+ * 当 MCU 上报 LowerIO 数据时，会调用该回调函数。
+ *
+ * @param data 指向接收到的数据缓冲（仅在回调内有效）
+ * @param data_size 数据长度（字节）
+ * @param user_ctx 用户注册的上下文参数
+ */
+typedef void (*msb_on_memory_lower_io_callback_function_t)(
+        const uint8_t* data,
+        uint32_t data_size,
+        void* user_ctx);
+
+/**
+ * @brief 注册内存交换回调函数
+ *
+ * MCU 上报 LowerIO 数据时，会调用用户提供的回调函数。
+ *
+ * @param handle MCU 句柄
+ * @param callback 用户提供的回调函数指针
+ * @param user_ctx 用户上下文参数
+ * @return MCUSerialBridgeError 错误码
+ */
+DLL_EXPORT MCUSerialBridgeError msb_register_memory_lower_io_callback(
+        msb_handle* handle,
+        msb_on_memory_lower_io_callback_function_t callback,
+        void* user_ctx);
+
 /*
  * @brief 生成函数指针结构体
  * 导出所有 API
@@ -277,6 +367,19 @@ typedef struct MCUSerialBridgeAPI {
             uint32_t,
             uint32_t);
     MCUSerialBridgeError (*msb_reset)(msb_handle*, uint32_t);
+    MCUSerialBridgeError (*msb_start)(msb_handle*, uint32_t);
+    MCUSerialBridgeError (
+            *msb_program)(msb_handle*, const uint8_t*, uint32_t, uint32_t);
+    MCUSerialBridgeError (*msb_enable_wire_tap)(msb_handle*, uint32_t);
+    MCUSerialBridgeError (*msb_memory_upper_io)(
+            msb_handle*,
+            const uint8_t*,
+            uint32_t,
+            uint32_t);
+    MCUSerialBridgeError (*msb_register_memory_lower_io_callback)(
+            msb_handle*,
+            msb_on_memory_lower_io_callback_function_t,
+            void*);
 } MCUSerialBridgeAPI;
 
 DLL_EXPORT void mcu_serial_bridge_get_api(MCUSerialBridgeAPI* api);
