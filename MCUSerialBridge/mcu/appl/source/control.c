@@ -28,8 +28,7 @@ volatile uint32_t g_outputs;
 volatile MCUStateC g_mcu_state = {.raw = 0};  // Bridge, Idle, not configured
 volatile bool g_wire_tap_enabled = false;
 
-// DIVER 程序缓冲区
-#define PROGRAM_BUFFER_MAX_SIZE (16 * 1024)  // 16KB 最大程序大小
+// DIVER 程序缓冲区 (PROGRAM_BUFFER_MAX_SIZE defined in control.h)
 static uint8_t program_buffer_storage[PROGRAM_BUFFER_MAX_SIZE];
 uint8_t* g_program_buffer = program_buffer_storage;
 uint32_t g_program_length = 0;

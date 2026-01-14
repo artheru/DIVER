@@ -15,6 +15,9 @@ extern volatile bool g_wire_tap_enabled;
 extern uint8_t* g_program_buffer;
 extern uint32_t g_program_length;
 
+/** @brief 程序缓冲区总大小（用于 VM 内存分配） */
+#define PROGRAM_BUFFER_MAX_SIZE (16 * 1024)
+
 /* ===============================
  * 基础控制命令
  * =============================== */

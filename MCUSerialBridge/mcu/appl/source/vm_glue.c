@@ -1,7 +1,7 @@
 #include "appl/vm.h"
 //
-#include "common.h"
 #include "appl/control.h"
+#include "common.h"
 #include "util/console.h"
 
 
@@ -89,23 +89,30 @@ void old_report_error(
     // }
 }
 
-void report_error(int il_offset, uchar* error_str) {
+void report_error(int il_offset, uchar* error_str)
+{
     console_printf_do(
             "ERROR: VMGlue, report_error, il_offset = %d, error_str = %s\n",
             il_offset,
             error_str);
 
-    // Fail-fast: stop VM loop to avoid continuing execution after memory/stack corruption.
-    // vm_loop() checks g_mcu_state.running_state == MCU_RunState_Running.
+    // Fail-fast: stop VM loop to avoid continuin`g execution after memory/stack
+    // corruption. vm_loop() checks g_mcu_state.running_state ==
+    // MCU_RunState_Running.
     g_mcu_state.running_state = MCU_RunState_Error;
     g_mcu_state.is_programmed = 0;
     console_printf_do("VMGlue: VM aborted, MCU state set to Error\n");
+
+    // io failsafe
+    // exit
+    while (1) {
+    }
 }
 
 void print_line(uchar* error_str)  // should upload text info.
 {
-    // console_printf_do("VMGlue: Console.WriteLine!\n");
-    // uint32_t len = strnlen((const char*)error_str, 1024);
-    // console_print_string_do(error_str, len);
-    // uplink_add_log(error_str, len);
+    console_printf_do("VMGlue: Console.WriteLine!\n");
+    uint32_t len = strnlen((const char*)error_str, 1024);
+    console_print_string_do(error_str, len);
+    //     uplink_add_log(error_str, len);
 }

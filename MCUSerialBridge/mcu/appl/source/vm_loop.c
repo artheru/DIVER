@@ -17,14 +17,16 @@ static void vm_loop()
     if (g_mcu_state.mode != MCU_Mode_DIVER || g_mcu_state.is_programmed == 0 ||
         g_mcu_state.is_configured == 0 ||
         g_mcu_state.running_state != MCU_RunState_Running) {
-        console_printf_do("NOT IN RUNNINGSTATE!\n");
         return;
     }
 
     if (!vm_is_program_loaded) {
         console_printf(
                 LogLevelInfo, "VM: Program not loaded, try load program\n");
-        int interval = vm_set_program(g_program_buffer, g_program_length);
+        // Pass full buffer size, not just program length - VM needs heap/stack
+        // space!
+        int interval =
+                vm_set_program(g_program_buffer, PROGRAM_BUFFER_MAX_SIZE);
         console_printf(
                 LogLevelInfo, "VM: Program loaded, interval=%d\n", interval);
         vm_iteration_count = 0;
