@@ -65,6 +65,7 @@ print(f"[INFO] ENABLE_DIVER_RUNTIME: {ENABLE_DIVER_RUNTIME}, HAS_DIVER_RUNTIME: 
 
 default_defines = {
     'DIRECT_CAN': 1,
+    'IS_MCU': 1,
     'ASYNC_QUEUE_CAPACITY': 256,
     'ASYNC_QUEUE_CAPACITY_LP': 2,
     'CONSOLE_MAX_STR': 512,
@@ -239,4 +240,3 @@ env.Depends(upg, firmware)
 env.Alias('rtt', rtt)
 env.Alias('flash', flash)
 env.Alias('upg', upg)
-
