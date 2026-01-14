@@ -109,7 +109,35 @@ namespace MCUSerialBridgeCLR
     }
 
     /// <summary>
+    /// MCU 运行模式枚举
+    /// </summary>
+    public enum MCUMode : byte
+    {
+        /// <summary>Bridge（透传/桥接）模式</summary>
+        Bridge = 0x00,
+
+        /// <summary>DIVER（应用/驱动）模式</summary>
+        DIVER = 0x80,
+    }
+
+    /// <summary>
+    /// MCU 运行状态枚举
+    /// </summary>
+    public enum MCURunState : byte
+    {
+        /// <summary>空闲状态</summary>
+        Idle = 0x00,
+
+        /// <summary>运行中</summary>
+        Running = 0x0F,
+
+        /// <summary>错误状态</summary>
+        Error = 0xFF,
+    }
+
+    /// <summary>
     /// MCU 当前运行状态
+    /// 内存布局（小端序）：[0] running_state | [1] is_configured | [2] is_programmed | [3] mode
     /// </summary>
     [StructLayout(LayoutKind.Explicit)]
     public struct MCUState
@@ -118,49 +146,57 @@ namespace MCUSerialBridgeCLR
         [FieldOffset(0)]
         public uint RawValue;
 
-        /// <summary>状态子字段 0</summary>
+        /// <summary>运行状态 (MCURunState)</summary>
         [FieldOffset(0)]
-        public byte Substate0;
+        public MCURunState RunningState;
 
-        /// <summary>状态子字段 1</summary>
+        /// <summary>是否已配置端口 (0 或 1)</summary>
         [FieldOffset(1)]
-        public byte Substate1;
+        public byte IsConfigured;
 
-        /// <summary>状态子字段 2</summary>
+        /// <summary>是否已加载程序 (0 或 1, 仅 DIVER 模式)</summary>
         [FieldOffset(2)]
-        public byte Substate2;
+        public byte IsProgrammed;
 
-        /// <summary>高字节模式标志</summary>
+        /// <summary>模式 (MCUMode: 0x00=Bridge, 0x80=DIVER)</summary>
         [FieldOffset(3)]
-        public byte Mode;
+        public MCUMode Mode;
 
         /// <summary>是否处于 Bridge 模式</summary>
-        public bool IsBridge => (Mode & 0x80) == 0;
+        public bool IsBridge => Mode == MCUMode.Bridge;
 
         /// <summary>是否处于 DIVER 模式</summary>
-        public bool IsDIVER => (Mode & 0x80) != 0;
+        public bool IsDIVER => Mode == MCUMode.DIVER;
+
+        /// <summary>是否正在运行</summary>
+        public bool IsRunning => RunningState == MCURunState.Running;
+
+        /// <summary>是否处于错误状态</summary>
+        public bool IsError => RunningState == MCURunState.Error;
 
         /// <summary>
         /// 返回可读的状态字符串
         /// </summary>
-        /// <returns>例如 "Bridge: Running" 或 "DIVER: Error"</returns>
+        /// <returns>例如 "Bridge: Running, Configured" 或 "DIVER: Idle, Programmed"</returns>
         public override string ToString()
         {
             string modeStr = IsBridge ? "Bridge" : "DIVER";
-            uint substate = (uint)(Substate0 | (Substate1 << 8) | (Substate2 << 16));
-
-            string subStr = substate switch
+            string runStr = RunningState switch
             {
-                0x00000000 => "Idle",
-                0x0000000F => "Running",
-                0x000000FF => "Error",
-                0x00000001 => "Configured", // DIVER specific
-                0x8000000F => "Running",
-                0x800000FF => "Error",
-                _ => $"Unknown (0x{substate:X6})",
+                MCURunState.Idle => "Idle",
+                MCURunState.Running => "Running",
+                MCURunState.Error => "Error",
+                _ => $"Unknown(0x{(byte)RunningState:X2})",
             };
 
-            return $"{modeStr}: {subStr}";
+            var flags = new System.Collections.Generic.List<string>();
+            if (IsConfigured != 0)
+                flags.Add("Configured");
+            if (IsProgrammed != 0)
+                flags.Add("Programmed");
+            string flagsStr = flags.Count > 0 ? string.Join(", ", flags) : "NotConfigured";
+
+            return $"{modeStr}: {runStr}, {flagsStr}";
         }
     }
 
@@ -451,7 +487,7 @@ namespace MCUSerialBridgeCLR
         );
 
         [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern MCUSerialBridgeError msb_memory_exchange(
+        internal static extern MCUSerialBridgeError msb_memory_upper_io(
             IntPtr handle,
             [In] byte[] data,
             uint data_len,
@@ -459,16 +495,16 @@ namespace MCUSerialBridgeCLR
         );
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        internal delegate void msb_on_memory_exchange_callback_function_t(
+        internal delegate void msb_on_memory_lower_io_callback_function_t(
             IntPtr data,
             uint data_size,
             IntPtr user_ctx
         );
 
         [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern MCUSerialBridgeError msb_register_memory_exchange_callback(
+        internal static extern MCUSerialBridgeError msb_register_memory_lower_io_callback(
             IntPtr handle,
-            msb_on_memory_exchange_callback_function_t callback,
+            msb_on_memory_lower_io_callback_function_t callback,
             IntPtr user_ctx
         );
     }
@@ -820,7 +856,7 @@ namespace MCUSerialBridgeCLR
             MCUSerialBridgeCoreAPI.msb_on_port_data_callback_function_t
         > _portCallbacks = [];
 
-        private MCUSerialBridgeCoreAPI.msb_on_memory_exchange_callback_function_t? _memoryExchangeCallback;
+        private MCUSerialBridgeCoreAPI.msb_on_memory_lower_io_callback_function_t? _memoryLowerIOCallback;
 
         /// <summary>
         /// 注册指定端口(Serial)的回调函数
@@ -974,7 +1010,7 @@ namespace MCUSerialBridgeCLR
         /// <param name="data">要发送的数据</param>
         /// <param name="timeout">超时时间（毫秒）</param>
         /// <returns>错误码</returns>
-        public MCUSerialBridgeError MemoryExchange(byte[] data, uint timeout)
+        public MCUSerialBridgeError MemoryUpperIO(byte[] data, uint timeout = 200)
         {
             if (nativeHandle == IntPtr.Zero)
                 return MCUSerialBridgeError.Win_HandleNotFound;
@@ -982,7 +1018,7 @@ namespace MCUSerialBridgeCLR
             if (data == null || data.Length == 0)
                 return MCUSerialBridgeError.Win_InvalidParam;
 
-            return MCUSerialBridgeCoreAPI.msb_memory_exchange(
+            return MCUSerialBridgeCoreAPI.msb_memory_upper_io(
                 nativeHandle,
                 data,
                 (uint)data.Length,
@@ -998,12 +1034,12 @@ namespace MCUSerialBridgeCLR
         /// <remarks>
         /// 注意事项：
         /// 1. 回调会在底层 C 层线程中直接调用，请**不要在回调内阻塞**，例如等待 I/O 或 Sleep。
-        /// 2. 回调内**不能调用 MemoryExchange 等发送函数**，否则可能导致死锁。
+        /// 2. 回调内**不能调用 MemoryUpperIO 等发送函数**，否则可能导致死锁。
         /// 3. 回调内只能做轻量级操作，例如简单解析、统计或打标记。
         /// 4. 若需要复杂处理（例如长时间解析、解码、存储数据库等），请**将数据入队到另一个线程**，再在后台处理。
         /// 5. 数据可能随时到来，请保证回调尽快返回，避免影响后续帧接收。
         /// </remarks>
-        public MCUSerialBridgeError RegisterMemoryExchangeCallback(Action<byte[]> callback)
+        public MCUSerialBridgeError RegisterMemoryLowerIOCallback(Action<byte[]> callback)
         {
             if (callback == null)
                 return MCUSerialBridgeError.Win_InvalidParam;
@@ -1027,12 +1063,12 @@ namespace MCUSerialBridgeCLR
             }
 
             // 保存引用，防止 GC 回收
-            _memoryExchangeCallback = del;
+            _memoryLowerIOCallback = del;
 
             // 调用 C 层注册
-            return MCUSerialBridgeCoreAPI.msb_register_memory_exchange_callback(
+            return MCUSerialBridgeCoreAPI.msb_register_memory_lower_io_callback(
                 nativeHandle,
-                _memoryExchangeCallback,
+                _memoryLowerIOCallback,
                 IntPtr.Zero
             );
         }

@@ -82,6 +82,10 @@ typedef struct msb_handle {
             port_data_callback[PACKET_MAX_PORTS_NUM];
     void* port_data_callback_ctx[PACKET_MAX_PORTS_NUM];
 
+    // Memory Lower IO 回调（DIVER 模式 LowerIO 上报）
+    msb_on_memory_lower_io_callback_function_t memory_lower_io_callback;
+    void* memory_lower_io_callback_ctx;
+
     // 用户自定义回调
     void (*error_cb)(MCUSerialBridgeError err, const char* msg, int len);
 } msb_handle;

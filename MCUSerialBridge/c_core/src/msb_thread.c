@@ -129,7 +129,40 @@ DWORD WINAPI parse_thread_func(LPVOID param)
                     command,
                     seq,
                     payload_header->error_code);
-            if (command != CommandUploadPort) {
+            if (command == CommandUploadPort) {
+                // Upload Port Data (MCU -> PC)
+                if (len < sizeof(PayloadHeader) + sizeof(DataPacket)) {
+                    continue;  // 数据太短
+                }
+                DataPacket* data_packet =
+                        (DataPacket*)((uint8_t*)local_buf + sizeof(PayloadHeader));
+                if (data_packet->data_len !=
+                    len - sizeof(PayloadHeader) - sizeof(DataPacket)) {
+                    continue;  // Length mismatch
+                }
+
+                msb_parse_upload_data(handle, data_packet);
+            } else if (command == CommandMemoryLowerIO) {
+                // Memory LowerIO Data (MCU -> PC, DIVER mode output)
+                if (len < sizeof(PayloadHeader) + sizeof(MemoryExchangePacket)) {
+                    continue;  // 数据太短
+                }
+                MemoryExchangePacket* mem_packet =
+                        (MemoryExchangePacket*)((uint8_t*)local_buf +
+                                                sizeof(PayloadHeader));
+                if (mem_packet->data_len !=
+                    len - sizeof(PayloadHeader) - sizeof(MemoryExchangePacket)) {
+                    continue;  // Length mismatch
+                }
+
+                // 调用用户回调
+                if (handle->memory_lower_io_callback) {
+                    handle->memory_lower_io_callback(
+                            mem_packet->data,
+                            mem_packet->data_len,
+                            handle->memory_lower_io_callback_ctx);
+                }
+            } else {
                 // -------------------------------
                 // 找到对应的 SeqWaiter
                 // -------------------------------
@@ -171,19 +204,6 @@ DWORD WINAPI parse_thread_func(LPVOID param)
                             seq,
                             payload_header->error_code);
                 }
-            } else {
-                // Upload with data
-                if (len < sizeof(PayloadHeader) + sizeof(DataPacket)) {
-                    continue;  // 数据太短
-                }
-                DataPacket* data_packet =
-                        (DataPacket*)((uint8_t*)local_buf + sizeof(PayloadHeader));
-                if (data_packet->data_len !=
-                    len - sizeof(PayloadHeader) - sizeof(DataPacket)) {
-                    continue;  // Length mismatch
-                }
-
-                msb_parse_upload_data(handle, data_packet);
             }
         } else {
             Sleep(READ_SLEEP_MS);  // 队列空，休眠

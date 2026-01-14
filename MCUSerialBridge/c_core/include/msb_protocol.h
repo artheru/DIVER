@@ -265,59 +265,45 @@ typedef struct {
  * =============================== */
 
 /**
- * @brief MCU 当前运行状态定义
- *
- * MCU 运行状态采用 32-bit 编码：
- * - Bit31 = 0 : Bridge（透传/桥接）模式
- * - Bit31 = 1 : DIVER（应用/驱动）模式
- * - 低 8-bit 表示具体子状态
- *
- * 该状态用于：
- * - PC 端判断 MCU 当前工作模式
- * - UI 状态显示
- * - 状态机与异常处理
+ * @brief MCU 运行模式枚举
  */
 typedef enum {
+    MCU_Mode_Bridge = 0x00, /**< Bridge（透传/桥接）模式 */
+    MCU_Mode_DIVER = 0x80,  /**< DIVER（应用/驱动）模式 */
+} MCUMode;
 
-    /* ===============================
-     * Bridge (Passthrough) States
-     * =============================== */
+/**
+ * @brief MCU 运行状态枚举
+ */
+typedef enum {
+    MCU_RunState_Idle = 0x00,    /**< 空闲状态 */
+    MCU_RunState_Running = 0x0F, /**< 运行中 */
+    MCU_RunState_Error = 0xFF,   /**< 错误状态 */
+} MCURunState;
 
-    /** Bridge 模式：空闲（未建立透传或未启动） */
-    MCUState_Bridge_Idle = 0x00000000,
-
-    /** Bridge 模式：透传运行中 */
-    MCUState_Bridge_Running = 0x0000000F,
-
-    /** Bridge 模式：错误状态 */
-    MCUState_Bridge_Error = 0x000000FF,
-
-
-    /* ===============================
-     * DIVER (Application) States
-     * =============================== */
-
-    /** DIVER 模式：已进入 DIVER，但尚未完成配置 */
-    MCUState_DIVER_Idle = 0x80000000,
-
-    /** DIVER 模式：配置完成（参数/端口已就绪） */
-    MCUState_DIVER_Configured = 0x80000001,
-
-    /** DIVER 模式：应用/驱动逻辑运行中 */
-    MCUState_DIVER_Running = 0x8000000F,
-
-    /** DIVER 模式：运行错误状态 */
-    MCUState_DIVER_Error = 0x800000FF,
-
-
-    /* ===============================
-     * Boundary
-     * =============================== */
-
-    /** 枚举边界值（非法状态） */
-    MCUState_MAX = 0xFFFFFFFF,
-
+/**
+ * @brief MCU 当前运行状态定义
+ *
+ * MCU 运行状态采用 32-bit 编码，使用 union 便于字段访问和整体读写：
+ * - mode: 0x00 = Bridge 模式, 0x80 = DIVER 模式
+ * - is_programmed: DIVER 模式下程序是否已加载
+ * - is_configured: 端口是否已配置
+ * - running_state: 运行子状态 (Idle/Running/Error)
+ *
+ * 内存布局（小端序）：
+ * [0] running_state | [1] is_configured | [2] is_programmed | [3] mode
+ */
+typedef union {
+    u32 raw; /**< 原始 32-bit 值，用于整体读写 */
+    struct {
+        u8 running_state;  /**< 运行状态 (MCURunState) */
+        u8 is_configured;  /**< 是否已配置端口 (0 或 1) */
+        u8 is_programmed;  /**< 是否已加载程序 (0 或 1, 仅 DIVER 模式) */
+        u8 mode;           /**< 模式 (MCUMode: 0x00=Bridge, 0x80=DIVER) */
+    };
 } MCUStateC;
+
+STATIC_ASSERT(sizeof(MCUStateC) == 4, "MCUStateC size must be 4 bytes");
 
 
 /* ===============================

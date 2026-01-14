@@ -51,10 +51,17 @@ AddMSBError(0xE0000003, "Proto_Timeout", "Protocol timeout")
 AddMSBError(0xE0000004, "Proto_FrameTooLong", "Frame too long")
 AddMSBError(0xE0000005, "Proto_UnknownCommand", "Unknown command")
 AddMSBError(0xE0000006, "Proto_InvalidPayload", "Invalid payload")
+AddMSBError(0xE0000010, "Proto_ProgramTooLarge", "Program too large for MCU")
+AddMSBError(0xE0000011, "Proto_ProgramInvalidOffset", "Program chunk offset or length mismatch")
 
 # 状态错误
-AddMSBError(0xF0000000, "State_NotRunning", "Not running, configure")
-AddMSBError(0xF0000001, "State_Running", "Can not configure, already running")
+AddMSBError(0xF0000000, "State_NotRunning", "Not running, configure and program first")
+AddMSBError(0xF0000001, "State_Running", "Can not configure or program, already running")
+AddMSBError(0xF0000002, "State_NotConfigured", "Not configured, Can not start")
+AddMSBError(0xF0000003, "State_AlreadyConfigured", "Already configured, Can not configure again")
+AddMSBError(0xF0000004, "State_NotProgrammed", "Program not loaded (DIVER mode)")
+AddMSBError(0xF0000005, "State_NotDIVERMode", "Not in DIVER mode")
+
 
 # 配置错误
 AddMSBError(0xC0000000, "Config_PortNumOver", "Port number over")

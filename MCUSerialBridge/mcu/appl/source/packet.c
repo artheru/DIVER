@@ -129,7 +129,7 @@ void packet_parse(const void* data_void, uint32_t length, ...)
             break;
         case CommandState:
             ret = MSB_Error_OK;
-            read_result = g_mcu_state;
+            read_result = g_mcu_state.raw;
             return_buffer = (void*)&read_result;
             return_buffer_size = sizeof(read_result);
             console_printf_do(
@@ -139,6 +139,12 @@ void packet_parse(const void* data_void, uint32_t length, ...)
             ret = MSB_Error_OK;
             return_buffer = (void*)&g_version_info;
             return_buffer_size = sizeof(g_version_info);
+            break;
+        case CommandEnableWireTap:
+            ret = control_on_enable_wire_tap(other_data, other_data_len);
+            break;
+        case CommandStart:
+            ret = control_on_start(other_data, other_data_len);
             break;
         case CommandWritePort:
             ret = control_on_write_port(
@@ -157,6 +163,12 @@ void packet_parse(const void* data_void, uint32_t length, ...)
             return_buffer_size = sizeof(read_result);
             console_printf_do(
                     "CONTROL: READ INPUT, value = [0x%08X]\n", read_result);
+            break;
+        case CommandProgram:
+            ret = control_on_program(other_data, other_data_len);
+            break;
+        case CommandMemoryUpperIO:
+            ret = control_on_memory_upper_io(other_data, other_data_len);
             break;
         default:
             break;
