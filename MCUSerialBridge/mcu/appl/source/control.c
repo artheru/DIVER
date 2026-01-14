@@ -437,6 +437,13 @@ MCUSerialBridgeError control_on_program(
         return MSB_Error_OK;
     }
 
+    // 如果传入非零数据，检查是否有 DIVER runtime 支持
+#if !defined(HAS_DIVER_RUNTIME) || HAS_DIVER_RUNTIME == 0
+    console_printf_do(
+            "CONTROL: Program download rejected - DIVER runtime not available\n");
+    return MSB_Error_MCU_RuntimeNotAvailable;
+#endif
+
     // 检查程序大小
     if (pkt->total_len > PROGRAM_BUFFER_MAX_SIZE) {
         console_printf_do(

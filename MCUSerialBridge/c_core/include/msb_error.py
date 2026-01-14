@@ -52,14 +52,19 @@ AddMSBError(0xE0000004, "Proto_FrameTooLong", "Frame too long")
 AddMSBError(0xE0000005, "Proto_UnknownCommand", "Unknown command")
 AddMSBError(0xE0000006, "Proto_InvalidPayload", "Invalid payload")
 AddMSBError(0xE0000010, "Proto_ProgramTooLarge", "Program too large for MCU")
-AddMSBError(0xE0000011, "Proto_ProgramInvalidOffset", "Program chunk offset or length mismatch")
+AddMSBError(0xE0000011, "Proto_ProgramInvalidOffset",
+            "Program chunk offset or length mismatch")
 
 # 状态错误
-AddMSBError(0xF0000000, "State_NotRunning", "Not running, configure and program first")
-AddMSBError(0xF0000001, "State_Running", "Can not configure or program, already running")
+AddMSBError(0xF0000000, "State_NotRunning",
+            "Not running, configure and program first")
+AddMSBError(0xF0000001, "State_Running",
+            "Can not configure or program, already running")
 AddMSBError(0xF0000002, "State_NotConfigured", "Not configured, Can not start")
-AddMSBError(0xF0000003, "State_AlreadyConfigured", "Already configured, Can not configure again")
-AddMSBError(0xF0000004, "State_NotProgrammed", "Program not loaded (DIVER mode)")
+AddMSBError(0xF0000003, "State_AlreadyConfigured",
+            "Already configured, Can not configure again")
+AddMSBError(0xF0000004, "State_NotProgrammed",
+            "Program not loaded (DIVER mode)")
 AddMSBError(0xF0000005, "State_NotDIVERMode", "Not in DIVER mode")
 
 
@@ -90,6 +95,8 @@ AddMSBError(0x10000001, "Port_WriteBusy", "Port is busy now")
 AddMSBError(0x00010001, "MCU_Unknown", "MCU unknown error")
 AddMSBError(0x00010002, "MCU_IOSizeError", "IO Should be 4 bytes")
 AddMSBError(0x00010010, "MCU_OverTemperature", "MCU over temperature")
+AddMSBError(0x00000020, "MCU_RuntimeNotAvailable",
+            "DIVER runtime not available, cannot load program")
 
 # =============================
 # 4. 生成 C 头文件
@@ -116,7 +123,7 @@ def generate_c_include(output_file):
         f.write("#ifdef __cplusplus\n")
         f.write("} // extern \"C\"\n")
         f.write("#endif\n")
-        
+
         f.write("#endif // MCU_ERROR_C_H\n")
     print(f"[INFO] C header generated: {output_file}")
 
@@ -134,7 +141,8 @@ def generate_cs_include(output_file):
         for err in ERRORS:
             f.write(f"        {err.name} = 0x{err.code:08X}, // {err.desc}\n")
         f.write("    }\n\n")
-        f.write("    public static class MCUSerialBridgeErrorExtensions\n    {\n")
+        f.write(
+            "    public static class MCUSerialBridgeErrorExtensions\n    {\n")
         f.write(
             "        public static string ToDescription(this MCUSerialBridgeError err)\n        {\n")
         f.write("            return err switch\n            {\n")

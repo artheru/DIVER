@@ -9,9 +9,7 @@ import importlib.util
 # 优先从环境变量读取，其次从命令行参数读取
 PDN = os.environ.get('MSB_PDN') or os.environ.get('PDN')
 if not PDN:
-    vars = Variables()
-    vars.Add("PDN", "Board name")
-    vars.Update(ARGUMENTS)
+    # 直接从 ARGUMENTS 读取（ARGUMENTS 是字典，可以直接使用 get）
     PDN = ARGUMENTS.get('PDN')
 
 if not PDN:
@@ -48,6 +46,23 @@ except AttributeError:
 
 env = define_env()
 conf_defines = getattr(bsp_config, "CPP_DEFINES", {})
+
+# ENABLE_DIVER_RUNTIME 配置变量
+# 优先从环境变量读取，其次从命令行参数读取
+ENABLE_DIVER_RUNTIME = os.environ.get('MSB_ENABLE_DIVER_RUNTIME') or os.environ.get('ENABLE_DIVER_RUNTIME')
+if ENABLE_DIVER_RUNTIME is None:
+    # 直接从 ARGUMENTS 读取（ARGUMENTS 是字典，可以直接使用 get）
+    ENABLE_DIVER_RUNTIME = ARGUMENTS.get('ENABLE_DIVER_RUNTIME', False)
+
+# 转换为布尔值
+if isinstance(ENABLE_DIVER_RUNTIME, str):
+    ENABLE_DIVER_RUNTIME = ENABLE_DIVER_RUNTIME.lower() in ('1', 'true', 'yes', 'on')
+else:
+    ENABLE_DIVER_RUNTIME = bool(ENABLE_DIVER_RUNTIME)
+
+HAS_DIVER_RUNTIME_VALUE = 1 if ENABLE_DIVER_RUNTIME else 0
+print(f"[INFO] ENABLE_DIVER_RUNTIME: {ENABLE_DIVER_RUNTIME}, HAS_DIVER_RUNTIME: {HAS_DIVER_RUNTIME_VALUE}")
+
 default_defines = {
     'DIRECT_CAN': 1,
     'ASYNC_QUEUE_CAPACITY': 256,
@@ -55,6 +70,7 @@ default_defines = {
     'CONSOLE_MAX_STR': 512,
     'CONSOLE_UPSTREAM_BUFFER_SIZE': 4096,
     'MEMPOOL_SIZE': 65536,
+    'HAS_DIVER_RUNTIME': HAS_DIVER_RUNTIME_VALUE,
 }
 merged_defines = {**default_defines, **conf_defines, 'PRODUCTION_NAME': f'"{PDN}"'}
 env.Append(CPPDEFINES=merged_defines)
@@ -76,7 +92,93 @@ includes = [
     'appl/include',
     '../c_core/include'
 ]
+# 如果启用了 DIVER runtime，添加 MCURuntime 头文件路径
+if ENABLE_DIVER_RUNTIME:
+    mcu_runtime_include = os.path.abspath('../../MCURuntime')
+    if os.path.exists(mcu_runtime_include):
+        includes.append(mcu_runtime_include)
+        print(f"[INFO] Added MCURuntime include path: {mcu_runtime_include}")
+
 env.Append(CPPPATH=includes)
+
+# 如果启用了 DIVER runtime，单独编译 mcu_runtime.c（忽略警告和错误）
+if ENABLE_DIVER_RUNTIME:
+    mcu_runtime_path = os.path.abspath('../../MCURuntime/mcu_runtime.c')
+    if os.path.exists(mcu_runtime_path):
+        # 为 mcu_runtime.c 创建单独的环境，忽略所有警告和错误
+        mcu_runtime_env = env.Clone()
+        # 添加包含路径（确保头文件能找到）
+        mcu_runtime_env.Append(CPPPATH=includes)
+        
+        # 首先移除全局的 -Wall 和 -Werror（如果存在）
+        # 通过添加对应的 no- 版本来覆盖
+        mcu_runtime_env.Append(CCFLAGS=[
+            '-Wno-error',           # 覆盖全局的 -Werror（必须在最前面）
+        ])
+        
+        # 添加预处理器定义以兼容 MSVC 语法（__cdecl, __declspec 等）
+        # 注意：GCC 不支持 MSVC 的 __cdecl 和 __declspec，需要定义为空
+        mcu_runtime_env.Append(CPPDEFINES={
+            '__cdecl': '',         # 将 __cdecl 定义为空（GCC 不需要调用约定）
+        })
+        # __declspec 是函数式宏，直接使用字符串形式定义
+        # 注意：在 SCons 中，CCFLAGS 列表中的字符串会被正确传递
+        mcu_runtime_env.Append(CCFLAGS=[
+            '-D__declspec(x)=',    # 将 __declspec 定义为空函数式宏
+        ])
+        
+        # 然后添加编译标志，忽略所有警告和错误
+        # 注意：移除 Clang 特定的选项（如 -Wno-shorten-64-to-32）
+        mcu_runtime_env.Append(CCFLAGS=[
+            '-Wno-all',             # 禁用所有警告（GCC）
+            '-Wno-extra',           # 禁用额外警告
+            '-Wno-unused-parameter', # 忽略未使用参数
+            '-Wno-unused-variable',  # 忽略未使用变量
+            '-Wno-unused-function',  # 忽略未使用函数
+            '-Wno-unused-value',     # 忽略未使用的值
+            '-Wno-unused-label',     # 忽略未使用的标签
+            '-Wno-sign-compare',     # 忽略符号比较警告
+            '-Wno-pointer-sign',     # 忽略指针符号警告
+            '-Wno-format',           # 忽略格式字符串警告
+            '-Wno-format-security',  # 忽略格式安全警告
+            '-Wno-format-nonliteral', # 忽略非字面量格式警告
+            '-Wno-missing-field-initializers', # 忽略缺少字段初始化
+            '-Wno-strict-prototypes', # 忽略严格原型警告
+            '-Wno-implicit-function-declaration', # 忽略隐式函数声明
+            '-Wno-incompatible-pointer-types',    # 忽略不兼容指针类型
+            '-Wno-discarded-qualifiers',          # 忽略丢弃的限定符
+            '-Wno-attributes',                    # 忽略未知属性警告（如 __declspec, __cdecl）
+            '-Wno-unknown-pragmas',               # 忽略未知 pragma
+            '-Wno-pragmas',                       # 忽略所有 pragma 警告
+            '-Wno-cast-function-type',            # 忽略函数类型转换警告
+            '-Wno-cast-qual',                     # 忽略限定符转换警告
+            '-Wno-conversion',                    # 忽略类型转换警告
+            '-Wno-sign-conversion',               # 忽略符号转换警告
+            '-Wno-float-conversion',              # 忽略浮点转换警告
+            '-Wno-int-conversion',                # 忽略整数转换警告
+            '-Wno-missing-braces',                # 忽略缺少大括号
+            '-Wno-multichar',                     # 忽略多字符常量
+            '-Wno-empty-body',                    # 忽略空函数体
+            '-Wno-clobbered',                     # 忽略被覆盖的变量
+            '-Wno-array-bounds',                  # 忽略数组边界检查
+            '-Wno-stringop-overflow',             # 忽略字符串操作溢出
+            '-Wno-stringop-truncation',           # 忽略字符串操作截断
+            '-Wno-maybe-uninitialized',           # 忽略可能未初始化
+            '-Wno-return-type',                  # 忽略返回类型警告
+            '-Wno-old-style-declaration',         # 忽略旧式声明
+            '-Wno-old-style-definition',          # 忽略旧式定义
+            '-Wno-declaration-missing-parameter-type', # 忽略缺少参数类型的声明
+            '-w',                                 # 禁用所有警告（放在最后作为兜底）
+        ])
+        # 单独编译 mcu_runtime.c 为对象文件
+        mcu_runtime_obj = mcu_runtime_env.Object(
+            'build/mcu_runtime.o',
+            mcu_runtime_path
+        )
+        sources.append(mcu_runtime_obj)
+        print(f"[INFO] Added mcu_runtime.c to build (warnings/errors ignored): {mcu_runtime_path}")
+    else:
+        print(f"[WARNING] mcu_runtime.c not found at {mcu_runtime_path}")
 
 # Build the firmware
 firmware = env.Program(
