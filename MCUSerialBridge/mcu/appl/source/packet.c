@@ -161,8 +161,6 @@ void packet_parse(const void* data_void, uint32_t length, ...)
             read_result = bsp_get_inputs();
             return_buffer = (void*)&read_result;
             return_buffer_size = sizeof(read_result);
-            console_printf_do(
-                    "CONTROL: READ INPUT, value = [0x%08X]\n", read_result);
             break;
         case CommandProgram:
             ret = control_on_program(other_data, other_data_len);

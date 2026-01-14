@@ -6,14 +6,36 @@ import os
 import importlib.util
 
 # PDN（选择硬件）
-vars = Variables()
-vars.Add("PDN", "Board name", "FRLD-DIVERBK-V2")
-vars.Update(ARGUMENTS)
-PDN = ARGUMENTS.get('PDN')
+# 优先从环境变量读取，其次从命令行参数读取
+PDN = os.environ.get('MSB_PDN') or os.environ.get('PDN')
+if not PDN:
+    vars = Variables()
+    vars.Add("PDN", "Board name")
+    vars.Update(ARGUMENTS)
+    PDN = ARGUMENTS.get('PDN')
+
+if not PDN:
+    print("Error: PDN (Board name) is required!")
+    print("Please set it via one of the following methods:")
+    print("  1. Environment variable: set MSB_PDN=BoardName (Windows) or export MSB_PDN=BoardName (Linux)")
+    print("  2. Command line: scons PDN=BoardName")
+    print("Available boards:", end=" ")
+    bsp_base = "./bsp"
+    if os.path.exists(bsp_base):
+        boards = [d for d in os.listdir(bsp_base) 
+                  if os.path.isdir(os.path.join(bsp_base, d)) 
+                  and d != "include"
+                  and os.path.exists(os.path.join(bsp_base, d, "bsp_config.py"))]
+        print(", ".join(boards) if boards else "none found")
+    else:
+        print("none found")
+    Exit(1)
+
+print(f"[INFO] Using PDN: {PDN}")
 bsp_dir = f"./bsp/{PDN}"
 config_file = os.path.join(bsp_dir, "bsp_config.py")
 if not os.path.exists(config_file):
-    print("Error: bsp config not found:", config_file)
+    print(f"Error: bsp config not found: {config_file}")
     Exit(1)
 spec = importlib.util.spec_from_file_location("bsp_config", config_file)
 bsp_config = importlib.util.module_from_spec(spec)

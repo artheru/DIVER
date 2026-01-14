@@ -77,6 +77,4 @@ MCUSerialBridgeError control_on_memory_upper_io(
  * @brief 发送 LowerIO 内存交换数据
  * MCU 向 PC 上报输出变量数据（DIVER 模式下使用）
  */
-void control_upload_memory_lower_io(
-        const uint8_t* data,
-        uint32_t data_length);
+void control_upload_memory_lower_io(const uint8_t* data, uint32_t data_length);

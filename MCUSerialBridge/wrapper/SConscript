@@ -6,29 +6,39 @@ env = Environment()
 build_dir = '../build'
 env.Execute(Mkdir(build_dir))
 
-# C# 源文件
-cs_files = [
+# 公共源文件
+common_cs_files = [
     os.path.abspath('MCUSerialBridgeError.cs'),
     os.path.abspath('MCUSerialBridgeCLR.cs'),
-    os.path.abspath('Test.cs'),
 ]
 
-# 输出 exe
-testcs_exe = os.path.abspath(os.path.join(build_dir, 'TestCS.exe'))
 cs_compiler = 'csc'  # Windows 自带 csc
-cs_flags = f'/out:{testcs_exe}'
 
-cmd = f'{cs_compiler} {cs_flags} ' + ' '.join(cs_files)
+# TestCS.exe (Throughput Mode)
+testcs_files = common_cs_files + [os.path.abspath('Test.cs')]
+testcs_exe = os.path.abspath(os.path.join(build_dir, 'TestCS.exe'))
+testcs_cmd = f'{cs_compiler} /out:{testcs_exe} ' + ' '.join(testcs_files)
 
-# SCons 构建
 env.Command(
     target=testcs_exe,
-    source=cs_files,
-    action=cmd
+    source=testcs_files,
+    action=testcs_cmd
 )
-Default(testcs_exe)
 
-# 运行别名
+# TestDIVER.exe (DIVER Mode)
+testdiver_files = common_cs_files + [os.path.abspath('TestDIVER.cs')]
+testdiver_exe = os.path.abspath(os.path.join(build_dir, 'TestDIVER.exe'))
+testdiver_cmd = f'{cs_compiler} /out:{testdiver_exe} ' + ' '.join(testdiver_files)
+
+env.Command(
+    target=testdiver_exe,
+    source=testdiver_files,
+    action=testdiver_cmd
+)
+
+Default([testcs_exe, testdiver_exe])
+
+# 运行别名 - Throughput Mode
 def runcs(target, source, env):
     exe_path = testcs_exe
     print(f"[INFO] Running {exe_path}")
@@ -36,3 +46,12 @@ def runcs(target, source, env):
 
 env.Alias('runcs', testcs_exe, Action(runcs, cmdstr='[TEST] Run TestCS.exe'))
 env.AlwaysBuild('runcs')
+
+# 运行别名 - DIVER Mode
+def rundiver(target, source, env):
+    exe_path = testdiver_exe
+    print(f"[INFO] Running {exe_path}")
+    os.system(f'"{exe_path}"')
+
+env.Alias('rundiver', testdiver_exe, Action(rundiver, cmdstr='[TEST] Run TestDIVER.exe'))
+env.AlwaysBuild('rundiver')

@@ -27,7 +27,7 @@ volatile MCUStateC g_mcu_state = {.raw = 0};  // Bridge, Idle, not configured
 volatile bool g_wire_tap_enabled = false;
 
 // DIVER 程序缓冲区
-#define PROGRAM_BUFFER_MAX_SIZE 32768  // 32KB 最大程序大小
+#define PROGRAM_BUFFER_MAX_SIZE (16 * 1024)  // 16KB 最大程序大小
 static uint8_t program_buffer_storage[PROGRAM_BUFFER_MAX_SIZE];
 uint8_t* g_program_buffer = program_buffer_storage;
 uint32_t g_program_length = 0;
@@ -460,7 +460,8 @@ MCUSerialBridgeError control_on_program(
         memset(g_program_buffer, 0, PROGRAM_BUFFER_MAX_SIZE);
     }
 
-    if (pkt->offset != g_program_receiving_offset || pkt->total_len != g_program_length) {
+    if (pkt->offset != g_program_receiving_offset ||
+        pkt->total_len != g_program_length) {
         return MSB_Error_Proto_ProgramInvalidOffset;
     }
 

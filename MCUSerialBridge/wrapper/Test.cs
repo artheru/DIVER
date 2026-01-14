@@ -149,7 +149,30 @@ namespace MCUTest
             {
                 Log("MSB GetState OK: {0}", state.ToString());
             }
-            Thread.Sleep(1000);
+
+            // 启动 MCU
+            err = bridge.Start();
+            if (err != MCUSerialBridgeError.OK)
+            {
+                Log("MSB Start FAILED: {0}", err.ToDescription());
+                return;
+            }
+            else
+            {
+                Log("MSB Start OK");
+            }
+
+            err = bridge.GetState(out state, 100);
+            if (err != MCUSerialBridgeError.OK)
+            {
+                Log("MSB GetState FAILED: {0}", err.ToDescription());
+                return;
+            }
+            else
+            {
+                Log("MSB GetState OK: {0}", state.ToString());
+            }
+            Thread.Sleep(100);
 
             // 注册回调函数，当 Port3 (RS232-1) 收到数据的时候，会自动调用下面的回调
             err = bridge.RegisterSerialPortCallback(

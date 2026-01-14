@@ -856,7 +856,7 @@ namespace MCUSerialBridgeCLR
             MCUSerialBridgeCoreAPI.msb_on_port_data_callback_function_t
         > _portCallbacks = [];
 
-        private MCUSerialBridgeCoreAPI.msb_on_memory_lower_io_callback_function_t? _memoryLowerIOCallback;
+        private MCUSerialBridgeCoreAPI.msb_on_memory_lower_io_callback_function_t _memoryLowerIOCallback;
 
         /// <summary>
         /// 注册指定端口(Serial)的回调函数
@@ -981,7 +981,7 @@ namespace MCUSerialBridgeCLR
         /// </param>
         /// <param name="timeout">超时时间（毫秒）</param>
         /// <returns>错误码</returns>
-        public MCUSerialBridgeError Program(byte[]? programBytes, uint timeout = 5000)
+        public MCUSerialBridgeError Program(byte[] programBytes, uint timeout = 5000)
         {
             if (nativeHandle == IntPtr.Zero)
                 return MCUSerialBridgeError.Win_HandleNotFound;
