@@ -226,6 +226,28 @@ namespace MCUTestDIVER
             }
             Log("MSB GetState OK: {0}", state.ToString());
 
+            // 注册 LowerIO 回调 (MCU → PC 内存交换)
+            bridge.RegisterMemoryLowerIOCallback(data =>
+            {
+                byte[] displayData = data;
+                if (data.Length > 16)
+                {
+                    displayData = new byte[16];
+                    Array.Copy(data, displayData, 16);
+                }
+                Log(
+                    "LowerIO Callback Received: {0} bytes, data: {1}",
+                    data.Length,
+                    BitConverter.ToString(displayData) + (data.Length > 16 ? "..." : "")
+                );
+            });
+            bridge.RegisterConsoleWriteLineCallback(str =>
+            {
+                Log("ConsoleWriteLine in MCU Callback Received: >>>{0}<<<", str);
+            });
+
+            Log("=== Main Loop Start (DIVER Mode) ===");
+
             // 8. Start
             err = bridge.Start();
             if (err != MCUSerialBridgeError.OK)
@@ -243,32 +265,6 @@ namespace MCUTestDIVER
                 return;
             }
             Log("MSB GetState OK: {0}", state.ToString());
-
-            // 注册 LowerIO 回调 (MCU → PC 内存交换)
-            err = bridge.RegisterMemoryLowerIOCallback(data =>
-            {
-                byte[] displayData = data;
-                if (data.Length > 16)
-                {
-                    displayData = new byte[16];
-                    Array.Copy(data, displayData, 16);
-                }
-                Log(
-                    "LowerIO Callback Received: {0} bytes, data: {1}",
-                    data.Length,
-                    BitConverter.ToString(displayData) + (data.Length > 16 ? "..." : "")
-                );
-            });
-            if (err != MCUSerialBridgeError.OK)
-            {
-                Log("RegisterMemoryLowerIOCallback FAILED: {0}", err.ToDescription());
-            }
-            else
-            {
-                Log("RegisterMemoryLowerIOCallback OK");
-            }
-
-            Log("=== Main Loop Start (DIVER Mode) ===");
 
             const int LOOP_DELAY_MS = 1000;
             const int TIMEOUT_MS = 200;

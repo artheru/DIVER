@@ -2,6 +2,7 @@
 //
 #include "appl/control.h"
 #include "appl/upload.h"
+#include "bsp/digital_io.h"
 #include "util/async.h"
 #include "util/console.h"
 
@@ -39,10 +40,9 @@ static void vm_loop()
         // Run Once
         console_printf(LogLevelInfo, "VM: Start new loop\n");
 
-        // TODO: Update IO Data
-        // TODO: this is dummy
-        static char dummy_data[4];
-        vm_put_snapshot_buffer((void*)dummy_data, 4);
+        // Read IO Data and put into snapshot buffer
+        uint32_t inputs_u32 = bsp_get_inputs();
+        vm_put_snapshot_buffer((void*)&inputs_u32, sizeof(inputs_u32));
 
         // if (vm_uplink_data_received) {
         //     enter_critical();

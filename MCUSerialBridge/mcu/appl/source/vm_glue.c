@@ -2,24 +2,27 @@
 //
 #include "appl/control.h"
 #include "appl/upload.h"
+#include "bsp/digital_io.h"
 #include "util/console.h"
 
 
 // In this file, we will implement the glue code between the MCU and the DIVER
 // runtime.
 
-
 void write_snapshot(
         uchar* buffer,
-        int size)  // size is equal to "vm_put_snapshot_buffer", called per
-// iteration
+        int size  // size is equal to "vm_put_snapshot_buffer", called per
+                  // iteration
+)
 {
-    // IOSnapshotType* buffer_snap = AS_PTR(IOSnapshotType, buffer);
-    // g_io_snapshot.outputs = buffer_snap->outputs;
+    if (size < 4) {
+        console_printf_do("VMGlue: write_snapshot, size < 4");
+        return;
+    }
 
-    // console_print_buffer_do(buffer_snap, 8);
-
+    bsp_set_outputs(*(uint32_t*)buffer);
     console_printf_do("VMGlue: called write_snapshot!\n");
+    console_print_buffer_do(buffer, 4);
 }
 
 void write_stream(

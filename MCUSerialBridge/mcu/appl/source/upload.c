@@ -5,6 +5,7 @@
 #include "hal/dcan.h"
 #include "msb_protocol.h"
 #include "util/console.h"
+#include "util/mempool.h"
 
 /**
  * @brief 检查是否应该上报端口数据到 PC
@@ -24,8 +25,8 @@ static inline bool should_upload_port_data(void)
     return g_wire_tap_enabled;
 }
 
-static uint8_t upload_console_writeline_buffer[PACKET_MAX_DATALEN];
-static uint32_t upload_console_writeline_buffer_length = 0;
+CCM_RAM uint8_t upload_console_writeline_buffer[PACKET_MAX_DATALEN];
+CCM_RAM uint32_t  upload_console_writeline_buffer_length = 0;
 
 void upload_serial_packet(
         const void* data,
