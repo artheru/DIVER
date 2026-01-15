@@ -97,6 +97,8 @@ AddMSBError(0x00010002, "MCU_IOSizeError", "IO Should be 4 bytes")
 AddMSBError(0x00010010, "MCU_OverTemperature", "MCU over temperature")
 AddMSBError(0x00000020, "MCU_RuntimeNotAvailable",
             "DIVER runtime not available, cannot load program")
+AddMSBError(0x00000021, "MCU_MemoryAllocFailed", "Memory allocation failed")
+AddMSBError(0x00000022, "MCU_SerialDataFlushFailed", "SerialData Buffer is Full")
 
 # =============================
 # 4. 生成 C 头文件

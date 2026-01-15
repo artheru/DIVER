@@ -11,3 +11,6 @@
 void vm_start_program();
 
 void register_vm_core_dump();
+
+#define DIVER_SERIAL_SEND_BUFFER_TOTAL_SIZE (2048)
+#define DIVER_SERIAL_SEND_BUFFER_SEGMENT_COUNT (16)

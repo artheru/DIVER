@@ -66,6 +66,9 @@ static void vm_loop()
         // not.
         vm_run(vm_iteration_count++);
 
+        // Always flush ports after each iteration.
+        control_vm_flush_ports();
+
         // Call upload console writeline to actually upload the console
         // writeline data to the host.
         upload_console_writeline();

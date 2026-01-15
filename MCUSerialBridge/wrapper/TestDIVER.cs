@@ -177,7 +177,7 @@ namespace MCUTestDIVER
             // 5. Configure - 配置端口
             var ports = new List<PortConfig>();
             for (int i = 0; i < 4; i++)
-                ports.Add(new SerialPortConfig(115200, 0));
+                ports.Add(new SerialPortConfig(9600, 0));
             for (int i = 0; i < 2; i++)
                 ports.Add(new CANPortConfig(250000, 10));
 

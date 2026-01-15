@@ -6,8 +6,45 @@
 #include "bsp/digital_io.h"
 #include "bsp/ports.h"
 #include "hal/nvic.h"
+#include "msb_error_c.h"
+#include "msb_protocol.h"
 #include "util/console.h"
+#include "util/mempool.h"
 
+// ===============================
+// VMTXBUF debug logs (temporary)
+// IMPORTANT:
+// - Do NOT call console_printf_do between critical_section_enter() and quit()
+// - ISR is considered a "medium" critical section; printf is allowed there
+// ===============================
+#define VMTXBUF_DEBUG 1
+#if VMTXBUF_DEBUG
+#define VMTXBUF_LOG(fmt, ...) console_printf_do("VMTXBUF: " fmt, ##__VA_ARGS__)
+#else
+#define VMTXBUF_LOG(fmt, ...) ((void)0)
+#endif
+
+typedef struct {
+    uint32_t start;  // 数据在 buffer 中的起始偏移
+    uint32_t len;    // 数据长度
+} DIVERSerialSendBufferSegment;
+
+typedef struct {
+    uint8_t buffer[DIVER_SERIAL_SEND_BUFFER_TOTAL_SIZE];
+    DIVERSerialSendBufferSegment
+            segments[DIVER_SERIAL_SEND_BUFFER_SEGMENT_COUNT];
+    volatile uint32_t head;       // 分段队列头（下一个要发送的分段索引，消费者）
+    volatile uint32_t tail;       // 分段队列尾（下一个要写入的分段槽位，生产者）
+    volatile uint32_t buf_write;  // buffer 中下一个写入位置
+    volatile bool sending;        // 是否正在发送中（防止 flush 和回调竞态）
+} DIVERSerialSendBuffer;
+
+// 辅助宏：判断分段队列是否为空
+#define DIVER_SENDBUF_IS_EMPTY(buf) ((buf)->head == (buf)->tail)
+
+// 辅助宏：判断分段队列是否已满
+#define DIVER_SENDBUF_IS_FULL(buf) \
+    (((buf)->tail + 1) % DIVER_SERIAL_SEND_BUFFER_SEGMENT_COUNT == (buf)->head)
 
 typedef struct {
     union {
@@ -16,8 +53,10 @@ typedef struct {
     };
     PortConfigC config;  // 保存完整的端口配置
     bool valid;
-    uint32_t pending_sequence;  // for serial can use other
-    bool pending;               // for serial, can use other
+    uint32_t pending_sequence;  // pending Bridge sequence for Host use
+                                // WriteSerial, CAN use other
+    bool pending;               // is pending_sequence valid
+    void* diver_send_buffer;    // for DIVER mode, pointer to
 } Handles;
 Handles g_handles[PACKET_MAX_PORTS_NUM];
 
@@ -33,6 +72,7 @@ uint8_t* g_program_buffer = program_buffer_storage;
 uint32_t g_program_length = 0;
 static uint32_t g_program_receiving_offset = 0;
 
+// Callback for serial data transmission started by write_port command complete
 static void control_on_serial_complete(uint32_t port_index)
 {
     if (port_index >= PACKET_MAX_PORTS_NUM) {
@@ -55,6 +95,7 @@ static void control_on_serial_complete(uint32_t port_index)
     }
 }
 
+// Callback for CAN data transmission started by write_port command complete
 static void control_on_can_complete(
         bool success,
         uint32_t port_index,
@@ -157,7 +198,7 @@ MCUSerialBridgeError control_on_configure(
         g_handles[port_index].config = ports[port_index];
 
         switch (ports[port_index].port_type) {
-        case PortType_Serial:
+        case PortType_Serial: {
             const SerialPortConfigC* serial_config =
                     (const SerialPortConfigC*)&ports[port_index];
             bsp_serial_configs[serial_count].baud_rate = serial_config->baud;
@@ -166,7 +207,8 @@ MCUSerialBridgeError control_on_configure(
             // 注意：receive 回调在 control_on_start 中注册，配置阶段不启动接收
             ++serial_count;
             break;
-        case PortType_CAN:
+        }
+        case PortType_CAN: {
             const CANPortConfigC* can_config =
                     (const CANPortConfigC*)&ports[port_index];
             bsp_can_configs[can_count].baud_rate = can_config->baud;
@@ -175,6 +217,7 @@ MCUSerialBridgeError control_on_configure(
             // 注意：receive 回调在 control_on_start 中注册，配置阶段不启动接收
             ++can_count;
             break;
+        }
         }
         g_handles[port_index].valid = true;
     }
@@ -316,6 +359,320 @@ MCUSerialBridgeError control_on_write_output(
 }
 
 /* ===============================
+ * VM 端口写入实现
+ * =============================== */
+
+MCUSerialBridgeError control_vm_write_port(
+        uint32_t port_index,
+        const uint8_t* data,
+        uint32_t data_length)
+{
+    // 检查端口索引有效性
+    if (port_index >= PACKET_MAX_PORTS_NUM || !g_handles[port_index].valid) {
+        return MSB_Error_Config_PortNumOver;
+    }
+
+    if (!data || data_length == 0) {
+        return MSB_Error_Proto_InvalidPayload;
+    }
+
+    const PortConfigC* cfg = &g_handles[port_index].config;
+
+    switch (cfg->port_type) {
+    case PortType_Serial: {
+        // Serial 类型：缓冲数据，等待 flush 时发送
+        DIVERSerialSendBuffer* buf =
+                (DIVERSerialSendBuffer*)g_handles[port_index].diver_send_buffer;
+
+        if (!buf) {
+            VMTXBUF_LOG("ENQ port=%u len=%u fail: no buffer\n",
+                        port_index,
+                        data_length);
+            return MSB_Error_Serial_NotOpen;
+        }
+
+        // ========== 无临界区读取快照 ==========
+        // 生产者只有 VM 一个，消费者（回调）只会推进 head，不会修改 tail/buf_write
+        // 消费者推进 head 只会让可用空间变大，所以这里的计算是保守的
+        uint32_t snapshot_head = buf->head;
+        uint32_t snapshot_tail = buf->tail;
+
+        // 检查分段队列是否已满
+        if ((snapshot_tail + 1) % DIVER_SERIAL_SEND_BUFFER_SEGMENT_COUNT ==
+            snapshot_head) {
+            VMTXBUF_LOG(
+                    "ENQ port=%u len=%u fail: segq full head=%u tail=%u\n",
+                    port_index,
+                    data_length,
+                    snapshot_head,
+                    snapshot_tail);
+            return MSB_Error_MCU_SerialDataFlushFailed;
+        }
+
+        // 计算写入位置和可用空间
+        uint32_t write_pos;
+        uint32_t next_buf_write;
+
+        if (snapshot_head == snapshot_tail) {
+            // 队列为空：
+            // - segments[head] 内容可能是旧数据，不能用于 buf_read 计算
+            // - 为了提升局部性，并且避免空队列时的复杂空间计算，这里直接从 0 写入
+            write_pos = 0;
+            if (data_length > DIVER_SERIAL_SEND_BUFFER_TOTAL_SIZE) {
+                VMTXBUF_LOG("ENQ port=%u len=%u fail: too large\n",
+                            port_index,
+                            data_length);
+                return MSB_Error_MCU_SerialDataFlushFailed;
+            }
+            next_buf_write = data_length;
+        } else {
+            // 队列非空，基于当前 buf_write 计算
+            uint32_t current_buf_write = buf->buf_write;
+            uint32_t buf_read = buf->segments[snapshot_head].start;
+
+            uint32_t available_at_end;   // 尾部连续可用空间
+            uint32_t available_at_start; // 头部连续可用空间（回绕后）
+
+            if (current_buf_write >= buf_read) {
+                // 正常情况：已用区间是 [buf_read, buf_write)
+                available_at_end =
+                        DIVER_SERIAL_SEND_BUFFER_TOTAL_SIZE - current_buf_write;
+                available_at_start = buf_read;
+            } else {
+                // 已回绕：已用区间是 [0, buf_write) 和 [buf_read, SIZE)
+                available_at_end = buf_read - current_buf_write;
+                available_at_start = 0;  // 不能再次回绕
+            }
+
+            // 优先在尾部写入（保证数据连续，便于 DMA）
+            if (data_length <= available_at_end) {
+                write_pos = current_buf_write;
+                next_buf_write = current_buf_write + data_length;
+                if (next_buf_write >= DIVER_SERIAL_SEND_BUFFER_TOTAL_SIZE) {
+                    next_buf_write = 0;
+                }
+            } else if (data_length <= available_at_start) {
+                // 尾部不够，回绕到头部（不拆分数据）
+                write_pos = 0;
+                next_buf_write = data_length;
+            } else {
+                VMTXBUF_LOG(
+                        "ENQ port=%u len=%u fail: no contig space "
+                        "head=%u tail=%u bw=%u read=%u end=%u start=%u\n",
+                        port_index,
+                        data_length,
+                        snapshot_head,
+                        snapshot_tail,
+                        current_buf_write,
+                        buf_read,
+                        available_at_end,
+                        available_at_start);
+                return MSB_Error_MCU_SerialDataFlushFailed;
+            }
+        }
+
+        // ========== 无临界区执行 memcpy ==========
+        // 生产者独占写入区域，消费者不会访问 [write_pos, write_pos+len) 区间
+        memcpy(buf->buffer + write_pos, data, data_length);
+
+        // ========== 进入临界区更新索引 ==========
+        // 只需要原子更新 segment 信息和 tail
+        hal_nvic_critical_section_enter();
+        buf->segments[snapshot_tail].start = write_pos;
+        buf->segments[snapshot_tail].len = data_length;
+        buf->buf_write = next_buf_write;
+        buf->tail =
+                (snapshot_tail + 1) % DIVER_SERIAL_SEND_BUFFER_SEGMENT_COUNT;
+        hal_nvic_critical_section_quit();
+
+        VMTXBUF_LOG(
+                "ENQ ok port=%u len=%u write_pos=%u next_bw=%u head=%u "
+                "tail->%u sending=%u\n",
+                port_index,
+                data_length,
+                write_pos,
+                next_buf_write,
+                snapshot_head,
+                (snapshot_tail + 1) % DIVER_SERIAL_SEND_BUFFER_SEGMENT_COUNT,
+                (uint32_t)buf->sending);
+
+        return MSB_Error_OK;
+    }
+
+    case PortType_CAN: {
+        // CAN 类型：直接发送，不需要缓冲
+        // 数据格式: CANIDInfo (2 bytes) + data (0~8 bytes)
+        if (data_length < sizeof(CANIDInfo)) {
+            return MSB_Error_CAN_DataError;
+        }
+
+        CANIDInfo id_info;
+        memcpy(&id_info, data, sizeof(CANIDInfo));
+
+        // 验证 DLC 和数据长度
+        if (id_info.dlc > 8 ||
+            data_length < sizeof(CANIDInfo) + id_info.dlc) {
+            return MSB_Error_CAN_DataError;
+        }
+
+        const uint8_t* can_data = data + sizeof(CANIDInfo);
+
+        // 直接发送 CAN 数据（无需回调，VM 模式下不需要等待确认）
+        bool enqueued = hal_direct_can_send(
+                g_handles[port_index].can,
+                id_info,
+                can_data,
+                NULL,  // 无回调
+                0);
+
+        if (!enqueued) {
+            return MSB_Error_CAN_BufferFull;
+        }
+
+        return MSB_Error_OK;
+    }
+
+    default:
+        return MSB_Error_Config_UnknownPortType;
+    }
+}
+
+/**
+ * @brief 发送完成回调（ISR 上下文）
+ *
+ * 当一个分段发送完成后被调用。消费当前分段，如果队列中还有分段则继续发送。
+ * 注意：此回调已在 ISR 中运行，中断已禁用，无需额外临界区。
+ */
+static void control_vm_flush_serial_complete(uint32_t port_index)
+{
+    DIVERSerialSendBuffer* buf =
+            (DIVERSerialSendBuffer*)g_handles[port_index].diver_send_buffer;
+
+    if (!buf) {
+        return;
+    }
+
+    // ISR 上下文，无需临界区
+
+    // 消费当前分段：推进 head
+    if (!DIVER_SENDBUF_IS_EMPTY(buf)) {
+        uint32_t prev_head = buf->head;
+        buf->head =
+                (buf->head + 1) % DIVER_SERIAL_SEND_BUFFER_SEGMENT_COUNT;
+        VMTXBUF_LOG("TX done port=%u head %u->%u tail=%u\n",
+                    port_index,
+                    prev_head,
+                    buf->head,
+                    buf->tail);
+    }
+
+    // 检查队列中是否还有分段要发送
+    if (!DIVER_SENDBUF_IS_EMPTY(buf)) {
+        // 还有分段，继续发送下一个
+        DIVERSerialSendBufferSegment* seg = &buf->segments[buf->head];
+
+        VMTXBUF_LOG("TX next port=%u start=%u len=%u head=%u tail=%u\n",
+                    port_index,
+                    seg->start,
+                    seg->len,
+                    buf->head,
+                    buf->tail);
+        hal_usart_send(
+                g_handles[port_index].serial,
+                buf->buffer + seg->start,
+                seg->len,
+                (AsyncCallback)control_vm_flush_serial_complete,
+                1,
+                port_index);
+    } else {
+        // 队列已空，标记发送完成
+        // 注意：不在这里重置 buf_write，由生产者在队列为空时自动重置到 0
+        buf->sending = false;
+        VMTXBUF_LOG("TX idle port=%u (queue empty) sending=0\n", port_index);
+    }
+}
+
+/**
+ * @brief 刷新所有 VM 端口的发送缓冲区
+ *
+ * 在 VM loop 末尾调用。对于每个 Serial 端口，如果有待发送的分段且当前没有正在发送，
+ * 则启动发送。
+ *
+ * 注意：
+ * - 此函数与 ISR 回调存在竞态，需要用临界区保护 sending 标志的检查和设置
+ * - 如果上一次发送还没完成（sending=true），本次 flush 会跳过该端口
+ */
+void control_vm_flush_ports()
+{
+    for (uint32_t port_index = 0; port_index < PACKET_MAX_PORTS_NUM;
+         port_index++) {
+        if (!g_handles[port_index].valid) {
+            continue;
+        }
+
+        const PortConfigC* cfg = &g_handles[port_index].config;
+
+        // 只处理 Serial 类型端口（CAN 在 write_port 时已直接发送）
+        if (cfg->port_type != PortType_Serial) {
+            continue;
+        }
+
+        DIVERSerialSendBuffer* buf =
+                (DIVERSerialSendBuffer*)g_handles[port_index].diver_send_buffer;
+
+        if (!buf) {
+            continue;
+        }
+
+        // ========== 进入临界区 ==========
+        // 需要原子检查和设置 sending 标志，防止与回调竞态
+        hal_nvic_critical_section_enter();
+
+        // 检查：队列是否为空？是否已经在发送中？
+        bool is_empty = DIVER_SENDBUF_IS_EMPTY(buf);
+        bool is_sending = buf->sending;
+        if (is_empty || is_sending) {
+            hal_nvic_critical_section_quit();
+            if (is_empty) {
+                // optional, only when debugging
+                // VMTXBUF_LOG("FLUSH skip port=%u: empty\n", port_index);
+            } else {
+                VMTXBUF_LOG("FLUSH skip port=%u: sending=1\n", port_index);
+            }
+            continue;
+        }
+
+        // 标记开始发送，防止重入
+        buf->sending = true;
+
+        // 获取队首分段信息（在临界区内读取，保证一致性）
+        uint32_t seg_start = buf->segments[buf->head].start;
+        uint32_t seg_len = buf->segments[buf->head].len;
+        uint32_t snapshot_head = buf->head;
+        uint32_t snapshot_tail = buf->tail;
+
+        hal_nvic_critical_section_quit();
+        // ========== 退出临界区 ==========
+
+        VMTXBUF_LOG("FLUSH start port=%u start=%u len=%u head=%u tail=%u\n",
+                    port_index,
+                    seg_start,
+                    seg_len,
+                    snapshot_head,
+                    snapshot_tail);
+
+        // 启动发送（带回调）
+        hal_usart_send(
+                g_handles[port_index].serial,
+                buf->buffer + seg_start,
+                seg_len,
+                (AsyncCallback)control_vm_flush_serial_complete,
+                1,
+                port_index);
+    }
+}
+
+/* ===============================
  * DIVER / 扩展控制命令实现
  * =============================== */
 
@@ -354,7 +711,7 @@ MCUSerialBridgeError control_on_start(const uint8_t* data, uint32_t data_length)
         const PortConfigC* cfg = &g_handles[port_index].config;
 
         switch (cfg->port_type) {
-        case PortType_Serial:
+        case PortType_Serial: {
             const SerialPortConfigC* serial_cfg = (const SerialPortConfigC*)cfg;
             hal_usart_register_receive(
                     g_handles[port_index].serial,
@@ -362,10 +719,27 @@ MCUSerialBridgeError control_on_start(const uint8_t* data, uint32_t data_length)
                     serial_cfg->receive_frame_ms,
                     1,
                     port_index);
+            if (g_mcu_state.mode == MCU_Mode_DIVER) {
+                g_handles[port_index].diver_send_buffer =
+                        mempool_malloc(sizeof(DIVERSerialSendBuffer));
+                if (g_handles[port_index].diver_send_buffer) {
+                    memset(g_handles[port_index].diver_send_buffer,
+                           0,
+                           sizeof(DIVERSerialSendBuffer));
+                } else {
+                    g_mcu_state.running_state = MCU_RunState_Error;
+                    console_printf_do(
+                            "CONTROL: Failed to allocate diver send buffer for "
+                            "serial %u\n",
+                            port_index);
+                    return MSB_Error_MCU_MemoryAllocFailed;
+                }
+            }
             console_printf_do(
                     "CONTROL: Registered serial[%u] receive callback\n",
                     port_index);
             break;
+        }
         case PortType_CAN:
             hal_direct_can_register_receive(
                     g_handles[port_index].can,

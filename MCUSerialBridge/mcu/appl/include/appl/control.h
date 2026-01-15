@@ -44,6 +44,36 @@ MCUSerialBridgeError control_on_write_port(
         uint32_t sequence,
         uint8_t* async);
 
+/*
+@brief 处理 VM 写端口命令
+VM 层通过调用这个函数来写端口数据
+- 对于 Serial
+类型数据，因为接口不支持并发，所以本函数的实现会先将数据写入到缓冲区。
+  然后在每个 VM Loop 结束时，vm_loop() 需要主动调用 control_vm_flush_ports()
+来发送数据。
+- 对于 CAN 类型端口，接口原生支持并发，本函数实现会直接调用 dcan 的接口直接发送
+@param port_index 端口索引
+@param data 数据指针
+@param data_length 数据长度
+@return 错误码
+@note
+*/
+MCUSerialBridgeError control_vm_write_port(
+        uint32_t port_index,
+        const uint8_t* data,
+        uint32_t data_length);
+
+/*
+@brief 刷新 VM 写端口数据
+在每个 VM Loop 结束时，vm_loop() 需要主动调用这个函数来发送数据。
+会遍历所有端口，并根据端口类型调用不同的发送函数。
+对于 Serial 类型端口，内部会将每次写入的片段间隔分开，逐个发送，间隔与 FrameGap
+设定保持一致，避免不同的包之间的粘连 CAN 端口则跳过，因为实际发送已经在
+control_vm_write_port() 中完成。
+@note
+*/
+void control_vm_flush_ports();
+
 MCUSerialBridgeError control_on_write_output(
         const uint8_t* data,
         uint32_t data_length);
