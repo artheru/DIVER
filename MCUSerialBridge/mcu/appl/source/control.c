@@ -33,10 +33,10 @@ typedef struct {
     uint8_t buffer[DIVER_SERIAL_SEND_BUFFER_TOTAL_SIZE];
     DIVERSerialSendBufferSegment
             segments[DIVER_SERIAL_SEND_BUFFER_SEGMENT_COUNT];
-    volatile uint32_t head;       // 分段队列头（下一个要发送的分段索引，消费者）
-    volatile uint32_t tail;       // 分段队列尾（下一个要写入的分段槽位，生产者）
+    volatile uint32_t head;  // 分段队列头（下一个要发送的分段索引，消费者）
+    volatile uint32_t tail;  // 分段队列尾（下一个要写入的分段槽位，生产者）
     volatile uint32_t buf_write;  // buffer 中下一个写入位置
-    volatile bool sending;        // 是否正在发送中（防止 flush 和回调竞态）
+    volatile bool sending;  // 是否正在发送中（防止 flush 和回调竞态）
 } DIVERSerialSendBuffer;
 
 // 辅助宏：判断分段队列是否为空
@@ -71,6 +71,17 @@ static uint8_t program_buffer_storage[PROGRAM_BUFFER_MAX_SIZE];
 uint8_t* g_program_buffer = program_buffer_storage;
 uint32_t g_program_length = 0;
 static uint32_t g_program_receiving_offset = 0;
+
+// UpperIO 双缓存结构（避免临界区）
+typedef struct {
+    uint8_t* buffer[2];                  // 双缓存 [0] 和 [1]
+    volatile uint32_t hot_buffer_index;  // 当前"热"buffer
+                                         // 索引（接收线程写入，可能被多次覆盖）
+    volatile uint32_t write_length;  // 当前写入的数据长度
+    volatile bool has_new_data;      // 是否有新数据标志
+} UpperIODoubleBuffer;
+
+static UpperIODoubleBuffer g_upperio_buffer = {0};
 
 // Callback for serial data transmission started by write_port command complete
 static void control_on_serial_complete(uint32_t port_index)
@@ -385,15 +396,17 @@ MCUSerialBridgeError control_vm_write_port(
                 (DIVERSerialSendBuffer*)g_handles[port_index].diver_send_buffer;
 
         if (!buf) {
-            VMTXBUF_LOG("ENQ port=%u len=%u fail: no buffer\n",
-                        port_index,
-                        data_length);
+            VMTXBUF_LOG(
+                    "ENQ port=%u len=%u fail: no buffer\n",
+                    port_index,
+                    data_length);
             return MSB_Error_Serial_NotOpen;
         }
 
         // ========== 无临界区读取快照 ==========
-        // 生产者只有 VM 一个，消费者（回调）只会推进 head，不会修改 tail/buf_write
-        // 消费者推进 head 只会让可用空间变大，所以这里的计算是保守的
+        // 生产者只有 VM 一个，消费者（回调）只会推进 head，不会修改
+        // tail/buf_write 消费者推进 head
+        // 只会让可用空间变大，所以这里的计算是保守的
         uint32_t snapshot_head = buf->head;
         uint32_t snapshot_tail = buf->tail;
 
@@ -416,12 +429,13 @@ MCUSerialBridgeError control_vm_write_port(
         if (snapshot_head == snapshot_tail) {
             // 队列为空：
             // - segments[head] 内容可能是旧数据，不能用于 buf_read 计算
-            // - 为了提升局部性，并且避免空队列时的复杂空间计算，这里直接从 0 写入
+            // - 为了提升局部性，并且避免空队列时计算，这里直接从 0 写入
             write_pos = 0;
             if (data_length > DIVER_SERIAL_SEND_BUFFER_TOTAL_SIZE) {
-                VMTXBUF_LOG("ENQ port=%u len=%u fail: too large\n",
-                            port_index,
-                            data_length);
+                VMTXBUF_LOG(
+                        "ENQ port=%u len=%u fail: too large\n",
+                        port_index,
+                        data_length);
                 return MSB_Error_MCU_SerialDataFlushFailed;
             }
             next_buf_write = data_length;
@@ -430,8 +444,8 @@ MCUSerialBridgeError control_vm_write_port(
             uint32_t current_buf_write = buf->buf_write;
             uint32_t buf_read = buf->segments[snapshot_head].start;
 
-            uint32_t available_at_end;   // 尾部连续可用空间
-            uint32_t available_at_start; // 头部连续可用空间（回绕后）
+            uint32_t available_at_end;  // 尾部连续可用空间
+            uint32_t available_at_start;  // 头部连续可用空间（回绕后）
 
             if (current_buf_write >= buf_read) {
                 // 正常情况：已用区间是 [buf_read, buf_write)
@@ -510,8 +524,7 @@ MCUSerialBridgeError control_vm_write_port(
         memcpy(&id_info, data, sizeof(CANIDInfo));
 
         // 验证 DLC 和数据长度
-        if (id_info.dlc > 8 ||
-            data_length < sizeof(CANIDInfo) + id_info.dlc) {
+        if (id_info.dlc > 8 || data_length < sizeof(CANIDInfo) + id_info.dlc) {
             return MSB_Error_CAN_DataError;
         }
 
@@ -557,13 +570,13 @@ static void control_vm_flush_serial_complete(uint32_t port_index)
     // 消费当前分段：推进 head
     if (!DIVER_SENDBUF_IS_EMPTY(buf)) {
         uint32_t prev_head = buf->head;
-        buf->head =
-                (buf->head + 1) % DIVER_SERIAL_SEND_BUFFER_SEGMENT_COUNT;
-        VMTXBUF_LOG("TX done port=%u head %u->%u tail=%u\n",
-                    port_index,
-                    prev_head,
-                    buf->head,
-                    buf->tail);
+        buf->head = (buf->head + 1) % DIVER_SERIAL_SEND_BUFFER_SEGMENT_COUNT;
+        VMTXBUF_LOG(
+                "TX done port=%u head %u->%u tail=%u\n",
+                port_index,
+                prev_head,
+                buf->head,
+                buf->tail);
     }
 
     // 检查队列中是否还有分段要发送
@@ -571,12 +584,13 @@ static void control_vm_flush_serial_complete(uint32_t port_index)
         // 还有分段，继续发送下一个
         DIVERSerialSendBufferSegment* seg = &buf->segments[buf->head];
 
-        VMTXBUF_LOG("TX next port=%u start=%u len=%u head=%u tail=%u\n",
-                    port_index,
-                    seg->start,
-                    seg->len,
-                    buf->head,
-                    buf->tail);
+        VMTXBUF_LOG(
+                "TX next port=%u start=%u len=%u head=%u tail=%u\n",
+                port_index,
+                seg->start,
+                seg->len,
+                buf->head,
+                buf->tail);
         hal_usart_send(
                 g_handles[port_index].serial,
                 buf->buffer + seg->start,
@@ -595,8 +609,8 @@ static void control_vm_flush_serial_complete(uint32_t port_index)
 /**
  * @brief 刷新所有 VM 端口的发送缓冲区
  *
- * 在 VM loop 末尾调用。对于每个 Serial 端口，如果有待发送的分段且当前没有正在发送，
- * 则启动发送。
+ * 在 VM loop 末尾调用。对于每个 Serial
+ * 端口，如果有待发送的分段且当前没有正在发送， 则启动发送。
  *
  * 注意：
  * - 此函数与 ISR 回调存在竞态，需要用临界区保护 sending 标志的检查和设置
@@ -654,12 +668,13 @@ void control_vm_flush_ports()
         hal_nvic_critical_section_quit();
         // ========== 退出临界区 ==========
 
-        VMTXBUF_LOG("FLUSH start port=%u start=%u len=%u head=%u tail=%u\n",
-                    port_index,
-                    seg_start,
-                    seg_len,
-                    snapshot_head,
-                    snapshot_tail);
+        VMTXBUF_LOG(
+                "FLUSH start port=%u start=%u len=%u head=%u tail=%u\n",
+                port_index,
+                seg_start,
+                seg_len,
+                snapshot_head,
+                snapshot_tail);
 
         // 启动发送（带回调）
         hal_usart_send(
@@ -753,6 +768,33 @@ MCUSerialBridgeError control_on_start(const uint8_t* data, uint32_t data_length)
         default:
             break;
         }
+    }
+
+    // --------------------------------
+    // 为 DIVER 模式分配 UpperIO 双缓存
+    // --------------------------------
+    if (g_mcu_state.mode == MCU_Mode_DIVER) {
+        // 分配双缓存
+        g_upperio_buffer.buffer[0] = mempool_malloc(UPPERIO_BUFFER_SIZE);
+        g_upperio_buffer.buffer[1] = mempool_malloc(UPPERIO_BUFFER_SIZE);
+
+        if (!g_upperio_buffer.buffer[0] || !g_upperio_buffer.buffer[1]) {
+            g_mcu_state.running_state = MCU_RunState_Error;
+            console_printf_do(
+                    "CONTROL: Failed to allocate UpperIO double buffer\n");
+            return MSB_Error_MCU_MemoryAllocFailed;
+        }
+
+        // 初始化：hot_buffer_index=0 表示 buffer[0]
+        // 是"热"buffer（接收线程写入，可能被覆盖） VM 线程读取 buffer[1]（冷
+        // buffer，安全不会变化）
+        g_upperio_buffer.hot_buffer_index = 0;
+        g_upperio_buffer.write_length = 0;
+        g_upperio_buffer.has_new_data = false;
+
+        console_printf_do(
+                "CONTROL: UpperIO double buffer allocated (%u bytes each)\n",
+                UPPERIO_BUFFER_SIZE);
     }
 
     // 切换到运行状态
@@ -884,10 +926,33 @@ MCUSerialBridgeError control_on_memory_upper_io(
         return MSB_Error_State_NotRunning;
     }
 
-    console_printf_do("CONTROL: UpperIO received, len=%u\n", pkt->data_len);
+    // 检查双缓存是否已分配
+    if (!g_upperio_buffer.buffer[0] || !g_upperio_buffer.buffer[1]) {
+        console_printf_do("CONTROL: UpperIO buffer not allocated\n");
+        return MSB_Error_State_NotRunning;
+    }
 
-    // TODO: 将 UpperIO 数据传递给 DIVER 运行时
-    // diver_set_upper_io(pkt->data, pkt->data_len);
+    // 检查数据长度
+    if (pkt->data_len > UPPERIO_BUFFER_SIZE) {
+        console_printf_do(
+                "CONTROL: UpperIO data too large: %u > %u\n",
+                pkt->data_len,
+                UPPERIO_BUFFER_SIZE);
+        return MSB_Error_Proto_FrameTooLong;
+    }
+
+    // ========== 无临界区写入双缓存 ==========
+    // 读取当前 hot_buffer_index，写入到热 buffer（可能被多次覆盖）
+    // 如果两个 Op 之间收到多个 UpperIO，后面的会覆盖前面的（只保留最后一个）
+    uint32_t hot_idx = g_upperio_buffer.hot_buffer_index;
+
+    memcpy(g_upperio_buffer.buffer[hot_idx], pkt->data, pkt->data_len);
+
+    // 原子更新长度和标志（volatile 写入，VM 线程会看到）
+    g_upperio_buffer.write_length = pkt->data_len;
+    g_upperio_buffer.has_new_data = true;
+
+    console_printf_do("CONTROL: UpperIO received, len=%u\n", pkt->data_len);
 
     return MSB_Error_OK;
 }
@@ -918,4 +983,48 @@ void control_upload_memory_lower_io(const uint8_t* data, uint32_t data_length)
 
     packet_send(
             &header, other_data, sizeof(MemoryExchangePacket) + data_length);
+}
+
+bool control_vm_get_upper_io(const uint8_t** data_ptr, uint32_t* data_len)
+{
+    if (!g_upperio_buffer.buffer[0] || !g_upperio_buffer.buffer[1]) {
+        return false;
+    }
+
+    // ========== 进入临界区 ==========
+    // 需要原子读取 has_new_data 和 hot_buffer_index，防止在交换过程中
+    // 进入 control_on_memory_upper_io 的 ISR
+    hal_nvic_critical_section_enter();
+
+    // 检查是否有新数据
+    if (!g_upperio_buffer.has_new_data) {
+        hal_nvic_critical_section_quit();
+        return false;
+    }
+
+    // 读取当前 hot_buffer_index 和数据长度
+    uint32_t hot_idx = g_upperio_buffer.hot_buffer_index;
+    uint32_t len = g_upperio_buffer.write_length;
+
+    // 计算冷 buffer 索引（VM 读取的安全 buffer，不会变化）
+    uint32_t cold_idx = 1 - hot_idx;
+
+    // 交换 hot_buffer_index（0 <-> 1）
+    // 热 buffer 和冷 buffer 互换：刚才的热 buffer 变成冷 buffer（VM
+    // 可以安全读取） 刚才的冷 buffer 变成新的热
+    // buffer（接收线程可以写入，可能被覆盖）
+    g_upperio_buffer.hot_buffer_index = cold_idx;
+
+    // 清除标志（必须在临界区内清除，避免竞态）
+    g_upperio_buffer.has_new_data = false;
+
+    hal_nvic_critical_section_quit();
+    // ========== 退出临界区 ==========
+
+    // 返回数据（cold_idx 指向的是刚才热 buffer 的数据，现在变成冷
+    // buffer，安全不会变化）
+    *data_ptr = g_upperio_buffer.buffer[cold_idx];
+    *data_len = len;
+
+    return true;
 }

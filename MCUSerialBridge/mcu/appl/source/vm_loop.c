@@ -44,27 +44,23 @@ static void vm_loop()
         uint32_t inputs_u32 = bsp_get_inputs();
         vm_put_snapshot_buffer((void*)&inputs_u32, sizeof(inputs_u32));
 
-        // if (vm_uplink_data_received) {
-        //     enter_critical();
-        //     vm_put_upper_memory(
-        //             vm_upper_memory_cmd, vm_upper_memory_cmd_length);
-        //     vm_uplink_data_received = 0;
-        //     leave_critical();
+        // 检查 UpperIO 新数据（双缓存，无临界区）
+        const uint8_t* upperio_data = NULL;
+        uint32_t upperio_len = 0;
+        bool has_upperio = control_vm_get_upper_io(&upperio_data, &upperio_len);
 
-        //     vm_run(vm_iteration_count++);
-        //     console_printf_do(
-        //             "VMLoop: upperio updated, iteration = %d\n",
-        //             vm_iteration_count);
-        // } else {
-        //     vm_run(vm_iteration_count);
-        //     console_printf_do(
-        //             "VMLoop: upperio not updated, iteration = %d\n",
-        //             vm_iteration_count);
-        // }
-
-        // TODO: iteration should be handled by if uplink upperio received or
-        // not.
-        vm_run(vm_iteration_count++);
+        if (has_upperio) {
+            // 有新数据，传递给 VM 运行时
+            vm_put_upper_memory((uchar*)upperio_data, (int)upperio_len);
+            vm_run(vm_iteration_count++);
+            console_printf_do(
+                    "VMLoop: upperio updated, iteration = %d, len = %u\n",
+                    vm_iteration_count - 1,
+                    upperio_len);
+        } else {
+            // 没有新数据，正常执行
+            vm_run(vm_iteration_count++);
+        }
 
         // Always flush ports after each iteration.
         control_vm_flush_ports();

@@ -127,3 +127,15 @@ MCUSerialBridgeError control_on_memory_upper_io(
  * MCU 向 PC 上报输出变量数据（DIVER 模式下使用）
  */
 void control_upload_memory_lower_io(const uint8_t* data, uint32_t data_length);
+
+/**
+ * @brief 检查并获取 UpperIO 新数据（双缓存交换）
+ * 
+ * 在 VM loop 中调用，如果收到新的 UpperIO 数据，会交换双缓存并返回数据指针和长度。
+ * 如果两个 Operation 之间收到多个 UpperIO，只保留最后一个。
+ * 
+ * @param[out] data_ptr 返回数据指针（指向读取 buffer）
+ * @param[out] data_len 返回数据长度
+ * @return true 如果有新数据，false 如果没有新数据
+ */
+bool control_vm_get_upper_io(const uint8_t** data_ptr, uint32_t* data_len);
