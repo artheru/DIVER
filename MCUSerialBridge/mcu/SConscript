@@ -181,6 +181,11 @@ if ENABLE_DIVER_RUNTIME:
     else:
         print(f"[WARNING] mcu_runtime.c not found at {mcu_runtime_path}")
 
+# Generate compile_commands.json for clangd
+env.Tool('compilation_db')
+compdb = env.CompilationDatabase('compile_commands.json')
+Default(compdb)
+
 # Build the firmware
 firmware = env.Program(
     'build/firmware.elf',

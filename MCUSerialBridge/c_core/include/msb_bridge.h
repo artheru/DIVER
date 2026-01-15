@@ -325,6 +325,35 @@ DLL_EXPORT MCUSerialBridgeError msb_register_memory_lower_io_callback(
         msb_on_memory_lower_io_callback_function_t callback,
         void* user_ctx);
 
+/**
+ * @brief Console 日志回调函数类型定义
+ *
+ * 当 MCU 上报 Console.WriteLine 数据时，会调用该回调函数。
+ *
+ * @param message 指向接收到的字符串缓冲（以 0 结尾）
+ * @param message_len 字符串长度（不包含 '\0'）
+ * @param user_ctx 用户注册的上下文参数
+ */
+typedef void (*msb_on_console_writeline_callback_function_t)(
+        const char* message,
+        uint32_t message_len,
+        void* user_ctx);
+
+/**
+ * @brief 注册 Console 日志回调函数
+ *
+ * MCU 上报 Console.WriteLine 数据时，会调用用户提供的回调函数。
+ *
+ * @param handle MCU 句柄
+ * @param callback 用户提供的回调函数指针
+ * @param user_ctx 用户上下文参数
+ * @return MCUSerialBridgeError 错误码
+ */
+DLL_EXPORT MCUSerialBridgeError msb_register_console_writeline_callback(
+        msb_handle* handle,
+        msb_on_console_writeline_callback_function_t callback,
+        void* user_ctx);
+
 /*
  * @brief 生成函数指针结构体
  * 导出所有 API
@@ -379,6 +408,10 @@ typedef struct MCUSerialBridgeAPI {
     MCUSerialBridgeError (*msb_register_memory_lower_io_callback)(
             msb_handle*,
             msb_on_memory_lower_io_callback_function_t,
+            void*);
+    MCUSerialBridgeError (*msb_register_console_writeline_callback)(
+            msb_handle*,
+            msb_on_console_writeline_callback_function_t,
             void*);
 } MCUSerialBridgeAPI;
 

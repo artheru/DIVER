@@ -1,7 +1,7 @@
 #include "appl/vm.h"
 //
 #include "appl/control.h"
-#include "common.h"
+#include "appl/upload.h"
 #include "util/console.h"
 
 
@@ -109,10 +109,9 @@ void report_error(int il_offset, uchar* error_str)
     }
 }
 
-void print_line(uchar* error_str)  // should upload text info.
+void print_line(uchar* str, int length)  // should upload text info.
 {
     console_printf_do("VMGlue: Console.WriteLine!\n");
-    uint32_t len = strnlen((const char*)error_str, 1024);
-    console_print_string_do(error_str, len);
-    //     uplink_add_log(error_str, len);
+    console_print_string_do(str, length);
+    upload_console_writeline_append(str, length);
 }

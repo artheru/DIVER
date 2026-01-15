@@ -86,6 +86,10 @@ typedef struct msb_handle {
     msb_on_memory_lower_io_callback_function_t memory_lower_io_callback;
     void* memory_lower_io_callback_ctx;
 
+    // Console WriteLine 回调（DIVER 模式日志上报）
+    msb_on_console_writeline_callback_function_t console_writeline_callback;
+    void* console_writeline_callback_ctx;
+
     // 用户自定义回调
     void (*error_cb)(MCUSerialBridgeError err, const char* msg, int len);
 } msb_handle;

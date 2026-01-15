@@ -172,6 +172,13 @@ typedef enum {
     CommandMemoryLowerIO = 0x70,
 
     /**
+     * @brief MCU ->PC 日志输出命令 (MCU → PC)
+     *
+     * MCU 主动上报日志数据。无需确认响应，sequence 固定为 0。
+     */
+    CommandUploadConsoleWriteLine = 0x71,
+
+    /**
      * @brief 致命错误上报命令 (MCU → PC 或 PC → MCU)
      *
      * 任意一方检测到致命错误时上报。sequence 固定为 0，通常携带错误码。
@@ -296,10 +303,10 @@ typedef enum {
 typedef union {
     u32 raw; /**< 原始 32-bit 值，用于整体读写 */
     struct {
-        u8 running_state;  /**< 运行状态 (MCURunState) */
-        u8 is_configured;  /**< 是否已配置端口 (0 或 1) */
-        u8 is_programmed;  /**< 是否已加载程序 (0 或 1, 仅 DIVER 模式) */
-        u8 mode;           /**< 模式 (MCUMode: 0x00=Bridge, 0x80=DIVER) */
+        u8 running_state; /**< 运行状态 (MCURunState) */
+        u8 is_configured; /**< 是否已配置端口 (0 或 1) */
+        u8 is_programmed; /**< 是否已加载程序 (0 或 1, 仅 DIVER 模式) */
+        u8 mode;          /**< 模式 (MCUMode: 0x00=Bridge, 0x80=DIVER) */
     };
 } MCUStateC;
 
@@ -349,10 +356,10 @@ STATIC_ASSERT(sizeof(CANPortConfigC) == 16, "CANPortConfig size error");
 /**
  * @brief 端口数据包结构
  *
- * 用于 CommandWritePort / CommandUploadPort。
+ * 用于 CommandWritePort / CommandUploadPort
  */
 typedef struct {
-    i8 port_index; /**< 端口索引，IO 时为 -1 */
+    i8 port_index; /**< 端口索引 */
     u16 data_len;  /**< 数据长度 */
     u8 data[0];    /**< 可变长度数据 */
 } DataPacket;

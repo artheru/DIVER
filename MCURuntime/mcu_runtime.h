@@ -139,7 +139,7 @@ void write_stream(int streamID, uchar* buffer, int size); // called to write byt
 void write_event(int portID, int eventID, uchar* buffer, int size); // called to write bytes into CAN/modbus similar ports. called anytime needed.
 
 void report_error(int il_offset, uchar* error_str); // should report error and terminate execution, enter safe mode.
-void print_line(uchar* error_str); // should upload text info.
+void print_line(uchar* str, int length); // should upload text info.
 
 #ifdef IS_MCU
 // For implementation of inline functions

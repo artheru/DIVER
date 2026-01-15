@@ -62,8 +62,13 @@ static void vm_loop()
         //             vm_iteration_count);
         // }
 
+        // TODO: iteration should be handled by if uplink upperio received or
+        // not.
         vm_run(vm_iteration_count++);
 
+        // Call upload console writeline to actually upload the console
+        // writeline data to the host.
+        upload_console_writeline();
         vm_last_iteration_time_us += vm_interval_period_us;
     }
 }

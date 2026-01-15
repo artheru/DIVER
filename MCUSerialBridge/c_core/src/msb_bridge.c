@@ -130,7 +130,7 @@ MCUSerialBridgeError msb_open(
         return MSB_Error_Win_CannotCreateThread;
     }
 
-    DBG_PRINT("MCU Open OK");
+    DBG_PRINT("MSB Open OK");
     return MSB_Error_OK;
 }
 
@@ -641,6 +641,28 @@ MCUSerialBridgeError msb_register_memory_lower_io_callback(
 }
 
 // --------------------
+// 注册 Console WriteLine 回调
+// --------------------
+MCUSerialBridgeError msb_register_console_writeline_callback(
+        msb_handle* handle,
+        msb_on_console_writeline_callback_function_t callback,
+        void* user_ctx)
+{
+    if (!handle)
+        return MSB_Error_Win_HandleNotFound;
+
+    handle->console_writeline_callback = NULL;
+    handle->console_writeline_callback_ctx = user_ctx;
+    handle->console_writeline_callback = callback;
+
+    DBG_PRINT(
+            "Registered console_writeline callback to[0x%08X]",
+            (uint32_t)(size_t)(void*)callback);
+
+    return MSB_Error_OK;
+}
+
+// --------------------
 // 获取 API 函数指针
 // --------------------
 void mcu_serial_bridge_get_api(MCUSerialBridgeAPI* api)
@@ -663,4 +685,5 @@ void mcu_serial_bridge_get_api(MCUSerialBridgeAPI* api)
     api->msb_enable_wire_tap = msb_enable_wire_tap;
     api->msb_memory_upper_io = msb_memory_upper_io;
     api->msb_register_memory_lower_io_callback = msb_register_memory_lower_io_callback;
+    api->msb_register_console_writeline_callback = msb_register_console_writeline_callback;
 }

@@ -507,6 +507,20 @@ namespace MCUSerialBridgeCLR
             msb_on_memory_lower_io_callback_function_t callback,
             IntPtr user_ctx
         );
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate void msb_on_console_writeline_callback_function_t(
+            IntPtr message,
+            uint message_len,
+            IntPtr user_ctx
+        );
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern MCUSerialBridgeError msb_register_console_writeline_callback(
+            IntPtr handle,
+            msb_on_console_writeline_callback_function_t callback,
+            IntPtr user_ctx
+        );
     }
 
     /// <summary>
@@ -857,6 +871,7 @@ namespace MCUSerialBridgeCLR
         > _portCallbacks = [];
 
         private MCUSerialBridgeCoreAPI.msb_on_memory_lower_io_callback_function_t _memoryLowerIOCallback;
+        private MCUSerialBridgeCoreAPI.msb_on_console_writeline_callback_function_t _consoleWriteLineCallback;
 
         /// <summary>
         /// 注册指定端口(Serial)的回调函数
@@ -1069,6 +1084,52 @@ namespace MCUSerialBridgeCLR
             return MCUSerialBridgeCoreAPI.msb_register_memory_lower_io_callback(
                 nativeHandle,
                 _memoryLowerIOCallback,
+                IntPtr.Zero
+            );
+        }
+
+        /// <summary>
+        /// 注册 MCU Console.WriteLine 日志回调（DIVER 模式日志输出）
+        /// </summary>
+        /// <param name="callback">接收日志回调，string 为接收到的日志消息</param>
+        /// <returns>错误码</returns>
+        /// <remarks>
+        /// 注意事项：
+        /// 1. 回调会在底层 C 层线程中直接调用，请**不要在回调内阻塞**，例如等待 I/O 或 Sleep。
+        /// 2. 回调内**不能调用其他发送函数**，否则可能导致死锁。
+        /// 3. 回调内只能做轻量级操作，例如打印日志、入队等。
+        /// 4. 若需要复杂处理，请**将数据入队到另一个线程**，再在后台处理。
+        /// 5. 数据可能随时到来，请保证回调尽快返回，避免影响后续帧接收。
+        /// </remarks>
+        public MCUSerialBridgeError RegisterConsoleWriteLineCallback(Action<string> callback)
+        {
+            if (callback == null)
+                return MCUSerialBridgeError.Win_InvalidParam;
+
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            // 包装 C# 回调为 P/Invoke 委托
+            void del(IntPtr message, uint message_len, IntPtr user_ctx)
+            {
+                try
+                {
+                    string msg = Marshal.PtrToStringAnsi(message, (int)message_len);
+                    callback(msg);
+                }
+                catch
+                {
+                    // 解析失败直接忽略，保证回调不会抛异常阻塞 C 层线程
+                }
+            }
+
+            // 保存引用，防止 GC 回收
+            _consoleWriteLineCallback = del;
+
+            // 调用 C 层注册
+            return MCUSerialBridgeCoreAPI.msb_register_console_writeline_callback(
+                nativeHandle,
+                _consoleWriteLineCallback,
                 IntPtr.Zero
             );
         }

@@ -55,3 +55,8 @@ def rundiver(target, source, env):
 
 env.Alias('rundiver', testdiver_exe, Action(rundiver, cmdstr='[TEST] Run TestDIVER.exe'))
 env.AlwaysBuild('rundiver')
+
+# Generate compile_commands.json for clangd
+env.Tool('compilation_db')
+compdb = env.CompilationDatabase('compile_commands.json')
+Default(compdb)

@@ -5,7 +5,6 @@
 #include "appl/vm.h"
 #include "bsp/digital_io.h"
 #include "bsp/ports.h"
-#include "common.h"
 #include "hal/nvic.h"
 #include "util/console.h"
 

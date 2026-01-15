@@ -4971,7 +4971,7 @@ void builtin_Func6_Invoke(uchar** reptr) {
 void builtin_Console_WriteLine(uchar** reptr) {
 	int refid = pop_reference(reptr);
 	struct string_val* str = (struct string_val*)heap_obj[refid].pointer;
-	print_line(&str->payload);
+	print_line(&str->payload, str->str_len);
 }
 
 void builtin_BitConverter_GetBytes_Boolean(uchar** reptr) {
@@ -6567,7 +6567,7 @@ void report_error(int il_offset, uchar* error_str) {
 	print_stacktrace();
 	exit(2);
 }
-void print_line(uchar* error_str) { printf("%s\n", error_str); }; // should upload text info.
+void print_line(uchar* str, int length); { printf("%s\n", str); }; // should upload text info.
 
 inline void enter_critical() {};
 inline void leave_critical() {};

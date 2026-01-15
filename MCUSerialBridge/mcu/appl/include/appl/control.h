@@ -18,18 +18,26 @@ extern uint32_t g_program_length;
 /** @brief 程序缓冲区总大小（用于 VM 内存分配） */
 #define PROGRAM_BUFFER_MAX_SIZE (16 * 1024)
 
+/*
+下列所有命令返回的错误码都会直接被交互层（packet）直接同步地返回给PC
+*/
+
 /* ===============================
- * 基础控制命令
+ * 端口读写命令
  * =============================== */
 
-MCUSerialBridgeError control_on_configure(
-        const uint8_t* data,
-        uint32_t data_length);
-
-MCUSerialBridgeError control_on_reset(
-        const uint8_t* data,
-        uint32_t data_length);
-
+/**
+ * @brief 处理写端口命令
+ * 向指定端口写数据
+ @param data 数据指针
+ @param data_length 数据长度
+ @param sequence 序列号
+ @param async 异步标志
+ @return 错误码
+ @note
+ 实现应该主动修改async标志，如果成功开始写入则是异步，写入完成回调已经被成功注册，当回调完成以后会向PC返回确认响应，这时候需要设置
+ async 为 true，表示交互层（packet）不能立刻返回确认响应，而是需要等待回调完成。
+ */
 MCUSerialBridgeError control_on_write_port(
         const uint8_t* data,
         uint32_t data_length,
@@ -41,8 +49,24 @@ MCUSerialBridgeError control_on_write_output(
         uint32_t data_length);
 
 /* ===============================
- * DIVER / 扩展控制命令
+ * DIVER / 控制命令
  * =============================== */
+
+MCUSerialBridgeError control_on_reset(
+        const uint8_t* data,
+        uint32_t data_length);
+
+/**
+ * @brief 处理程序下载命令
+ * 接收程序数据，支持分片传输。如果程序长度为 0，切换到透传模式
+ */
+MCUSerialBridgeError control_on_program(
+        const uint8_t* data,
+        uint32_t data_length);
+
+MCUSerialBridgeError control_on_configure(
+        const uint8_t* data,
+        uint32_t data_length);
 
 /**
  * @brief 处理启动命令
@@ -57,14 +81,6 @@ MCUSerialBridgeError control_on_start(
  * 启用后即使在 DIVER 模式下，端口收到的数据也会上报给 PC
  */
 MCUSerialBridgeError control_on_enable_wire_tap(
-        const uint8_t* data,
-        uint32_t data_length);
-
-/**
- * @brief 处理程序下载命令
- * 接收程序数据，支持分片传输。如果程序长度为 0，切换到透传模式
- */
-MCUSerialBridgeError control_on_program(
         const uint8_t* data,
         uint32_t data_length);
 

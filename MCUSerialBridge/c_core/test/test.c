@@ -61,10 +61,10 @@ int main(void)
 
     MCUSerialBridgeError ret = api.msb_open(&handle, "COM18", 1000000);
     if (ret != MSB_Error_OK) {
-        Log("MCU Open FAILED: 0x%08X", ret);
+        Log("MSB Open FAILED: 0x%08X", ret);
         return -1;
     }
-    Log("MCU Open OK");
+    Log("MSB Open OK");
 
     VersionInfoC version;
     memset(&version, 0, sizeof(version));

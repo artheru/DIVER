@@ -70,3 +70,8 @@ runc_alias = env.Alias(
     Action(runc_test_exe, cmdstr='[C TEST] Run')
 )
 env.AlwaysBuild(runc_alias)
+
+# Generate compile_commands.json for clangd
+env.Tool('compilation_db')
+compdb = env.CompilationDatabase('compile_commands.json')
+Default(compdb)

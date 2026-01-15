@@ -3,10 +3,8 @@
 #include "appl/control.h"
 #include "appl/packet.h"
 #include "hal/dcan.h"
-#include "hal/usart.h"
 #include "msb_protocol.h"
 #include "util/console.h"
-#include "util/crc.h"
 
 /**
  * @brief 检查是否应该上报端口数据到 PC
@@ -25,6 +23,9 @@ static inline bool should_upload_port_data(void)
     // DIVER 模式：仅当 wire_tap 启用时上报
     return g_wire_tap_enabled;
 }
+
+static uint8_t upload_console_writeline_buffer[PACKET_MAX_DATALEN];
+static uint32_t upload_console_writeline_buffer_length = 0;
 
 void upload_serial_packet(
         const void* data,
@@ -107,4 +108,56 @@ void upload_can_packet(
     memcpy(can_data->data + 4, &data_4_7, 4);
 
     packet_send(&header, other_data, sizeof(other_data) - 8 + id_info.dlc);
+}
+
+void upload_console_writeline()
+{
+    if (upload_console_writeline_buffer_length == 0) {
+        return;
+    }
+
+    PayloadHeader header = {
+            .command = CommandUploadConsoleWriteLine,
+            .sequence = 0,
+            .error_code = 0,
+            .timestamp_ms = 0,
+    };
+
+    if (upload_console_writeline_buffer_length > PACKET_MAX_DATALEN) {
+        upload_console_writeline_buffer_length = PACKET_MAX_DATALEN;
+    }
+
+    // Directly send upload console writeline buffer to PC
+    packet_send(
+            &header,
+            upload_console_writeline_buffer,
+            upload_console_writeline_buffer_length);
+
+    // After sending, clear the buffer by setting the length to 0
+    upload_console_writeline_buffer_length = 0;
+}
+
+uint32_t upload_console_writeline_append(const void* data, uint32_t length)
+{
+    if (length == 0 || data == NULL) {
+        return 0;
+    }
+
+    uint32_t max_append =
+            PACKET_MAX_DATALEN - upload_console_writeline_buffer_length;
+    if (max_append <= 1) {
+        return 0;
+    }
+    if (length >= max_append) {
+        length = max_append - 1;
+    }
+    memcpy(upload_console_writeline_buffer +
+                   upload_console_writeline_buffer_length,
+           data,
+           length);
+    upload_console_writeline_buffer_length += length;
+    upload_console_writeline_buffer[upload_console_writeline_buffer_length] =
+            '\n';
+    upload_console_writeline_buffer_length++;
+    return length;
 }
