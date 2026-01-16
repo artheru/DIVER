@@ -279,13 +279,28 @@ namespace MCUTestDIVER
                     Log("--- Loop {0} ---", loopCount);
 
                     // MemoryUpperIO - PC → MCU 内存交换 (发送输入变量)
-                    byte[] upperIOData = new byte[16];
-                    for (int i = 0; i < upperIOData.Length; i++)
-                    {
-                        upperIOData[i] = (byte)((loopCount + i) & 0xFF);
-                    }
+                    // Format: For each UpperIO field: [typeid 1B][value bytes]
+                    // TestVehicle has: inputA (int), inputB (int)
+                    // TypeId for Int32 = 6, value = 4 bytes
+                    // Total: [0x06][inputA:4B][0x06][inputB:4B] = 10 bytes
+                    using var ms = new MemoryStream();
+                    using var bw = new BinaryWriter(ms);
 
-                    Log("MemoryUpperIO: Sending {0} bytes", upperIOData.Length);
+                    int inputA = loopCount * 10; // Test value for inputA
+                    int inputB = loopCount * 100; // Test value for inputB
+
+                    bw.Write((byte)6); // TypeId for Int32
+                    bw.Write(inputA); // inputA value (4 bytes, little-endian)
+                    bw.Write((byte)6); // TypeId for Int32
+                    bw.Write(inputB); // inputB value (4 bytes, little-endian)
+
+                    byte[] upperIOData = ms.ToArray();
+                    Log(
+                        "MemoryUpperIO: Sending {0} bytes, inputA={1}, inputB={2}",
+                        upperIOData.Length,
+                        inputA,
+                        inputB
+                    );
                     err = bridge.MemoryUpperIO(upperIOData, TIMEOUT_MS);
                     if (err != MCUSerialBridgeError.OK)
                     {

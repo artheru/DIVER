@@ -1020,11 +1020,28 @@ namespace MCUSerialBridgeCLR
         }
 
         /// <summary>
-        /// PC → MCU 内存交换（UpperIO 数据，用于 DIVER 模式）
+        /// PC → MCU memory exchange (UpperIO data for DIVER mode).
+        /// Sends input variable values to MCU for the next VM iteration.
         /// </summary>
-        /// <param name="data">要发送的数据</param>
-        /// <param name="timeout">超时时间（毫秒）</param>
-        /// <returns>错误码</returns>
+        /// <param name="data">
+        /// UpperIO payload bytes. Format: For each [AsUpperIO] field in cart definition order:
+        ///   [typeid: 1 byte][value: N bytes depending on type]
+        ///
+        /// TypeIDs (primitive types):
+        ///   0=Boolean(1B), 1=Byte(1B), 2=SByte(1B), 3=Char(2B), 4=Int16(2B),
+        ///   5=UInt16(2B), 6=Int32(4B), 7=UInt32(4B), 8=Single(4B)
+        ///
+        /// For arrays: [11=ArrayHeader][elemTid:1B][length:4B][raw element bytes...]
+        /// For strings: [12=StringHeader][length:2B][UTF8 bytes...]
+        /// For references: [16=ReferenceID][rid:4B] (rid=0 means null)
+        ///
+        /// References for format details:
+        ///   - MCURuntime/mcu_runtime.c: vm_put_upper_memory() and comments above it
+        ///   - DiverTest/DIVER/DIVERInterface.cs: NotifyLowerData() method (serialization logic)
+        ///   - Search keywords: "vm_put_upper_memory", "upper_memory", "AsUpperIO"
+        /// </param>
+        /// <param name="timeout">Timeout in milliseconds</param>
+        /// <returns>Error code</returns>
         public MCUSerialBridgeError MemoryUpperIO(byte[] data, uint timeout = 200)
         {
             if (nativeHandle == IntPtr.Zero)

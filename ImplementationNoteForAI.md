@@ -106,6 +106,20 @@
 - IO annotations: `[AsLowerIO]` = MCU➜host (read-only on host), `[AsUpperIO]` = host➜MCU. Descriptor IDs map to these fields in `TestVehicle`.
 - Execution loop (`vm_run`) interprets stack machine IL; `vm_put_*` functions enqueue IO writes (snapshot/stream/event) executed each tick.
 
+## UpperIO / LowerIO Wire Format
+- **UpperIO** (Host → MCU): Sent via `CommandMemoryUpperIO (0x60)`. Format per field in cart definition order:
+  - Primitives: `[typeid:1B][value:NB]`
+    - TypeIDs: 0=Boolean(1B), 1=Byte(1B), 2=SByte(1B), 3=Char(2B), 4=Int16(2B), 5=UInt16(2B), 6=Int32(4B), 7=UInt32(4B), 8=Single(4B)
+  - Arrays: `[11=ArrayHeader][elemTid:1B][length:4B][raw element bytes...]`
+  - Strings: `[12=StringHeader][length:2B][UTF8 bytes...]`
+  - References: `[16=ReferenceID][rid:4B]` (rid=0 means null)
+- **LowerIO** (MCU → Host): Same format as UpperIO, sent via `CommandMemoryLowerIO (0x70)`.
+- **Reference files for format details:**
+  - `MCURuntime/mcu_runtime.c`: Search for `vm_put_upper_memory` — the function and comments above it describe the parsing logic.
+  - `DiverTest/DIVER/DIVERInterface.cs`: Search for `NotifyLowerData` — contains the C# serialization/deserialization code.
+  - `MCUSerialBridge/wrapper/MCUSerialBridgeCLR.cs`: `MemoryUpperIO()` method documentation.
+- **Search keywords:** `vm_put_upper_memory`, `upper_memory`, `AsUpperIO`, `NotifyLowerData`, `SendUpperData`
+
 ## Troubleshooting Checklist
 - Missing `extra_methods.txt` during weaving → ensure prebuild ran or manually execute `DiverCompiler.exe -g`.
 - `Unknown cart descriptor kind` → log `descriptor.Kind` when building descriptors and add mapping for new type to existing enum bucket.

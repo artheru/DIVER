@@ -44,6 +44,8 @@ DIVER give a robust "terminal nerve" like architecture,
    - **Upper IO (`[AsUpperIO]`)**
      - Host → MCU direction
      - Control commands, parameters
+     - Wire format: `[typeid:1B][value:NB]` per field in cart definition order
+     - See `MCURuntime/mcu_runtime.c` (`vm_put_upper_memory`) for detailed format
      - Example:
 ```csharp
 [AsUpperIO] public int motorSpeed; // Host sends motor speed command to MCU
