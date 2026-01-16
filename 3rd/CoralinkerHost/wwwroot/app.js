@@ -2332,13 +2332,34 @@ function loadArtifactMetadata(buildId, logicName, opts) {
     .then(file => {
       try {
         const fields = JSON.parse(file.text);
-        // Parse the field metadata: [{"field":"name", "typeid":N, "offset":N}, ...]
-        const variables = fields.map(f => ({
-          name: f.field,
-          type: getTypeNameFromId(f.typeid),
-          direction: "output", // AsUpperIO
-          offset: f.offset
-        }));
+        // Parse the field metadata: [{"field":"name", "typeid":N, "offset":N, "flags":N}, ...]
+        // flags: 0x01=UpperIO (Host->MCU), 0x02=LowerIO (MCU->Host), 0x00=Mutual
+        const variables = fields.map(f => {
+          const flags = f.flags || 0x00; // backward compatibility: default to Mutual if flags missing
+          let direction, icon;
+          if (flags === 0x01) {
+            direction = "input"; // UpperIO: Host sends to MCU
+            icon = "arrow-up";
+          } else if (flags === 0x02) {
+            direction = "output"; // LowerIO: MCU sends to Host
+            icon = "arrow-down";
+          } else {
+            direction = "mutual"; // Mutual: bidirectional
+            icon = "circle";
+          }
+          return {
+            name: f.field,
+            type: getTypeNameFromId(f.typeid),
+            direction: direction,
+            icon: icon,
+            offset: f.offset,
+            flags: flags
+          };
+        });
+        
+        const upperCount = variables.filter(v => v.flags === 0x01).length;
+        const lowerCount = variables.filter(v => v.flags === 0x02).length;
+        const mutualCount = variables.filter(v => v.flags === 0x00).length;
         
         currentArtifact = {
           name: logicName,
@@ -2347,7 +2368,13 @@ function loadArtifactMetadata(buildId, logicName, opts) {
         };
         _lastLoadedArtifactLogic = logicName;
         
-        if (!silent) logTerminal(`[ui] Loaded artifact metadata: ${variables.length} AsUpperIO variable(s)`);
+        if (!silent) {
+          const parts = [];
+          if (upperCount > 0) parts.push(`${upperCount} UpperIO`);
+          if (lowerCount > 0) parts.push(`${lowerCount} LowerIO`);
+          if (mutualCount > 0) parts.push(`${mutualCount} Mutual`);
+          logTerminal(`[ui] Loaded artifact metadata: ${variables.length} variable(s) (${parts.join(", ")})`);
+        }
         renderVars();
       } catch (err) {
         console.error("Failed to parse artifact metadata:", err);

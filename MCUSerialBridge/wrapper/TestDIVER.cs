@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using MCUSerialBridgeCLR;
 
@@ -227,19 +228,49 @@ namespace MCUTestDIVER
             Log("MSB GetState OK: {0}", state.ToString());
 
             // 注册 LowerIO 回调 (MCU → PC 内存交换)
+            // Format: For each [AsLowerIO] field: [typeid:1B][value:NB]
+            // TypeIDs: 6=Int32(4B), 8=Single(4B), others not supported here
             bridge.RegisterMemoryLowerIOCallback(data =>
             {
-                byte[] displayData = data;
-                if (data.Length > 16)
+                var sb = new StringBuilder();
+                sb.Append($"LowerIO ({data.Length}B): ");
+                int offset = 0;
+                int fieldIndex = 0;
+                while (offset < data.Length)
                 {
-                    displayData = new byte[16];
-                    Array.Copy(data, displayData, 16);
+                    if (fieldIndex > 0)
+                        sb.Append(", ");
+                    byte typeId = data[offset++];
+                    switch (typeId)
+                    {
+                        case 6: // Int32
+                            if (offset + 4 > data.Length)
+                            {
+                                sb.Append("[truncated]");
+                                goto done;
+                            }
+                            int intVal = BitConverter.ToInt32(data, offset);
+                            offset += 4;
+                            sb.Append(intVal);
+                            break;
+                        case 8: // Single (float)
+                            if (offset + 4 > data.Length)
+                            {
+                                sb.Append("[truncated]");
+                                goto done;
+                            }
+                            float floatVal = BitConverter.ToSingle(data, offset);
+                            offset += 4;
+                            sb.Append(floatVal.ToString("F2"));
+                            break;
+                        default:
+                            sb.Append($"[unsupported type {typeId}]");
+                            goto done;
+                    }
+                    fieldIndex++;
                 }
-                Log(
-                    "LowerIO Callback Received: {0} bytes, data: {1}",
-                    data.Length,
-                    BitConverter.ToString(displayData) + (data.Length > 16 ? "..." : "")
-                );
+                done:
+                Log(sb.ToString());
             });
             bridge.RegisterConsoleWriteLineCallback(str =>
             {

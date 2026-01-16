@@ -197,9 +197,14 @@ public class PEAMInterface
             // ok to send current data.
             using var sends = new MemoryStream();
             using var bw = new BinaryWriter(sends);
+            // TODO: If should add iteartion count to upperIO?
             bw.Write(tup.iterations++);
             for (var cid = 0; cid < tup.fields.Length; cid++)
             {
+                // Skip Lower IO fields, since they are defined as LowNode writeback
+                // Host read in cart definition.
+                if (tup.fields[cid].isLower) continue;
+
                 bw.Write((short)cid);
                 bw.Write((byte)tup.fields[cid].typeid);
                 var val = tup.fields[cid].fi.GetValue(Target);
@@ -264,6 +269,7 @@ public class PEAMInterface
             if (pField.fi == null)
                 throw new Exception($"field {pField.field} doesn't exist in target(cart) object?");
             pField.isUpper = pField.fi.GetCustomAttributes().Any(p => p.GetType().Name.Contains("AsUpperIO"));
+            pField.isLower = pField.fi.GetCustomAttributes().Any(p => p.GetType().Name.Contains("AsLowerIO"));
             // todo: check type.
         }
         SetMCUProgram(mcuUri, asmBytes);
@@ -275,6 +281,7 @@ public class PEAMInterface
         public string field;
         public FieldInfo fi;
         public bool isUpper;
+        public bool isLower;
         public int typeid, offset;
     }
 

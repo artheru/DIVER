@@ -92,12 +92,14 @@ void old_report_error(
     // }
 }
 
-void report_error(int il_offset, uchar* error_str)
+void report_error(int il_offset, uchar* error_str, int line_no)
 {
     console_printf_do(
-            "ERROR: VMGlue, report_error, il_offset = %d, error_str = %s\n",
+            "ERROR: VMGlue, report_error, il_offset = %d, error_str = %s, "
+            "line_no = %d\n",
             il_offset,
-            error_str);
+            error_str,
+            line_no);
 
     // Fail-fast: stop VM loop to avoid continuin`g execution after memory/stack
     // corruption. vm_loop() checks g_mcu_state.running_state ==

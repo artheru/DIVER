@@ -189,6 +189,10 @@ namespace CartActivator
 
                 for (var cid = 0; cid < tup.fields.Length; cid++)
                 {
+                    // Skip Lower IO fields, since they are defined as LowNode writeback
+                    // Host read in cart definition.
+                    if (tup.fields[cid].isLower) continue;
+
                     var val = tup.fields[cid].fi.GetValue(this);
                     if (val is string s)
                     {
@@ -393,6 +397,7 @@ namespace CartActivator
                     if (pField.fi == null)
                         throw new Exception($"field {pField.field} doesn't exist in cart object?");
                     pField.isUpper = pField.fi.IsDefined(typeof(AsUpperIO));
+                    pField.isLower = pField.fi.IsDefined(typeof(AsLowerIO));
                     // todo: check type.
                 }
                 _outerRef = new WeakReference(this);
@@ -406,6 +411,7 @@ namespace CartActivator
             public string field;
             public FieldInfo fi;
             public bool isUpper;
+            public bool isLower;
             public int typeid, offset;
         }
 

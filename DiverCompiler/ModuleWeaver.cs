@@ -88,7 +88,7 @@ public class ModuleWeaver : BaseModuleWeaver
                 module.Resources.Add(new EmbeddedResource($"{type.Name}.bin.json", ManifestResourceAttributes.Public,
                     Encoding.UTF8.GetBytes("[" + string.Join(",",
                         dll.IOs.Select(p =>
-                            $"{{\"field\":\"{p.FieldName}\", \"typeid\":{p.typeid}, \"offset\":{p.offset}}}")) + "]")));
+                            $"{{\"field\":\"{p.FieldName}\", \"typeid\":{p.typeid}, \"offset\":{p.offset}, \"flags\":{p.flags}}}")) + "]")));
                 module.Resources.Add(new EmbeddedResource($"{type.Name}.diver", ManifestResourceAttributes.Public, dll.diver_src));
                 module.Resources.Add(new EmbeddedResource($"{type.Name}.diver.map.json", ManifestResourceAttributes.Public, dll.diver_map));
             }

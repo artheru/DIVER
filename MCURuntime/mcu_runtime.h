@@ -138,7 +138,7 @@ void write_snapshot(uchar* buffer, int size); // size is equal to "vm_put_snapsh
 void write_stream(int streamID, uchar* buffer, int size); // called to write bytes into serial. called anytime needed.
 void write_event(int portID, int eventID, uchar* buffer, int size); // called to write bytes into CAN/modbus similar ports. called anytime needed.
 
-void report_error(int il_offset, uchar* error_str); // should report error and terminate execution, enter safe mode.
+void report_error(int il_offset, uchar* error_str, int line_no); // should report error and terminate execution, enter safe mode.
 void print_line(uchar* str, int length); // should upload text info.
 
 #ifdef IS_MCU

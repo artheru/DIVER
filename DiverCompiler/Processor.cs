@@ -28,7 +28,7 @@ internal partial class Processor
     public class ResultDLL
     {
         public byte[] bytes;
-        public (string FieldName, int offset, byte typeid)[] IOs;
+        public (string FieldName, int offset, byte typeid, byte flags)[] IOs;
         public byte[] diver_src;
         public byte[] diver_map;
         public byte[] native_blob;
@@ -84,7 +84,8 @@ internal partial class Processor
         {
             public TypeReference tr;
             public TypeReference baseType;
-            public Dictionary<string, (int offset, TypeReference tr, byte typeid, TypeReference dtr)> field_offset = new(); // field name
+            // flags: 0x01=UpperIO, 0x02=LowerIO, 0x00=Mutual(no attribute)
+            public Dictionary<string, (int offset, TypeReference tr, byte typeid, TypeReference dtr, byte flags)> field_offset = new(); // field name
             public int size = 0;
             public bool baseInitialized;
         }
@@ -1279,7 +1280,17 @@ internal partial class Processor
                     bmw.WriteWarning($"{cls_fld_name}> static allocate {v.fr.Name}({ftype.Name}) @ {SI.sfield_offset.size}");
                     if (!SI.sfield_offset.field_offset.ContainsKey(fd.Name))
                     {
-                        SI.sfield_offset.field_offset[fd.Name] = (SI.sfield_offset.size, ftype, typeid, fd.DeclaringType);
+                        // Determine Upper/Lower flags: 0x01=UpperIO, 0x02=LowerIO, 0x00=Mutual
+                        byte ioFlags = 0x00;
+                        if (fd.CustomAttributes.Any(a => a.AttributeType.Name == "AsUpperIO"))
+                            ioFlags = 0x01;
+                        else if (fd.CustomAttributes.Any(a => a.AttributeType.Name == "AsLowerIO"))
+                            ioFlags = 0x02;
+                        
+                        string flagStr = ioFlags == 0x01 ? "UpperIO" : (ioFlags == 0x02 ? "LowerIO" : "Mutual");
+                        bmw.WriteWarning($"CartIO Field: name={fd.Name}, type={ftype.Name}, offset={SI.sfield_offset.size}, flags=0x{ioFlags:X2}({flagStr})");
+                        
+                        SI.sfield_offset.field_offset[fd.Name] = (SI.sfield_offset.size, ftype, typeid, fd.DeclaringType, ioFlags);
                         SI.sfield_offset.size += mysz;
                     }
                 }
@@ -1305,7 +1316,7 @@ internal partial class Processor
                         }
                         cfields.size = Math.Max(cfields.size, baseInfo0.size);
                     }
-                    cfields.field_offset[fd.Name] = (cfields.size, ftype, typeid, v.tr);
+                    cfields.field_offset[fd.Name] = (cfields.size, ftype, typeid, v.tr, (byte)0x00);
                     cfields.size += mysz;
                     cfields.tr = v.tr;
                 }
@@ -1348,7 +1359,7 @@ internal partial class Processor
 
                     if (!SI.class_ifield_offset.TryGetValue(tr.FullName, out var cfields))
                         SI.class_ifield_offset[tr.FullName] = cfields = new();
-                    cfields.field_offset[fd.Name] = (cfields.size, paramType, typeid, tr);
+                    cfields.field_offset[fd.Name] = (cfields.size, paramType, typeid, tr, (byte)0x00);
                     cfields.size += mysz;
                     cfields.tr = tr;
                 }
@@ -1566,7 +1577,12 @@ internal partial class Processor
             byte[] program_desc =
             [ 
                 ..BitConverter.GetBytes((ushort)SI.cart_io_list.Count),
-                ..SI.cart_io_list.SelectMany(p => BitConverter.GetBytes(SI.sfield_offset.field_offset[p].offset)), 
+                // cartIO layout: [offset 4B][flags 1B] per field
+                // flags: 0x01=UpperIO, 0x02=LowerIO, 0x00=Mutual
+                ..SI.cart_io_list.SelectMany(p => {
+                    var field = SI.sfield_offset.field_offset[p];
+                    return BitConverter.GetBytes(field.offset).Concat(new byte[] { field.flags });
+                }), 
                 ..BitConverter.GetBytes((ushort)SI.instanceable_classes.Count),
                 ..iclass_layout, 
                 ..iclass.SelectMany(p=>p) 
@@ -1727,7 +1743,10 @@ internal partial class Processor
                 ret.dll = new ResultDLL()
                 {
                     bytes = dll,
-                    IOs = SI.cart_io_list.Select(p => (p, SI.sfield_offset.field_offset[p].offset, SI.sfield_offset.field_offset[p].typeid)).ToArray(),
+                    IOs = SI.cart_io_list.Select(p => {
+                        var field = SI.sfield_offset.field_offset[p];
+                        return (p, field.offset, field.typeid, field.flags);
+                    }).ToArray(),
                     diver_src = Encoding.UTF8.GetBytes(diver.ToString()),
                     diver_map = Encoding.UTF8.GetBytes(map.ToString()),
                     native_blob = nativeResult.Blob ?? Array.Empty<byte>(),
@@ -1741,7 +1760,10 @@ internal partial class Processor
                 ret.dll = new ResultDLL()
                 {
                     bytes = dll,
-                    IOs = SI.cart_io_list.Select(p => (p, SI.sfield_offset.field_offset[p].offset, SI.sfield_offset.field_offset[p].typeid)).ToArray(),
+                    IOs = SI.cart_io_list.Select(p => {
+                        var field = SI.sfield_offset.field_offset[p];
+                        return (p, field.offset, field.typeid, field.flags);
+                    }).ToArray(),
                     diver_src = Encoding.UTF8.GetBytes(string.Empty),
                     diver_map = Encoding.UTF8.GetBytes("[]"),
                     native_blob = nativeResult.Blob ?? Array.Empty<byte>(),
@@ -3030,7 +3052,7 @@ internal partial class Processor
                 {
                     if (info.field_offset.TryGetValue(name, out var v))
                     {
-                        info.field_offset[name] = (v.offset + baseInfo.size, v.tr, v.typeid, v.dtr);
+                        info.field_offset[name] = (v.offset + baseInfo.size, v.tr, v.typeid, v.dtr, v.flags);
                     }
                 }
             }
