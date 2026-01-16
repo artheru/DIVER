@@ -193,23 +193,30 @@ scons rtt
 在项目根目录执行：
 
 ```sh
-scons
+scons c_core
 ```
 
-将自动构建：
+将构建：
 
 * `c_core`（C 协议核心库）
-* `wrapper`（C# 封装和 C# 测试程序）
+
+然后构建 wrapper（已迁移为 csproj）：
+
+```sh
+dotnet build .\wrapper\MCUSerialBridgeWrapper.csproj
+dotnet build .\wrapper\TestCS.csproj
+dotnet build .\wrapper\TestDIVER.csproj
+```
 
 ---
 
 ### 3. 运行 C# 测试程序
 
 ```sh
-scons runcs
+.\build\TestCS.exe
 ```
 
-或手动运行生成的 EXE。
+或手动运行生成的 EXE（`build/` 目录）。
 
 运行前请确认：
 
@@ -259,7 +266,7 @@ scons c_core
 ### 仅运行 C# 测试程序
 
 ```sh
-scons runcs
+.\build\TestCS.exe
 ```
 
 ---

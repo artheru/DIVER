@@ -19,6 +19,11 @@ goto usage
 :build
 echo === Building MCU firmware ===
 scons %SCONS_OPTS%
+if errorlevel 1 goto end
+echo === Building wrapper (csproj) ===
+dotnet build .\wrapper\MCUSerialBridgeWrapper.csproj
+dotnet build .\wrapper\TestDIVER.csproj
+dotnet build .\wrapper\TestCS.csproj
 goto end
 
 :flash
@@ -41,6 +46,10 @@ goto end
 :all
 echo === Build + Flash + Test ===
 scons %SCONS_OPTS%
+if errorlevel 1 goto end
+dotnet build .\wrapper\MCUSerialBridgeWrapper.csproj
+dotnet build .\wrapper\TestDIVER.csproj
+dotnet build .\wrapper\TestCS.csproj
 if errorlevel 1 goto end
 scons %SCONS_OPTS% flash
 if errorlevel 1 goto end

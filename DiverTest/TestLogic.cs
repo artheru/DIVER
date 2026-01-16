@@ -30,6 +30,9 @@ namespace DiverTest
 
         [AsUpperIO]
         public int inputB;
+
+        [AsUpperIO]
+        public int digital_output;
     }
 
     /// <summary>
@@ -134,7 +137,7 @@ namespace DiverTest
                 cart.result += snapshot[0];
             }
 
-            byte[] snapshotData = new byte[] { 0xAA, 0x55, 0x00, 0x00 };
+            byte[] snapshotData = BitConverter.GetBytes(cart.digital_output);
             RunOnMCU.WriteSnapshot(snapshotData);
 
             // Print progress (Console.WriteLine is built-in)

@@ -3,6 +3,7 @@
 #include "appl/control.h"
 #include "appl/upload.h"
 #include "bsp/digital_io.h"
+#include "mcu_runtime.h"
 #include "util/async.h"
 #include "util/console.h"
 
@@ -64,6 +65,11 @@ static void vm_loop()
 
         // Always flush ports after each iteration.
         control_vm_flush_ports();
+
+        // Upload LowerIO to host
+        uint8_t* lowerio = vm_get_lower_memory();
+        int lowerio_size = vm_get_lower_memory_size();
+        control_upload_memory_lower_io(lowerio, lowerio_size);
 
         // Call upload console writeline to actually upload the console
         // writeline data to the host.

@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace MCUSerialBridgeCLR
 {
@@ -211,6 +213,37 @@ namespace MCUSerialBridgeCLR
         /// <summary>序列化端口配置为字节数组（供 P/Invoke 使用）</summary>
         /// <returns>返回固定长度字节数组（16 bytes）</returns>
         public abstract byte[] ToBytes();
+
+        /// <summary>
+        /// 从 JSON 对象反序列化 PortConfig
+        /// JSON 格式: { "type": "serial", "baud": 9600, "receiveFrameMs": 20 }
+        ///        或: { "type": "can", "baud": 500000, "retryTimeMs": 10 }
+        /// </summary>
+        public static PortConfig FromJson(Newtonsoft.Json.Linq.JObject json)
+        {
+            var type = json["type"]?.ToString()?.ToLower() ?? "serial";
+            var baud = (uint)(json["baud"]?.ToObject<uint>() ?? 9600);
+            
+            return type switch
+            {
+                "serial" => new SerialPortConfig(baud, (uint)(json["receiveFrameMs"]?.ToObject<uint>() ?? 20)),
+                "can" => new CANPortConfig(baud, (uint)(json["retryTimeMs"]?.ToObject<uint>() ?? 10)),
+                _ => throw new ArgumentException($"Unknown port type: {type}")
+            };
+        }
+
+        /// <summary>
+        /// 从 JSON 数组反序列化 PortConfig 数组
+        /// </summary>
+        public static PortConfig[] FromJsonArray(Newtonsoft.Json.Linq.JArray jsonArray)
+        {
+            return jsonArray.Select(j => FromJson((Newtonsoft.Json.Linq.JObject)j)).ToArray();
+        }
+
+        /// <summary>
+        /// 序列化为 JSON 对象
+        /// </summary>
+        public abstract Newtonsoft.Json.Linq.JObject ToJson();
     }
 
     /// <summary>
@@ -247,6 +280,14 @@ namespace MCUSerialBridgeCLR
             };
             return PortStructHelper.StructToBytes(c);
         }
+
+        /// <summary>序列化为 JSON</summary>
+        public override Newtonsoft.Json.Linq.JObject ToJson() => new()
+        {
+            ["type"] = "serial",
+            ["baud"] = Baud,
+            ["receiveFrameMs"] = ReceiveFrameMs
+        };
     }
 
     /// <summary>
@@ -283,6 +324,14 @@ namespace MCUSerialBridgeCLR
             };
             return PortStructHelper.StructToBytes(c);
         }
+
+        /// <summary>序列化为 JSON</summary>
+        public override Newtonsoft.Json.Linq.JObject ToJson() => new()
+        {
+            ["type"] = "can",
+            ["baud"] = Baud,
+            ["retryTimeMs"] = RetryTimeMs
+        };
     }
 
     /// <summary>

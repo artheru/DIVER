@@ -36,7 +36,8 @@
    * 提供 `MCUSerialBridgeError` 枚举、`VersionInfo`、`MCUState`、`PortConfig` 等结构
    * 封装 `ReadSerial` / `WriteSerial` / `ReadCAN` / `WriteCAN` 等操作
    * 可直接在 C# WPF、WinForms 或控制台程序中使用
-   * 路径示例：`wrapper/MCUSerialBridge.cs`、`wrapper/MCUSerialBridgeError.cs`、`wrapper/Test.cs`
+* 路径示例：`wrapper/MCUSerialBridgeCLR.cs`、`wrapper/MCUSerialBridgeError.cs`、`wrapper/Test.cs`
+* 构建方式：使用 `dotnet build`（已迁移为 csproj）
 
 ---
 
@@ -93,6 +94,7 @@ C# 上位机应用（可直接调用 MCUSerialBridge 类）
 ### 3. C# 封装层（wrapper）
 
 * 直接 P/Invoke 调用 `mcu_serial_bridge.dll`，封装为面向对象 C# API
+* wrapper 目录已迁移为 `csproj` 工程（不再由 SCons 编译 C#）
 * 管理底层句柄生命周期（Open/Close）
 * 提供串口与 CAN 的读写方法：`ReadSerial`、`WriteSerial`、`ReadCAN`、`WriteCAN`
 * 提供端口配置、MCU 状态、版本信息等结构体
