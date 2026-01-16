@@ -129,7 +129,67 @@ DWORD WINAPI parse_thread_func(LPVOID param)
                     command,
                     seq,
                     payload_header->error_code);
-            if (command != CommandUploadPort) {
+            if (command == CommandUploadPort) {
+                // Upload Port Data (MCU -> PC)
+                if (len < sizeof(PayloadHeader) + sizeof(DataPacket)) {
+                    continue;  // 数据太短
+                }
+                DataPacket* data_packet =
+                        (DataPacket*)((uint8_t*)local_buf + sizeof(PayloadHeader));
+                if (data_packet->data_len !=
+                    len - sizeof(PayloadHeader) - sizeof(DataPacket)) {
+                    continue;  // Length mismatch
+                }
+
+                msb_parse_upload_data(handle, data_packet);
+            } else if (command == CommandMemoryLowerIO) {
+                // Memory LowerIO Data (MCU -> PC, DIVER mode output)
+                if (len <
+                    sizeof(PayloadHeader) + sizeof(MemoryExchangePacket)) {
+                    continue;  // 数据太短
+                }
+                MemoryExchangePacket* mem_packet =
+                        (MemoryExchangePacket*)((uint8_t*)local_buf + sizeof(PayloadHeader));
+                if (mem_packet->data_len !=
+                    len - sizeof(PayloadHeader) -
+                            sizeof(MemoryExchangePacket)) {
+                    continue;  // Length mismatch
+                }
+
+                // 调用用户回调
+                if (handle->memory_lower_io_callback) {
+                    handle->memory_lower_io_callback(
+                            mem_packet->data,
+                            mem_packet->data_len,
+                            handle->memory_lower_io_callback_ctx);
+                }
+            } else if (command == CommandUploadConsoleWriteLine) {
+                // Console WriteLine (MCU -> PC, DIVER mode log output)
+                // Payload 结构: PayloadHeader + string data (不含长度字段)
+                uint32_t msg_len = len - sizeof(PayloadHeader);
+                if (msg_len == 0) {
+                    continue;  // 空消息
+                }
+
+                char* msg_ptr = (char*)(local_buf + sizeof(PayloadHeader));
+                // 临时存储，确保末尾有 '\0'
+                char msg_buf[PACKET_MAX_PAYLOAD_LEN + 1];
+                if (msg_len > PACKET_MAX_PAYLOAD_LEN) {
+                    msg_len = PACKET_MAX_PAYLOAD_LEN;
+                }
+                // 确保字符串以 '\0' 结尾
+                memcpy(msg_buf, msg_ptr, msg_len);
+                msg_buf[msg_len] = '\0';
+                DBG_PRINT("MCU: Called Console.WriteLine, msg = >>>\n%s<<<", msg_buf);
+
+                // 调用用户回调
+                if (handle->console_writeline_callback) {
+                    handle->console_writeline_callback(
+                            msg_buf,
+                            msg_len,
+                            handle->console_writeline_callback_ctx);
+                }
+            } else {
                 // -------------------------------
                 // 找到对应的 SeqWaiter
                 // -------------------------------
@@ -171,19 +231,6 @@ DWORD WINAPI parse_thread_func(LPVOID param)
                             seq,
                             payload_header->error_code);
                 }
-            } else {
-                // Upload with data
-                if (len < sizeof(PayloadHeader) + sizeof(DataPacket)) {
-                    continue;  // 数据太短
-                }
-                DataPacket* data_packet =
-                        (DataPacket*)((uint8_t*)local_buf + sizeof(PayloadHeader));
-                if (data_packet->data_len !=
-                    len - sizeof(PayloadHeader) - sizeof(DataPacket)) {
-                    continue;  // Length mismatch
-                }
-
-                msb_parse_upload_data(handle, data_packet);
             }
         } else {
             Sleep(READ_SLEEP_MS);  // 队列空，休眠

@@ -78,25 +78,52 @@ void vm_put_stream_buffer(int streamID, uchar* buffer, int size); // put serial-
 void vm_put_event_buffer(int portID, int eventID, uchar* buffer, int size); // put CAN/modbus similar data here.
 
 /*
-// MCU - Medulla Protocol, an example:
-// |magic 2B|len 2B|hash 1B|payload {len}B|hash_all 1B|... repeat.
-// payload: |command 1B|operand XB...
-// commands:
-    0> PC->MCU: set MCU configuration. operand: configuration bytes (MCU developer should implement)
-	1> PC->MCU: set operation program. operand: |len 4B|buffer bytes. {len}B|
-    2> PC->MCU: upperIO buffer. operand: |len 4B|buffer bytes. {len}B|
-    3> PC->MCU: stream buffer. operand: |streamID 4B|len 4B|payload {len}B|
-    4> PC->MCU: event buffer. operand: |portID 4B|eventID 4B|len 2B|payload {len}B|
-    5> PC->MCU: snapshot buffer. operand: |len 4B|payload {len}B|
-    6> MCU->PC: stream buffer. same to [3]
-    7> MCU->PC: event buffer. same to [4]
-    8> MCU->PC: snapshot buffer. same to [5]
-    9> MCU->PC: lowerIO buffer. operand: |len 4B|buffer bytes {len}B|
-Special notes:
-	configuration should have:
-	1> snapshot layout.
-    2> n-th stream configure to what speed, should VM or Medulla process the data?
-    3> what event should processed by VM/Medulla.
+// MCU Serial Bridge Protocol (MCU ↔ PC Communication Protocol)
+// Frame structure: |BB AA|Len(2B)|LenRev(2B)|Payload(N)|CRC16(2B)|EE EE|
+// Payload structure: |CommandType(1B)|Sequence(4B)|Timestamp(4B)|ErrorCode(4B)|OtherData(...)|
+//
+// Command definitions (CommandType):
+// PC → MCU (Request commands):
+//   0x01: CommandConfigure - Set MCU port configuration (serial/CAN ports)
+//         Response: 0x81 (same sequence, no additional data)
+//   0x02: CommandReset - Reset MCU
+//         Response: 0x82 (same sequence, no additional data), MCU resets after ~200ms
+//   0x03: CommandState - Read MCU state
+//         Response: 0x83 (same sequence, 4 bytes MCUState)
+//   0x04: CommandVersion - Read MCU version info
+//         Response: 0x84 (same sequence, VersionInfo structure)
+//   0x05: CommandEnableWireTap - Enable wire tap mode (upload port data even in DIVER mode)
+//         Response: 0x85 (same sequence, no additional data)
+//   0x0F: CommandStart - Start MCU execution (DIVER mode or bridge mode)
+//         Response: 0x8F (same sequence, no additional data)
+//   0x10: CommandWritePort - Write data to specified port (serial/CAN)
+//         Response: 0x90 (same sequence, no additional data)
+//   0x30: CommandWriteOutput - Write MCU IO output (4 bytes)
+//         Response: 0xB0 (same sequence, no additional data)
+//   0x40: CommandReadInput - Read MCU IO input
+//         Response: 0xC0 (same sequence, 4 bytes input data)
+//   0x50: CommandProgram - Download program to MCU
+//         If data length = 0: switch to Bridge (passthrough) mode
+//         If data length > 0: switch to DIVER mode and load program (supports chunked transfer)
+//         Response: 0xD0 (same sequence, no additional data)
+//   0x60: CommandMemoryUpperIO - PC → MCU memory exchange (UpperIO in DIVER mode)
+//         Response: 0xE0 (same sequence, no additional data)
+//
+// MCU → PC (Upload/Response commands):
+//   0x20: CommandUploadPort - MCU uploads port received data (passthrough mode or wire tap enabled)
+//         No response needed, sequence = 0
+//   0x70: CommandMemoryLowerIO - MCU → PC memory exchange (LowerIO in DIVER mode)
+//         No response needed, sequence = 0
+//   0x80-0xFF: Response commands (0x80 | request_command)
+//
+//   0xFF: CommandError - Fatal error report (bidirectional)
+//         sequence = 0, usually carries error code
+//
+// Special notes:
+//   - Response commands: 0x80 | request_command (e.g., 0x81 = response to 0x01)
+//   - Upload commands (CommandUploadPort, CommandMemoryLowerIO) have sequence = 0
+//   - Program download supports chunked transfer using offset and total_len fields
+//   - Wire tap mode allows port data upload even when MCU is in DIVER mode
 */
 
 /*
@@ -111,12 +138,17 @@ void write_snapshot(uchar* buffer, int size); // size is equal to "vm_put_snapsh
 void write_stream(int streamID, uchar* buffer, int size); // called to write bytes into serial. called anytime needed.
 void write_event(int portID, int eventID, uchar* buffer, int size); // called to write bytes into CAN/modbus similar ports. called anytime needed.
 
-void report_error(int il_offset, uchar* error_str); // should report error and terminate execution, enter safe mode.
-void print_line(uchar* error_str); // should upload text info.
+void report_error(int il_offset, uchar* error_str, int line_no); // should report error and terminate execution, enter safe mode.
+void print_line(uchar* str, int length); // should upload text info.
 
+#ifdef IS_MCU
+// For implementation of inline functions
+#include "appl/vm_inline.h"
+#else
 inline void enter_critical();
 inline void leave_critical();
 
 inline int get_cyclic_millis();
 inline int get_cyclic_micros();
 inline int get_cyclic_seconds();
+#endif

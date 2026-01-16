@@ -1,0 +1,85 @@
+#include "appl/vm.h"
+//
+#include "appl/control.h"
+#include "appl/upload.h"
+#include "bsp/digital_io.h"
+#include "mcu_runtime.h"
+#include "util/async.h"
+#include "util/console.h"
+
+
+static bool vm_is_program_loaded = false;
+static int32_t vm_iteration_count = 0;
+static uint64_t vm_interval_period_us = 100000;
+
+static volatile uint64_t vm_last_iteration_time_us = 0;
+
+static void vm_loop()
+{
+    if (g_mcu_state.mode != MCU_Mode_DIVER || g_mcu_state.is_programmed == 0 ||
+        g_mcu_state.is_configured == 0 ||
+        g_mcu_state.running_state != MCU_RunState_Running) {
+        return;
+    }
+
+    if (!vm_is_program_loaded) {
+        console_printf(
+                LogLevelInfo, "VM: Program not loaded, try load program\n");
+        // Pass full buffer size, not just program length - VM needs heap/stack
+        // space!
+        int interval =
+                vm_set_program(g_program_buffer, PROGRAM_BUFFER_MAX_SIZE);
+        console_printf(
+                LogLevelInfo, "VM: Program loaded, interval=%d\n", interval);
+        vm_iteration_count = 0;
+        vm_interval_period_us = (uint64_t)interval * (uint64_t)1000;
+        vm_is_program_loaded = true;
+    }
+
+    uint64_t current_time_us = g_hal_timestamp_us;
+    if (current_time_us > vm_last_iteration_time_us + vm_interval_period_us) {
+        // Run Once
+        console_printf(LogLevelInfo, "VM: Start new loop\n");
+
+        // Read IO Data and put into snapshot buffer
+        uint32_t inputs_u32 = bsp_get_inputs();
+        vm_put_snapshot_buffer((void*)&inputs_u32, sizeof(inputs_u32));
+
+        // 检查 UpperIO 新数据（双缓存，无临界区）
+        const uint8_t* upperio_data = NULL;
+        uint32_t upperio_len = 0;
+        bool has_upperio = control_vm_get_upper_io(&upperio_data, &upperio_len);
+
+        if (has_upperio) {
+            // 有新数据，传递给 VM 运行时
+            vm_put_upper_memory((uchar*)upperio_data, (int)upperio_len);
+            vm_run(vm_iteration_count++);
+            console_printf_do(
+                    "VMLoop: upperio updated, iteration = %d, len = %u\n",
+                    vm_iteration_count - 1,
+                    upperio_len);
+        } else {
+            // 没有新数据，正常执行
+            vm_run(vm_iteration_count++);
+        }
+
+        // Always flush ports after each iteration.
+        control_vm_flush_ports();
+
+        // Upload LowerIO to host
+        uint8_t* lowerio = vm_get_lower_memory();
+        int lowerio_size = vm_get_lower_memory_size();
+        control_upload_memory_lower_io(lowerio, lowerio_size);
+
+        // Call upload console writeline to actually upload the console
+        // writeline data to the host.
+        upload_console_writeline();
+        vm_last_iteration_time_us += vm_interval_period_us;
+    }
+}
+
+void vm_start_program()
+{
+    console_printf_do("VM: Starting program loop in background thread!\n");
+    async_interval_low_priority(1, AsyncPriority_Medium, vm_loop, 0);
+}

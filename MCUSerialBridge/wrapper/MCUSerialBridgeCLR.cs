@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace MCUSerialBridgeCLR
 {
@@ -109,7 +111,35 @@ namespace MCUSerialBridgeCLR
     }
 
     /// <summary>
+    /// MCU 运行模式枚举
+    /// </summary>
+    public enum MCUMode : byte
+    {
+        /// <summary>Bridge（透传/桥接）模式</summary>
+        Bridge = 0x00,
+
+        /// <summary>DIVER（应用/驱动）模式</summary>
+        DIVER = 0x80,
+    }
+
+    /// <summary>
+    /// MCU 运行状态枚举
+    /// </summary>
+    public enum MCURunState : byte
+    {
+        /// <summary>空闲状态</summary>
+        Idle = 0x00,
+
+        /// <summary>运行中</summary>
+        Running = 0x0F,
+
+        /// <summary>错误状态</summary>
+        Error = 0xFF,
+    }
+
+    /// <summary>
     /// MCU 当前运行状态
+    /// 内存布局（小端序）：[0] running_state | [1] is_configured | [2] is_programmed | [3] mode
     /// </summary>
     [StructLayout(LayoutKind.Explicit)]
     public struct MCUState
@@ -118,49 +148,57 @@ namespace MCUSerialBridgeCLR
         [FieldOffset(0)]
         public uint RawValue;
 
-        /// <summary>状态子字段 0</summary>
+        /// <summary>运行状态 (MCURunState)</summary>
         [FieldOffset(0)]
-        public byte Substate0;
+        public MCURunState RunningState;
 
-        /// <summary>状态子字段 1</summary>
+        /// <summary>是否已配置端口 (0 或 1)</summary>
         [FieldOffset(1)]
-        public byte Substate1;
+        public byte IsConfigured;
 
-        /// <summary>状态子字段 2</summary>
+        /// <summary>是否已加载程序 (0 或 1, 仅 DIVER 模式)</summary>
         [FieldOffset(2)]
-        public byte Substate2;
+        public byte IsProgrammed;
 
-        /// <summary>高字节模式标志</summary>
+        /// <summary>模式 (MCUMode: 0x00=Bridge, 0x80=DIVER)</summary>
         [FieldOffset(3)]
-        public byte Mode;
+        public MCUMode Mode;
 
         /// <summary>是否处于 Bridge 模式</summary>
-        public bool IsBridge => (Mode & 0x80) == 0;
+        public bool IsBridge => Mode == MCUMode.Bridge;
 
         /// <summary>是否处于 DIVER 模式</summary>
-        public bool IsDIVER => (Mode & 0x80) != 0;
+        public bool IsDIVER => Mode == MCUMode.DIVER;
+
+        /// <summary>是否正在运行</summary>
+        public bool IsRunning => RunningState == MCURunState.Running;
+
+        /// <summary>是否处于错误状态</summary>
+        public bool IsError => RunningState == MCURunState.Error;
 
         /// <summary>
         /// 返回可读的状态字符串
         /// </summary>
-        /// <returns>例如 "Bridge: Running" 或 "DIVER: Error"</returns>
+        /// <returns>例如 "Bridge: Running, Configured" 或 "DIVER: Idle, Programmed"</returns>
         public override string ToString()
         {
             string modeStr = IsBridge ? "Bridge" : "DIVER";
-            uint substate = (uint)(Substate0 | (Substate1 << 8) | (Substate2 << 16));
-
-            string subStr = substate switch
+            string runStr = RunningState switch
             {
-                0x00000000 => "Idle",
-                0x0000000F => "Running",
-                0x000000FF => "Error",
-                0x00000001 => "Configured", // DIVER specific
-                0x8000000F => "Running",
-                0x800000FF => "Error",
-                _ => $"Unknown (0x{substate:X6})",
+                MCURunState.Idle => "Idle",
+                MCURunState.Running => "Running",
+                MCURunState.Error => "Error",
+                _ => $"Unknown(0x{(byte)RunningState:X2})",
             };
 
-            return $"{modeStr}: {subStr}";
+            var flags = new System.Collections.Generic.List<string>();
+            if (IsConfigured != 0)
+                flags.Add("Configured");
+            if (IsProgrammed != 0)
+                flags.Add("Programmed");
+            string flagsStr = flags.Count > 0 ? string.Join(", ", flags) : "NotConfigured";
+
+            return $"{modeStr}: {runStr}, {flagsStr}";
         }
     }
 
@@ -175,6 +213,37 @@ namespace MCUSerialBridgeCLR
         /// <summary>序列化端口配置为字节数组（供 P/Invoke 使用）</summary>
         /// <returns>返回固定长度字节数组（16 bytes）</returns>
         public abstract byte[] ToBytes();
+
+        /// <summary>
+        /// 从 JSON 对象反序列化 PortConfig
+        /// JSON 格式: { "type": "serial", "baud": 9600, "receiveFrameMs": 20 }
+        ///        或: { "type": "can", "baud": 500000, "retryTimeMs": 10 }
+        /// </summary>
+        public static PortConfig FromJson(Newtonsoft.Json.Linq.JObject json)
+        {
+            var type = json["type"]?.ToString()?.ToLower() ?? "serial";
+            var baud = (uint)(json["baud"]?.ToObject<uint>() ?? 9600);
+            
+            return type switch
+            {
+                "serial" => new SerialPortConfig(baud, (uint)(json["receiveFrameMs"]?.ToObject<uint>() ?? 20)),
+                "can" => new CANPortConfig(baud, (uint)(json["retryTimeMs"]?.ToObject<uint>() ?? 10)),
+                _ => throw new ArgumentException($"Unknown port type: {type}")
+            };
+        }
+
+        /// <summary>
+        /// 从 JSON 数组反序列化 PortConfig 数组
+        /// </summary>
+        public static PortConfig[] FromJsonArray(Newtonsoft.Json.Linq.JArray jsonArray)
+        {
+            return jsonArray.Select(j => FromJson((Newtonsoft.Json.Linq.JObject)j)).ToArray();
+        }
+
+        /// <summary>
+        /// 序列化为 JSON 对象
+        /// </summary>
+        public abstract Newtonsoft.Json.Linq.JObject ToJson();
     }
 
     /// <summary>
@@ -211,6 +280,14 @@ namespace MCUSerialBridgeCLR
             };
             return PortStructHelper.StructToBytes(c);
         }
+
+        /// <summary>序列化为 JSON</summary>
+        public override Newtonsoft.Json.Linq.JObject ToJson() => new()
+        {
+            ["type"] = "serial",
+            ["baud"] = Baud,
+            ["receiveFrameMs"] = ReceiveFrameMs
+        };
     }
 
     /// <summary>
@@ -247,6 +324,14 @@ namespace MCUSerialBridgeCLR
             };
             return PortStructHelper.StructToBytes(c);
         }
+
+        /// <summary>序列化为 JSON</summary>
+        public override Newtonsoft.Json.Linq.JObject ToJson() => new()
+        {
+            ["type"] = "can",
+            ["baud"] = Baud,
+            ["retryTimeMs"] = RetryTimeMs
+        };
     }
 
     /// <summary>
@@ -431,6 +516,59 @@ namespace MCUSerialBridgeCLR
             [In] byte[] src_data,
             uint src_data_len,
             uint timeout_ms
+        );
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern MCUSerialBridgeError msb_start(IntPtr handle, uint timeout_ms);
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern MCUSerialBridgeError msb_program(
+            IntPtr handle,
+            [In] byte[] program_bytes,
+            uint program_len,
+            uint timeout_ms
+        );
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern MCUSerialBridgeError msb_enable_wire_tap(
+            IntPtr handle,
+            uint timeout_ms
+        );
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern MCUSerialBridgeError msb_memory_upper_io(
+            IntPtr handle,
+            [In] byte[] data,
+            uint data_len,
+            uint timeout_ms
+        );
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate void msb_on_memory_lower_io_callback_function_t(
+            IntPtr data,
+            uint data_size,
+            IntPtr user_ctx
+        );
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern MCUSerialBridgeError msb_register_memory_lower_io_callback(
+            IntPtr handle,
+            msb_on_memory_lower_io_callback_function_t callback,
+            IntPtr user_ctx
+        );
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate void msb_on_console_writeline_callback_function_t(
+            IntPtr message,
+            uint message_len,
+            IntPtr user_ctx
+        );
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern MCUSerialBridgeError msb_register_console_writeline_callback(
+            IntPtr handle,
+            msb_on_console_writeline_callback_function_t callback,
+            IntPtr user_ctx
         );
     }
 
@@ -781,6 +919,9 @@ namespace MCUSerialBridgeCLR
             MCUSerialBridgeCoreAPI.msb_on_port_data_callback_function_t
         > _portCallbacks = [];
 
+        private MCUSerialBridgeCoreAPI.msb_on_memory_lower_io_callback_function_t _memoryLowerIOCallback;
+        private MCUSerialBridgeCoreAPI.msb_on_console_writeline_callback_function_t _consoleWriteLineCallback;
+
         /// <summary>
         /// 注册指定端口(Serial)的回调函数
         /// </summary>
@@ -877,6 +1018,184 @@ namespace MCUSerialBridgeCLR
                 nativeHandle,
                 portIndex,
                 _portCallbacks[portIndex],
+                IntPtr.Zero
+            );
+        }
+
+        /// <summary>
+        /// 启动 MCU 运行（DIVER 模式或透传模式）
+        /// </summary>
+        /// <param name="timeout">超时时间（毫秒）</param>
+        /// <returns>错误码</returns>
+        public MCUSerialBridgeError Start(uint timeout = 200)
+        {
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            return MCUSerialBridgeCoreAPI.msb_start(nativeHandle, timeout);
+        }
+
+        /// <summary>
+        /// 设置程序到 MCU
+        /// </summary>
+        /// <param name="programBytes">
+        /// 程序字节数组
+        /// - 如果为 null 或空数组：MCU 切换到透传模式（through mode / direct packet communication）
+        /// - 如果非 null：MCU 切换到 DIVER 模式并加载程序
+        /// </param>
+        /// <param name="timeout">超时时间（毫秒）</param>
+        /// <returns>错误码</returns>
+        public MCUSerialBridgeError Program(byte[] programBytes, uint timeout = 5000)
+        {
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            uint len = (programBytes == null) ? 0u : (uint)programBytes.Length;
+            return MCUSerialBridgeCoreAPI.msb_program(nativeHandle, programBytes, len, timeout);
+        }
+
+        /// <summary>
+        /// 启用 Wire Tap 模式
+        /// 启用后，即使在 DIVER 模式下，端口数据也会上传
+        /// </summary>
+        /// <param name="timeout">超时时间（毫秒），默认 200ms</param>
+        /// <returns>错误码</returns>
+        public MCUSerialBridgeError EnableWireTap(uint timeout = 200)
+        {
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            return MCUSerialBridgeCoreAPI.msb_enable_wire_tap(nativeHandle, timeout);
+        }
+
+        /// <summary>
+        /// PC → MCU memory exchange (UpperIO data for DIVER mode).
+        /// Sends input variable values to MCU for the next VM iteration.
+        /// </summary>
+        /// <param name="data">
+        /// UpperIO payload bytes. Format: For each [AsUpperIO] field in cart definition order:
+        ///   [typeid: 1 byte][value: N bytes depending on type]
+        ///
+        /// TypeIDs (primitive types):
+        ///   0=Boolean(1B), 1=Byte(1B), 2=SByte(1B), 3=Char(2B), 4=Int16(2B),
+        ///   5=UInt16(2B), 6=Int32(4B), 7=UInt32(4B), 8=Single(4B)
+        ///
+        /// For arrays: [11=ArrayHeader][elemTid:1B][length:4B][raw element bytes...]
+        /// For strings: [12=StringHeader][length:2B][UTF8 bytes...]
+        /// For references: [16=ReferenceID][rid:4B] (rid=0 means null)
+        ///
+        /// References for format details:
+        ///   - MCURuntime/mcu_runtime.c: vm_put_upper_memory() and comments above it
+        ///   - DiverTest/DIVER/DIVERInterface.cs: NotifyLowerData() method (serialization logic)
+        ///   - Search keywords: "vm_put_upper_memory", "upper_memory", "AsUpperIO"
+        /// </param>
+        /// <param name="timeout">Timeout in milliseconds</param>
+        /// <returns>Error code</returns>
+        public MCUSerialBridgeError MemoryUpperIO(byte[] data, uint timeout = 200)
+        {
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            if (data == null || data.Length == 0)
+                return MCUSerialBridgeError.Win_InvalidParam;
+
+            return MCUSerialBridgeCoreAPI.msb_memory_upper_io(
+                nativeHandle,
+                data,
+                (uint)data.Length,
+                timeout
+            );
+        }
+
+        /// <summary>
+        /// 注册 MCU → PC 内存交换回调（LowerIO 数据，用于 DIVER 模式）
+        /// </summary>
+        /// <param name="callback">接收数据回调，byte[] 为接收到的原始数据</param>
+        /// <returns>错误码</returns>
+        /// <remarks>
+        /// 注意事项：
+        /// 1. 回调会在底层 C 层线程中直接调用，请**不要在回调内阻塞**，例如等待 I/O 或 Sleep。
+        /// 2. 回调内**不能调用 MemoryUpperIO 等发送函数**，否则可能导致死锁。
+        /// 3. 回调内只能做轻量级操作，例如简单解析、统计或打标记。
+        /// 4. 若需要复杂处理（例如长时间解析、解码、存储数据库等），请**将数据入队到另一个线程**，再在后台处理。
+        /// 5. 数据可能随时到来，请保证回调尽快返回，避免影响后续帧接收。
+        /// </remarks>
+        public MCUSerialBridgeError RegisterMemoryLowerIOCallback(Action<byte[]> callback)
+        {
+            if (callback == null)
+                return MCUSerialBridgeError.Win_InvalidParam;
+
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            // 包装 C# 回调为 P/Invoke 委托
+            void del(IntPtr data, uint data_size, IntPtr user_ctx)
+            {
+                try
+                {
+                    byte[] buffer = new byte[data_size];
+                    Marshal.Copy(data, buffer, 0, (int)data_size);
+                    callback(buffer);
+                }
+                catch
+                {
+                    // 解析失败直接忽略，保证回调不会抛异常阻塞 C 层线程
+                }
+            }
+
+            // 保存引用，防止 GC 回收
+            _memoryLowerIOCallback = del;
+
+            // 调用 C 层注册
+            return MCUSerialBridgeCoreAPI.msb_register_memory_lower_io_callback(
+                nativeHandle,
+                _memoryLowerIOCallback,
+                IntPtr.Zero
+            );
+        }
+
+        /// <summary>
+        /// 注册 MCU Console.WriteLine 日志回调（DIVER 模式日志输出）
+        /// </summary>
+        /// <param name="callback">接收日志回调，string 为接收到的日志消息</param>
+        /// <returns>错误码</returns>
+        /// <remarks>
+        /// 注意事项：
+        /// 1. 回调会在底层 C 层线程中直接调用，请**不要在回调内阻塞**，例如等待 I/O 或 Sleep。
+        /// 2. 回调内**不能调用其他发送函数**，否则可能导致死锁。
+        /// 3. 回调内只能做轻量级操作，例如打印日志、入队等。
+        /// 4. 若需要复杂处理，请**将数据入队到另一个线程**，再在后台处理。
+        /// 5. 数据可能随时到来，请保证回调尽快返回，避免影响后续帧接收。
+        /// </remarks>
+        public MCUSerialBridgeError RegisterConsoleWriteLineCallback(Action<string> callback)
+        {
+            if (callback == null)
+                return MCUSerialBridgeError.Win_InvalidParam;
+
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            // 包装 C# 回调为 P/Invoke 委托
+            void del(IntPtr message, uint message_len, IntPtr user_ctx)
+            {
+                try
+                {
+                    string msg = Marshal.PtrToStringAnsi(message, (int)message_len);
+                    callback(msg);
+                }
+                catch
+                {
+                    // 解析失败直接忽略，保证回调不会抛异常阻塞 C 层线程
+                }
+            }
+
+            // 保存引用，防止 GC 回收
+            _consoleWriteLineCallback = del;
+
+            // 调用 C 层注册
+            return MCUSerialBridgeCoreAPI.msb_register_console_writeline_callback(
+                nativeHandle,
+                _consoleWriteLineCallback,
                 IntPtr.Zero
             );
         }

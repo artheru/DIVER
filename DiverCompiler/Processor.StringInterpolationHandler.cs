@@ -25,8 +25,8 @@ internal partial class Processor
             size = 10,
             baseInitialized = true
         };
-        handlerFields.field_offset["+len"] = (0, int32Type, tMap.vInt32.typeid, handlerType);
-        handlerFields.field_offset["+bytes"] = (5, handlerType, tMap.aReference.typeid, handlerType);
+        handlerFields.field_offset["+len"] = (0, int32Type, tMap.vInt32.typeid, handlerType, (byte)0x00);
+        handlerFields.field_offset["+bytes"] = (5, handlerType, tMap.aReference.typeid, handlerType, (byte)0x00);
         SI.class_ifield_offset[handlerType.FullName] = handlerFields;
 
         var keysToRemove = SI.referenced_typefield.Keys

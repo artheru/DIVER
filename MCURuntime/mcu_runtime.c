@@ -4,13 +4,13 @@
 #else
 #include "appl/vm.h"
 #include "util/console.h"
-#include "appl/states.h"
+// #include "appl/co.h"
 #undef _DEBUG
 #define INLINE __attribute__((always_inline)) static inline
 #endif
 
 #ifdef IS_MCU
-#define MCU_FASTMEM attribute((section(".ccm")))
+#define MCU_FASTMEM attribute((section(".ccmram")))
 #else
 #define MCU_FASTMEM
 #endif
@@ -80,7 +80,7 @@ static void parse_native_chunk(uchar* chunk_ptr, int chunk_size);
 
 // Language-level assertions for interpreter debugging (only active in DEBUG_COMPILER mode)
 #ifdef DEBUG_COMPILER
-#define ASSERT_LANG(expr, ...) if (!(expr)) { char sprintf_format[100] = { 0 }; sprintf(sprintf_format, __VA_ARGS__); report_error(cur_il_offset, sprintf_format); }
+#define ASSERT_LANG(expr, ...) if (!(expr)) { char sprintf_format[100] = { 0 }; sprintf(sprintf_format, __VA_ARGS__); report_error(cur_il_offset, sprintf_format, __LINE__); }
 #else
 #define ASSERT_LANG(expr, ...) ((void)0)
 #endif
@@ -99,7 +99,7 @@ VAL_OUT(ptr);
 
 
 // Runtime assertions for safety checks (always active)
-#define ASSERT_RT(expr, ...) if (!(expr)) { char err_tmp[256]={0}; int sz = snprintf(err_tmp,sizeof(err_tmp),__VA_ARGS__); report_error(cur_il_offset, err_tmp); }
+#define ASSERT_RT(expr, ...) if (!(expr)) { char err_tmp[256]={0}; int sz = snprintf(err_tmp,sizeof(err_tmp),__VA_ARGS__); report_error(cur_il_offset, err_tmp, __LINE__); }
 
 /*
  * memory layout:
@@ -183,7 +183,16 @@ struct
 	int layout_offset;
 } *instanceable_class_layout_ptr;
 uchar* instanceable_class_per_layout_ptr;
-int* cartIO_layout_ptr;
+
+// cartIO layout entry: offset (4B) + flags (1B) = 5 bytes per field, packed
+// flags: 0x01=UpperIO (Host->MCU), 0x02=LowerIO (MCU->Host), 0x00=Mutual (bidirectional)
+#pragma pack(push, 1)
+struct cartIO_entry {
+	int offset;
+	uchar flags;
+};
+#pragma pack(pop)
+struct cartIO_entry* cartIO_layout_ptr;
 
 struct per_field
 {
@@ -472,8 +481,8 @@ void parse_program_desc()
 {
 	uchar* ptr = program_desc_ptr;
 	cartIO_N = ReadShort;
-	cartIO_layout_ptr = ptr;
-	ptr += cartIO_N * 4; //cart IO offset layout.
+	cartIO_layout_ptr = (struct cartIO_entry*)ptr;
+	ptr += cartIO_N * 5; // cartIO layout: [offset 4B][flags 1B] per field
 	instanceable_class_N = ReadShort;
 	instanceable_class_layout_ptr = ptr;
 	instanceable_class_per_layout_ptr = ((uchar*)instanceable_class_layout_ptr) + 7 * instanceable_class_N;
@@ -3104,10 +3113,20 @@ void vm_put_upper_memory(uchar* buffer, int size)
 
 	for (int cid = 0; cid < cartIO_N; ++cid)
 	{
+		// Skip non-UpperIO fields (0x02=LowerIO should not be in upper buffer)
+		// Only process UpperIO (0x01) and Mutual (0x00) fields
+		uchar flags = cartIO_layout_ptr[cid].flags;
+		if (flags == 0x02) // LowerIO - skip
+			continue;
+
+		DBG("UPPERIODBG: iterating for cart_io %d (flags=0x%02x), in total cart_io_number %d\n", cid, flags, cartIO_N);
+
 		ASSERT_RT(ptr < end, "upper buffer truncated at field %d", cid);
-		uchar* field_ptr = statics_val_ptr + cartIO_layout_ptr[cid];
+		uchar* field_ptr = statics_val_ptr + cartIO_layout_ptr[cid].offset;
 		uchar expected_tid = *field_ptr;
 		uchar token = *ptr; ptr += 1;
+
+		DBG("UPPERIODBG: expected_tid: %d, token: %d\n", expected_tid, token);
 
 		if (expected_tid == ReferenceID)
 		{
@@ -3171,7 +3190,13 @@ uchar* vm_get_lower_memory()
 
 	for (int i = 0; i < cartIO_N; ++i)
 	{
-		uchar* field_ptr = statics_val_ptr + cartIO_layout_ptr[i];
+		// Skip non-LowerIO fields (0x01=UpperIO should not be in lower buffer)
+		// Only export LowerIO (0x02) and Mutual (0x00) fields
+		uchar flags = cartIO_layout_ptr[i].flags;
+		if (flags == 0x01) // UpperIO - skip
+			continue;
+
+		uchar* field_ptr = statics_val_ptr + cartIO_layout_ptr[i].offset;
 		uchar type_id = *field_ptr;
 
 		if (type_id == ReferenceID)
@@ -4971,7 +4996,7 @@ void builtin_Func6_Invoke(uchar** reptr) {
 void builtin_Console_WriteLine(uchar** reptr) {
 	int refid = pop_reference(reptr);
 	struct string_val* str = (struct string_val*)heap_obj[refid].pointer;
-	print_line(&str->payload);
+	print_line(&str->payload, str->str_len);
 }
 
 void builtin_BitConverter_GetBytes_Boolean(uchar** reptr) {
@@ -6529,7 +6554,7 @@ void write_stream(int streamID, uchar* buffer, int size) {} // called to write b
 void write_event(int portID, int eventID, uchar* buffer, int size) {} // called to write bytes into CAN/modbus similar ports.
 
 
-typedef void(*NotifyErr)(int il_offset, unsigned char* error_msg, int length);
+typedef void(*NotifyErr)(int il_offset, unsigned char* error_msg, int length, int line_no);
 NotifyErr err_cb = 0;
 __declspec(dllexport) void set_error_report_cb(NotifyErr cb)
 {
@@ -6562,12 +6587,12 @@ void print_stacktrace(void) {
 	free(sym);
 }
 
-void report_error(int il_offset, uchar* error_str) { 
-	err_cb(il_offset, error_str, strlen(error_str));
+void report_error(int il_offset, uchar* error_str, int line_no) { 
+	err_cb(il_offset, error_str, strlen(error_str), line_no);
 	print_stacktrace();
 	exit(2);
 }
-void print_line(uchar* error_str) { printf("%s\n", error_str); }; // should upload text info.
+void print_line(uchar* str, int length) { printf("%s\n", str); } // should upload text info.
 
 inline void enter_critical() {};
 inline void leave_critical() {};

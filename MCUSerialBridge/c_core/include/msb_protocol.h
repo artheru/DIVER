@@ -99,6 +99,22 @@ typedef enum {
     CommandVersion = 0x04,
 
     /**
+     * @brief 启用 Wire Tap 模式 (PC → MCU)
+     *
+     * 启用后，即使在 DIVER 模式下，端口收到的数据也会上报给 PC。
+     * 响应命令：0x85（同 seq）。
+     */
+    CommandEnableWireTap = 0x05,
+
+    /**
+     * @brief 启动 MCU 运行 (PC → MCU)
+     *
+     * 上位机命令 MCU 开始执行（DIVER 模式运行程序，或透传模式开始转发）。
+     * 响应命令：0x8F（同 seq）。
+     */
+    CommandStart = 0x0F,
+
+    /**
      * @brief 向 MCU 端口写数据命令 (PC → MCU)
      *
      * 上位机向下发数据到指定端口（串口/CAN 等）。MCU 执行写操作后需返回同 seq
@@ -128,6 +144,39 @@ typedef enum {
      * seq），并携带 4 字节输入数据。
      */
     CommandReadInput = 0x40,
+
+    /**
+     * @brief 下载程序到 MCU (PC → MCU)
+     *
+     * 上位机向 MCU 发送程序数据。如果数据长度为 0，MCU 进入透传模式；
+     * 如果数据长度非 0，MCU 进入 DIVER 模式并加载程序。
+     * 程序可能需要分片传输，使用 offset 和 total_len 字段标识。
+     * 响应命令：0xD0（同 seq）。
+     */
+    CommandProgram = 0x50,
+
+    /**
+     * @brief PC → MCU 内存交换 (UpperIO) (PC → MCU)
+     *
+     * PC 向 MCU 发送 UpperIO 数据（DIVER 模式下的输入变量）。
+     * 响应命令（同 seq）。
+     */
+    CommandMemoryUpperIO = 0x60,
+
+    /**
+     * @brief MCU → PC 内存交换上报 (LowerIO) (MCU → PC)
+     *
+     * MCU 主动上报 LowerIO 数据（DIVER 模式下的输出变量）。
+     * 无需确认响应。
+     */
+    CommandMemoryLowerIO = 0x70,
+
+    /**
+     * @brief MCU ->PC 日志输出命令 (MCU → PC)
+     *
+     * MCU 主动上报日志数据。无需确认响应，sequence 固定为 0。
+     */
+    CommandUploadConsoleWriteLine = 0x71,
 
     /**
      * @brief 致命错误上报命令 (MCU → PC 或 PC → MCU)
@@ -223,59 +272,45 @@ typedef struct {
  * =============================== */
 
 /**
- * @brief MCU 当前运行状态定义
- *
- * MCU 运行状态采用 32-bit 编码：
- * - Bit31 = 0 : Bridge（透传/桥接）模式
- * - Bit31 = 1 : DIVER（应用/驱动）模式
- * - 低 8-bit 表示具体子状态
- *
- * 该状态用于：
- * - PC 端判断 MCU 当前工作模式
- * - UI 状态显示
- * - 状态机与异常处理
+ * @brief MCU 运行模式枚举
  */
 typedef enum {
+    MCU_Mode_Bridge = 0x00, /**< Bridge（透传/桥接）模式 */
+    MCU_Mode_DIVER = 0x80,  /**< DIVER（应用/驱动）模式 */
+} MCUMode;
 
-    /* ===============================
-     * Bridge (Passthrough) States
-     * =============================== */
+/**
+ * @brief MCU 运行状态枚举
+ */
+typedef enum {
+    MCU_RunState_Idle = 0x00,    /**< 空闲状态 */
+    MCU_RunState_Running = 0x0F, /**< 运行中 */
+    MCU_RunState_Error = 0xFF,   /**< 错误状态 */
+} MCURunState;
 
-    /** Bridge 模式：空闲（未建立透传或未启动） */
-    MCUState_Bridge_Idle = 0x00000000,
-
-    /** Bridge 模式：透传运行中 */
-    MCUState_Bridge_Running = 0x0000000F,
-
-    /** Bridge 模式：错误状态 */
-    MCUState_Bridge_Error = 0x000000FF,
-
-
-    /* ===============================
-     * DIVER (Application) States
-     * =============================== */
-
-    /** DIVER 模式：已进入 DIVER，但尚未完成配置 */
-    MCUState_DIVER_Idle = 0x80000000,
-
-    /** DIVER 模式：配置完成（参数/端口已就绪） */
-    MCUState_DIVER_Configured = 0x80000001,
-
-    /** DIVER 模式：应用/驱动逻辑运行中 */
-    MCUState_DIVER_Running = 0x8000000F,
-
-    /** DIVER 模式：运行错误状态 */
-    MCUState_DIVER_Error = 0x800000FF,
-
-
-    /* ===============================
-     * Boundary
-     * =============================== */
-
-    /** 枚举边界值（非法状态） */
-    MCUState_MAX = 0xFFFFFFFF,
-
+/**
+ * @brief MCU 当前运行状态定义
+ *
+ * MCU 运行状态采用 32-bit 编码，使用 union 便于字段访问和整体读写：
+ * - mode: 0x00 = Bridge 模式, 0x80 = DIVER 模式
+ * - is_programmed: DIVER 模式下程序是否已加载
+ * - is_configured: 端口是否已配置
+ * - running_state: 运行子状态 (Idle/Running/Error)
+ *
+ * 内存布局（小端序）：
+ * [0] running_state | [1] is_configured | [2] is_programmed | [3] mode
+ */
+typedef union {
+    u32 raw; /**< 原始 32-bit 值，用于整体读写 */
+    struct {
+        u8 running_state; /**< 运行状态 (MCURunState) */
+        u8 is_configured; /**< 是否已配置端口 (0 或 1) */
+        u8 is_programmed; /**< 是否已加载程序 (0 或 1, 仅 DIVER 模式) */
+        u8 mode;          /**< 模式 (MCUMode: 0x00=Bridge, 0x80=DIVER) */
+    };
 } MCUStateC;
+
+STATIC_ASSERT(sizeof(MCUStateC) == 4, "MCUStateC size must be 4 bytes");
 
 
 /* ===============================
@@ -321,10 +356,10 @@ STATIC_ASSERT(sizeof(CANPortConfigC) == 16, "CANPortConfig size error");
 /**
  * @brief 端口数据包结构
  *
- * 用于 CommandWritePort / CommandUploadPort。
+ * 用于 CommandWritePort / CommandUploadPort
  */
 typedef struct {
-    i8 port_index; /**< 端口索引，IO 时为 -1 */
+    i8 port_index; /**< 端口索引 */
     u16 data_len;  /**< 数据长度 */
     u8 data[0];    /**< 可变长度数据 */
 } DataPacket;
@@ -350,6 +385,40 @@ typedef struct {
     u16 info;   /**< CANID / RTR / DLC */
     u8 data[8]; /**< CAN 数据 */
 } CANData;
+
+/* ===============================
+ * Program Packet
+ * =============================== */
+
+/**
+ * @brief 程序下载数据包结构
+ *
+ * 用于 CommandProgram，支持分片传输大程序。
+ */
+typedef struct {
+    u32 total_len; /**< 程序总长度（字节） */
+    u32 offset;    /**< 当前分片偏移量 */
+    u16 chunk_len; /**< 当前分片长度 */
+    u8 data[0];    /**< 可变长度程序数据 */
+} ProgramPacket;
+
+STATIC_ASSERT(
+        sizeof(ProgramPacket) == 10,
+        "ProgramPacket size must be 10 (packed)");
+
+/**
+ * @brief 内存交换数据包结构
+ *
+ * 用于 CommandMemoryExchange / CommandMemoryExchangeUpload。
+ */
+typedef struct {
+    u16 data_len; /**< 数据长度 */
+    u8 data[0];   /**< 可变长度交换数据 */
+} MemoryExchangePacket;
+
+STATIC_ASSERT(
+        sizeof(MemoryExchangePacket) == 2,
+        "MemoryExchangePacket size must be 2 (packed)");
 
 #pragma pack(pop)
 

@@ -2,162 +2,146 @@ using CartActivator;
 
 namespace DiverTest
 {
+    // Minimal Cart definition for simple testing
     public class TestVehicle : LocalDebugDIVERVehicle
     {
-        [AsLowerIO] public int prim;
-        [AsLowerIO] public string str;
-        [AsLowerIO] public int[] arr;
+        // LowerIO: MCU -> PC (these values are sent back from MCU)
+        [AsLowerIO]
+        public int counter;
 
-        [AsUpperIO] public bool prim_b;
-        [AsUpperIO] public int[] arr_send = { 1, 2, 3, 4 };
+        [AsLowerIO]
+        public int result;
 
-        public int test_shared_var;
+        [AsLowerIO]
+        public float computed;
+
+        [AsLowerIO]
+        public int serial0RxLen;
+
+        [AsLowerIO]
+        public int serial3RxLen;
+
+        [AsLowerIO]
+        public int can4RxLen;
+
+        // UpperIO: PC -> MCU (these values are sent to MCU)
+        [AsUpperIO]
+        public int inputA;
+
+        [AsUpperIO]
+        public int inputB;
+
+        [AsUpperIO]
+        public int digital_output;
     }
 
-// LIOQ
-    [LogicRunOnMCU(scanInterval = 50)]
+    /// <summary>
+    /// Minimal DIVER test logic - performs simple arithmetic operations
+    /// Good for testing basic MCU DIVER runtime functionality:
+    /// - Field access
+    /// - Basic arithmetic
+    /// - Conditional logic
+    /// - LowerIO/UpperIO data exchange
+    /// - Serial/CAN port read/write
+    /// </summary>
+    [LogicRunOnMCU(scanInterval = 100)]
     public class TestLogic : LadderLogic<TestVehicle>
     {
-        private Dictionary<int, string> testDict = new();
-
-        interface IFace
-        {
-            int good(int b);
-        }
-
-        public abstract class AClass : IFace
-        {
-            public int good(int b)
-            {
-                Console.WriteLine("A-good");
-                return 0;
-            }
-
-            public virtual int VMethod() => 0;
-            public abstract float GG();
-            internal IEnumerator<bool> Running;
-        }
-
-        private (int a, IFace b) vv = (1, null);
-
-        public class TI : AClass, IFace
-        {
-            private TestLogic ll;
-
-            public TI(TestLogic ll) 
-            {
-                this.ll = ll;
-            }
-
-            public int good(int b)
-            {
-                ll.vv.a += 3;
-                if (ll.vv.a > 7) ll.vv.a %= 6;
-                var zz = (int)GG();
-                Console.WriteLine($"A={ll.vv.a}, zz={zz}");
-                return ll.vv.a + 4 + zz;
-            }
-
-            public override int VMethod() => 7 + ll.test;
-
-            public override float GG()
-            {
-                Console.WriteLine("GG");
-                Running ??= StateMachine().GetEnumerator();
-                Running.MoveNext();
-                return ll.test = VMethod() + 1;
-            }
-             
-            public IEnumerable<bool> StateMachine()
-            {
-                var z = ll.vv.a;
-                for (int i = 0; i < z + 1; ++i)
-                {
-                    yield return true;
-                }
-
-                Console.WriteLine("Yield done");
-                ll.act = (j) =>
-                {
-                    Console.WriteLine($"j={j}");
-                    ll.act = null;
-                    return -3;
-                };
-                Running = null;
-            }
-        } 
-
-        public TestLogic() 
-        { 
-            vv.b = new TI(this);
-            testDict = new Dictionary<int, string>();
-        }
-
-        private Func<int, int> act = null;
-        private int test = 3;
-        private byte[] cache = new byte[64 * 32];
-
-        [RequireNativeCode]
-        static byte[] RenderPattern(byte[] buffer, float bias)
-        {
-            int width = 64;
-            int height = 32;
-            int output = 0;
-
-            for (int y = 0; y < height; y++)
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    double value = Math.Sin(x * 0.1 + bias) * Math.Cos(y * 0.1 - bias);
-                    if (value > 0.3)
-                    {
-                        buffer[(y / 8) * width + x] |= (byte)(1 << (y % 8));
-                    }
-                }
-            }
-            return buffer;
-        }
+        private int _accumulator = 0;
+        private float _floatAcc = 0.0f;
 
         public override void Operation(int iteration)
         {
-            // ============ TEST AsLowerIO/AsUpperIO (Cart read/write) ============
-            var ls = new List<int>();
-            for (int i = 0; i < Math.Min(iteration,20); ++i)
+            // Increment counter each iteration
+            cart.counter = iteration;
+
+            // Simple arithmetic with UpperIO inputs
+            cart.result = cart.inputA + cart.inputB + iteration;
+
+            // Accumulate values
+            _accumulator += iteration;
+            if (_accumulator > 100)
+                _accumulator = 0;
+
+            // Float computation
+            _floatAcc = (float)iteration * 0.5f + (float)cart.inputA * 0.25f;
+            cart.computed = _floatAcc;
+
+            // Simple conditional
+            if (iteration % 5 == 0)
             {
-                ls.Add(i);
-                testDict[i % 5] = $"i={i}";
+                cart.result *= 2;
             }
 
-            var arr = ls.Where(p => p % 2 == 1).ToArray();
-            cart.arr = arr;
-            if (testDict.ContainsKey(vv.a))
+            // ========================================
+            // Serial Port Tests
+            // ========================================
+
+            // Write to Serial port 3
+            byte[] serial3TxData = new byte[] { 0xAA, 0xBB, (byte)(iteration & 0xFF), 0xCC };
+            RunOnMCU.WriteStream(serial3TxData, 3);
+
+            // Read from Serial port 3
+            byte[] serial3RxData = RunOnMCU.ReadStream(3);
+            cart.serial3RxLen = serial3RxData != null ? serial3RxData.Length : 0;
+            if (serial3RxData is not null)
             {
-                Console.WriteLine($"has {vv.a}");
-                cart.str = testDict[vv.a];
+                Console.WriteLine($"Serial 3 RX: Received OK!");
             }
             else
             {
-                Console.WriteLine($"no {vv.a}");
-                cart.str = vv.a + ">" + vv.b.good(vv.a);
+                Console.WriteLine($"Serial 3 RX: Received NO DATA!");
             }
 
-            int I(int id)
+            // Read from Serial port 0
+            byte[] serial0RxData = RunOnMCU.ReadStream(0);
+            cart.serial0RxLen = serial0RxData != null ? serial0RxData.Length : 0;
+            if (serial0RxData is not null)
             {
-                if (ls.Count > 100) ls.Clear();
-                ls.Add(99); 
-                return ls[id % ls.Count] + 100;
+                Console.WriteLine($"Serial 0 RX: Received OK!");
             }
-
-            act ??= _ => I(iteration);
-            cart.str += "::" + test;
-            if (iteration % 3 == 1)
+            else
             {
-                Console.WriteLine($"iteration={iteration}, GG!");
-                testDict[act(iteration) % 100] = $"{new TI(this).GG()}.xxx";
+                Console.WriteLine($"Serial 0 RX: Received NO DATA!");
             }
 
-            RunOnMCU.WriteSnapshot(RenderPattern(cache, iteration));
-            Console.WriteLine($"{iteration}:arr=[{string.Join(",", arr)}], upload={cart.str}..");
+            // ========================================
+            // CAN Port Tests (port 4, event_id 0x100)
+            // ========================================
+
+            // Write to CAN port 4
+            byte[] can4TxData = new byte[] { 0x11, 0x22, 0x33, 0x44, (byte)(iteration & 0xFF) };
+            RunOnMCU.WriteEvent(can4TxData, 4, 0x100);
+
+            // Read from CAN port 4
+            byte[] can4RxData = RunOnMCU.ReadEvent(4, 0x100);
+            cart.can4RxLen = can4RxData != null ? can4RxData.Length : 0;
+            if (can4RxData is not null)
+            {
+                Console.WriteLine($"CAN 4 RX: Received OK!");
+            }
+            else
+            {
+                Console.WriteLine($"CAN 4 RX: Received NO DATA!");
+            }
+
+            // ========================================
+            // Snapshot (Input) Test
+            // ========================================
+
+            // Read input snapshot
+            byte[] snapshot = RunOnMCU.ReadSnapshot();
+            if (snapshot != null && snapshot.Length >= 4)
+            {
+                // Use first 4 bytes as an int for testing
+                cart.result += snapshot[0];
+            }
+
+            byte[] snapshotData = BitConverter.GetBytes(cart.digital_output);
+            RunOnMCU.WriteSnapshot(snapshotData);
+
+            // Print progress (Console.WriteLine is built-in)
+            Console.WriteLine("DOG BARKS: Woof!");
         }
     }
 }

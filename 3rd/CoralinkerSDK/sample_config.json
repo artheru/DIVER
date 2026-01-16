@@ -1,0 +1,20 @@
+{
+  "assemblyPath": null,
+  "nodes": [
+    {
+      "nodeId": "node1",
+      "mcuUri": "serial://name=COM18&baudrate=1000000",
+      "binPath": "../CoralinkerHost/data/assets/generated/TestLogic.bin",
+      "metaJsonPath": "../CoralinkerHost/data/assets/generated/TestLogic.bin.json",
+      "logicName": "TestLogic",
+      "portConfigs": [
+        { "type": "serial", "baud": 9600, "receiveFrameMs": 20 },
+        { "type": "serial", "baud": 9600, "receiveFrameMs": 20 },
+        { "type": "serial", "baud": 9600, "receiveFrameMs": 20 },
+        { "type": "serial", "baud": 9600, "receiveFrameMs": 20 },
+        { "type": "can", "baud": 500000, "retryTimeMs": 10 },
+        { "type": "can", "baud": 500000, "retryTimeMs": 10 }
+      ]
+    }
+  ]
+}

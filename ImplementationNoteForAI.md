@@ -106,6 +106,26 @@
 - IO annotations: `[AsLowerIO]` = MCU➜host (read-only on host), `[AsUpperIO]` = host➜MCU. Descriptor IDs map to these fields in `TestVehicle`.
 - Execution loop (`vm_run`) interprets stack machine IL; `vm_put_*` functions enqueue IO writes (snapshot/stream/event) executed each tick.
 
+## UpperIO / LowerIO Wire Format
+- **Compiler marks fields with flags:** In `program_desc`, each cartIO field has `[offset:4B][flags:1B]`.
+  - `flags=0x01` = `[AsUpperIO]` (Host→MCU only)
+  - `flags=0x02` = `[AsLowerIO]` (MCU→Host only)
+  - `flags=0x00` = Mutual (no attribute, bidirectional)
+- **UpperIO** (Host → MCU): Sent via `CommandMemoryUpperIO (0x60)`. Only contains `[AsUpperIO]` and Mutual fields (skips `[AsLowerIO]`).
+- **LowerIO** (MCU → Host): Sent via `CommandMemoryLowerIO (0x70)`. Only contains `[AsLowerIO]` and Mutual fields (skips `[AsUpperIO]`).
+- **Wire format per field:**
+  - Primitives: `[typeid:1B][value:NB]`
+    - TypeIDs: 0=Boolean(1B), 1=Byte(1B), 2=SByte(1B), 3=Char(2B), 4=Int16(2B), 5=UInt16(2B), 6=Int32(4B), 7=UInt32(4B), 8=Single(4B)
+  - Arrays: `[11=ArrayHeader][elemTid:1B][length:4B][raw element bytes...]`
+  - Strings: `[12=StringHeader][length:2B][UTF8 bytes...]`
+  - References: `[16=ReferenceID][rid:4B]` (rid=0 means null)
+- **Reference files for format details:**
+  - `DiverCompiler/Processor.cs`: Search for `cart_io_list`, `ioFlags` — compiler marks fields with Upper/Lower flags.
+  - `MCURuntime/mcu_runtime.c`: Search for `vm_put_upper_memory`, `vm_get_lower_memory`, `cartIO_entry` — runtime skips fields based on flags.
+  - `DiverTest/DIVER/DIVERInterface.cs`: Search for `NotifyLowerData`, `isLower`, `isUpper` — C# serialization logic.
+  - `MCUSerialBridge/wrapper/MCUSerialBridgeCLR.cs`: `MemoryUpperIO()` method documentation.
+- **Search keywords:** `vm_put_upper_memory`, `cartIO_entry`, `ioFlags`, `AsUpperIO`, `AsLowerIO`, `NotifyLowerData`
+
 ## Troubleshooting Checklist
 - Missing `extra_methods.txt` during weaving → ensure prebuild ran or manually execute `DiverCompiler.exe -g`.
 - `Unknown cart descriptor kind` → log `descriptor.Kind` when building descriptors and add mapping for new type to existing enum bucket.

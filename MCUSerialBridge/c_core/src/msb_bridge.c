@@ -130,7 +130,7 @@ MCUSerialBridgeError msb_open(
         return MSB_Error_Win_CannotCreateThread;
     }
 
-    DBG_PRINT("MCU Open OK");
+    DBG_PRINT("MSB Open OK");
     return MSB_Error_OK;
 }
 
@@ -193,7 +193,7 @@ MCUSerialBridgeError mcu_state(
     MCUSerialBridgeError ret = mcu_send_packet_and_wait(
             handle, CommandState, 0, 0, state, sizeof(MCUStateC), timeout_ms);
 
-    DBG_PRINT("State finished with result[0x%08X], state[0x%08X]", ret, *state);
+    DBG_PRINT("State finished with result[0x%08X], state[0x%08X]", ret, state->raw);
     return ret;
 }
 
@@ -291,6 +291,40 @@ MCUSerialBridgeError msb_configure(
             DefaultConfigureTimeout);
 
     DBG_PRINT("Configure finished with result[0x%08X]", ret);
+    return ret;
+}
+
+// --------------------
+// 启动 MCU
+// --------------------
+MCUSerialBridgeError msb_start(msb_handle* handle, uint32_t timeout_ms)
+{
+    DBG_PRINT("Start called");
+
+    if (!handle)
+        return MSB_Error_Win_HandleNotFound;
+
+    MCUSerialBridgeError ret = mcu_send_packet_and_wait(
+            handle, CommandStart, NULL, 0, NULL, 0, timeout_ms);
+
+    DBG_PRINT("Start finished with result[0x%08X]", ret);
+    return ret;
+}
+
+// --------------------
+// 启用 Wire Tap
+// --------------------
+MCUSerialBridgeError msb_enable_wire_tap(msb_handle* handle, uint32_t timeout_ms)
+{
+    DBG_PRINT("EnableWireTap called");
+
+    if (!handle)
+        return MSB_Error_Win_HandleNotFound;
+
+    MCUSerialBridgeError ret = mcu_send_packet_and_wait(
+            handle, CommandEnableWireTap, NULL, 0, NULL, 0, timeout_ms);
+
+    DBG_PRINT("EnableWireTap finished with result[0x%08X]", ret);
     return ret;
 }
 
@@ -465,6 +499,170 @@ DLL_EXPORT MCUSerialBridgeError msb_register_port_data_callback(
 }
 
 // --------------------
+// 下载程序到 MCU
+// --------------------
+#define PROGRAM_CHUNK_SIZE 512  // 每次传输的最大分片大小
+
+MCUSerialBridgeError msb_program(
+        msb_handle* handle,
+        const uint8_t* program_bytes,
+        uint32_t program_len,
+        uint32_t timeout_ms)
+{
+    DBG_PRINT("Program called, len=%u", program_len);
+
+    if (!handle)
+        return MSB_Error_Win_HandleNotFound;
+
+    // 如果 program_bytes 为 NULL 或 program_len 为 0，发送空程序包（透传模式）
+    if (program_bytes == NULL || program_len == 0) {
+        DBG_PRINT("Program: switching to passthrough mode (empty program)");
+
+        uint8_t packet_buf[sizeof(ProgramPacket)];
+        ProgramPacket* pkt = (ProgramPacket*)packet_buf;
+        pkt->total_len = 0;
+        pkt->offset = 0;
+        pkt->chunk_len = 0;
+
+        MCUSerialBridgeError ret = mcu_send_packet_and_wait(
+                handle,
+                CommandProgram,
+                packet_buf,
+                sizeof(ProgramPacket),
+                NULL,
+                0,
+                timeout_ms);
+
+        DBG_PRINT("Program (empty) finished with result[0x%08X]", ret);
+        return ret;
+    }
+
+    // 分片传输程序
+    uint32_t offset = 0;
+    while (offset < program_len) {
+        uint32_t remaining = program_len - offset;
+        uint16_t chunk_len =
+                (remaining > PROGRAM_CHUNK_SIZE) ? PROGRAM_CHUNK_SIZE : (uint16_t)remaining;
+
+        // 构建 ProgramPacket
+        uint8_t packet_buf[sizeof(ProgramPacket) + PROGRAM_CHUNK_SIZE];
+        ProgramPacket* pkt = (ProgramPacket*)packet_buf;
+        pkt->total_len = program_len;
+        pkt->offset = offset;
+        pkt->chunk_len = chunk_len;
+        memcpy(pkt->data, program_bytes + offset, chunk_len);
+
+        DBG_PRINT(
+                "Program chunk: offset=%u, chunk_len=%u, total=%u",
+                offset,
+                chunk_len,
+                program_len);
+
+        MCUSerialBridgeError ret = mcu_send_packet_and_wait(
+                handle,
+                CommandProgram,
+                packet_buf,
+                sizeof(ProgramPacket) + chunk_len,
+                NULL,
+                0,
+                timeout_ms);
+
+        if (ret != MSB_Error_OK) {
+            DBG_PRINT("Program chunk failed at offset=%u, error=0x%08X", offset, ret);
+            return ret;
+        }
+
+        offset += chunk_len;
+    }
+
+    DBG_PRINT("Program finished, total %u bytes transferred", program_len);
+    return MSB_Error_OK;
+}
+
+// --------------------
+// PC → MCU 内存交换（UpperIO）
+// --------------------
+MCUSerialBridgeError msb_memory_upper_io(
+        msb_handle* handle,
+        const uint8_t* data,
+        uint32_t data_len,
+        uint32_t timeout_ms)
+{
+    DBG_PRINT("MemoryUpperIO called, len=%u", data_len);
+
+    if (!handle)
+        return MSB_Error_Win_HandleNotFound;
+
+    if (!data || data_len == 0)
+        return MSB_Error_Win_InvalidParam;
+
+    if (data_len > PACKET_MAX_DATALEN)
+        return MSB_Error_Proto_FrameTooLong;
+
+    // 构建 MemoryExchangePacket
+    uint8_t packet_buf[sizeof(MemoryExchangePacket) + PACKET_MAX_DATALEN];
+    MemoryExchangePacket* pkt = (MemoryExchangePacket*)packet_buf;
+    pkt->data_len = (uint16_t)data_len;
+    memcpy(pkt->data, data, data_len);
+
+    MCUSerialBridgeError ret = mcu_send_packet_and_wait(
+            handle,
+            CommandMemoryUpperIO,
+            packet_buf,
+            sizeof(MemoryExchangePacket) + data_len,
+            NULL,
+            0,
+            timeout_ms);
+
+    DBG_PRINT("MemoryUpperIO finished with result[0x%08X]", ret);
+    return ret;
+}
+
+// --------------------
+// 注册 LowerIO 回调
+// --------------------
+MCUSerialBridgeError msb_register_memory_lower_io_callback(
+        msb_handle* handle,
+        msb_on_memory_lower_io_callback_function_t callback,
+        void* user_ctx)
+{
+    if (!handle)
+        return MSB_Error_Win_HandleNotFound;
+
+    handle->memory_lower_io_callback = NULL;
+    handle->memory_lower_io_callback_ctx = user_ctx;
+    handle->memory_lower_io_callback = callback;
+
+    DBG_PRINT(
+            "Registered memory_lower_io callback to[0x%08X]",
+            (uint32_t)(size_t)(void*)callback);
+
+    return MSB_Error_OK;
+}
+
+// --------------------
+// 注册 Console WriteLine 回调
+// --------------------
+MCUSerialBridgeError msb_register_console_writeline_callback(
+        msb_handle* handle,
+        msb_on_console_writeline_callback_function_t callback,
+        void* user_ctx)
+{
+    if (!handle)
+        return MSB_Error_Win_HandleNotFound;
+
+    handle->console_writeline_callback = NULL;
+    handle->console_writeline_callback_ctx = user_ctx;
+    handle->console_writeline_callback = callback;
+
+    DBG_PRINT(
+            "Registered console_writeline callback to[0x%08X]",
+            (uint32_t)(size_t)(void*)callback);
+
+    return MSB_Error_OK;
+}
+
+// --------------------
 // 获取 API 函数指针
 // --------------------
 void mcu_serial_bridge_get_api(MCUSerialBridgeAPI* api)
@@ -482,4 +680,10 @@ void mcu_serial_bridge_get_api(MCUSerialBridgeAPI* api)
     api->msb_register_port_data_callback = msb_register_port_data_callback;
     api->msb_write_port = msb_write_port;
     api->msb_reset = msb_reset;
+    api->msb_start = msb_start;
+    api->msb_program = msb_program;
+    api->msb_enable_wire_tap = msb_enable_wire_tap;
+    api->msb_memory_upper_io = msb_memory_upper_io;
+    api->msb_register_memory_lower_io_callback = msb_register_memory_lower_io_callback;
+    api->msb_register_console_writeline_callback = msb_register_console_writeline_callback;
 }

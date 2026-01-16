@@ -193,23 +193,30 @@ scons rtt
 在项目根目录执行：
 
 ```sh
-scons
+scons c_core
 ```
 
-将自动构建：
+将构建：
 
 * `c_core`（C 协议核心库）
-* `wrapper`（C# 封装和 C# 测试程序）
+
+然后构建 wrapper（已迁移为 csproj）：
+
+```sh
+dotnet build .\wrapper\MCUSerialBridgeWrapper.csproj
+dotnet build .\wrapper\TestCS.csproj
+dotnet build .\wrapper\TestDIVER.csproj
+```
 
 ---
 
 ### 3. 运行 C# 测试程序
 
 ```sh
-scons runcs
+.\build\TestCS.exe
 ```
 
-或手动运行生成的 EXE。
+或手动运行生成的 EXE（`build/` 目录）。
 
 运行前请确认：
 
@@ -219,7 +226,30 @@ scons runcs
 
 ---
 
-## 四、常见构建组合
+## 四、DIVER 开发快捷命令 (dev.bat)
+
+针对 DIVER 模式开发，提供了 `dev.bat` 一键脚本：
+
+```sh
+dev.bat build   # 编译 MCU 固件
+dev.bat flash   # 烧录固件到 MCU
+dev.bat rtt     # 启动 RTT 日志查看器
+dev.bat test    # 运行 PC 端 TestDIVER 测试程序
+dev.bat all     # 编译 + 烧录 + 测试（一条龙）
+```
+
+配置项位于 `dev.bat` 文件顶部：
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `PDN` | 板子型号 | `FRLD-DIVERBK-V2` |
+| `TESTDIVER_PORT` | 串口号 | `COM18` |
+| `TESTDIVER_BAUD` | 波特率 | `1000000` |
+| `TESTDIVER_BIN` | DIVER 程序 bin 路径 | `...\TestLogic.bin` |
+
+---
+
+## 五、常见构建组合
 
 ### 仅构建 MCU 固件
 
@@ -236,12 +266,12 @@ scons c_core
 ### 仅运行 C# 测试程序
 
 ```sh
-scons runcs
+.\build\TestCS.exe
 ```
 
 ---
 
-## 五、清理构建产物
+## 七、清理构建产物
 
 ```sh
 scons -c
@@ -255,7 +285,7 @@ scons -c
 
 ---
 
-## 六、运行前检查清单
+## 八、运行前检查清单
 
 * [ ] Python ≥ 3.9
 * [ ] SCons 已安装
