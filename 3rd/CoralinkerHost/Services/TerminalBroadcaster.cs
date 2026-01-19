@@ -21,6 +21,9 @@ public sealed class TerminalBroadcaster
     {
         return _hub.Clients.All.SendAsync("varsSnapshot", snapshot, ct);
     }
+
+    public Task NodeSnapshotAsync(object snapshot, CancellationToken ct = default)
+    {
+        return _hub.Clients.All.SendAsync("nodeSnapshot", snapshot, ct);
+    }
 }
-
-

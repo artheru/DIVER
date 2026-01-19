@@ -4,6 +4,7 @@ setlocal
 set PDN=FRLD-DIVERBK-V2
 set SCONS_OPTS=PDN=%PDN% ENABLE_DIVER_RUNTIME=1 -j 12 debug=1
 set TESTDIVER_EXE=.\build\TestDIVER.exe
+set TESTCS_EXE=.\build\TestCS.exe
 set TESTDIVER_PORT=COM18
 set TESTDIVER_BAUD=1000000
 set TESTDIVER_BIN=D:\Documents\Coral\DIVER\3rd\CoralinkerHost\data\assets\generated\TestLogic.bin
@@ -13,6 +14,7 @@ if "%1"=="build" goto build
 if "%1"=="flash" goto flash
 if "%1"=="rtt" goto rtt
 if "%1"=="test" goto test
+if "%1"=="testb" goto testb
 if "%1"=="all" goto all
 goto usage
 
@@ -41,6 +43,12 @@ echo === Running TestDIVER ===
 echo Port: %TESTDIVER_PORT%, Baud: %TESTDIVER_BAUD%
 echo Bin: %TESTDIVER_BIN%
 %TESTDIVER_EXE% %TESTDIVER_PORT% %TESTDIVER_BAUD% %TESTDIVER_BIN%
+goto end
+
+:testb
+echo === Running TestBridge ===
+echo Port: %TESTDIVER_PORT%, Baud: %TESTDIVER_BAUD%
+%TESTCS_EXE%
 goto end
 
 :all

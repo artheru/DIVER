@@ -242,6 +242,45 @@ MCUSerialBridgeError msb_version(
     return ret;
 }
 
+MCUSerialBridgeError mcu_get_layout(
+        msb_handle* handle,
+        LayoutInfoC* layout,
+        uint32_t timeout_ms)
+{
+    DBG_PRINT("GetLayout called");
+
+    // -------------------------
+    // 参数检查
+    // -------------------------
+    if (!handle) {
+        return MSB_Error_Win_HandleNotFound;
+    }
+    if (!layout) {
+        return MSB_Error_Win_InvalidParam;
+    }
+
+    MCUSerialBridgeError ret = mcu_send_packet_and_wait(
+            handle,
+            CommandGetLayout,
+            0,
+            0,
+            layout,
+            sizeof(LayoutInfoC),
+            timeout_ms);
+
+    if (ret == MSB_Error_OK) {
+        DBG_PRINT(
+                "GetLayout OK: DI=%d, DO=%d, Ports=%d",
+                layout->digital_input_count,
+                layout->digital_output_count,
+                layout->port_count);
+    } else {
+        DBG_PRINT("GetLayout failed with error [0x%08X]", ret);
+    }
+
+    return ret;
+}
+
 MCUSerialBridgeError msb_configure(
         msb_handle* handle,
         uint32_t num_ports,
@@ -673,6 +712,7 @@ void mcu_serial_bridge_get_api(MCUSerialBridgeAPI* api)
     api->msb_close = msb_close;
     api->mcu_state = mcu_state;
     api->msb_version = msb_version;
+    api->mcu_get_layout = mcu_get_layout;
     api->msb_configure = msb_configure;
     api->msb_read_input = msb_read_input;
     api->msb_write_output = msb_write_output;

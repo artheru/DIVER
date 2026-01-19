@@ -7,6 +7,10 @@
 #include "util/console.h"
 #include "util/mempool.h"
 
+#if defined(HAS_DIVER_RUNTIME) && HAS_DIVER_RUNTIME == 1
+#include "mcu_runtime.h"
+#endif
+
 /**
  * @brief 检查是否应该上报端口数据到 PC
  *
@@ -36,10 +40,13 @@ void upload_serial_packet(
     console_printf_do(
             "RECEIVED PACKET FROM SERIAL %u, len %u\n", port_index, length);
 
-    // TODO: DIVER 模式下，将数据传递给 DIVER 运行时处理
-    // if (g_mcu_state.mode == MCU_Mode_DIVER) {
-    //     diver_on_serial_data(port_index, data, length);
-    // }
+#if defined(HAS_DIVER_RUNTIME) && HAS_DIVER_RUNTIME == 1
+    // DIVER 模式下，将串口数据传递给 DIVER 运行时处理
+    if (g_mcu_state.mode == MCU_Mode_DIVER &&
+        g_mcu_state.running_state == MCU_RunState_Running) {
+        vm_put_stream_buffer((int)port_index, (uchar*)data, (int)length);
+    }
+#endif
 
     // 检查是否应该上报到 PC
     if (!should_upload_port_data()) {
@@ -74,10 +81,23 @@ void upload_can_packet(
 {
     console_printf_do("RECEIVED PACKET FROM CAN %d\n", port_index);
 
-    // TODO: DIVER 模式下，将数据传递给 DIVER 运行时处理
-    // if (g_mcu_state.mode == MCU_Mode_DIVER) {
-    //     diver_on_can_data(port_index, id_info, data_0_3, data_4_7);
-    // }
+#if defined(HAS_DIVER_RUNTIME) && HAS_DIVER_RUNTIME == 1
+    // DIVER 模式下，将 CAN 数据传递给 DIVER 运行时处理
+    if (g_mcu_state.mode == MCU_Mode_DIVER &&
+        g_mcu_state.running_state == MCU_RunState_Running) {
+        CANData can_msg;
+        can_msg.info = *(uint16_t*)&id_info;
+        memcpy(can_msg.data, &data_0_3, 4);
+        memcpy(can_msg.data + 4, &data_4_7, 4);
+        
+        uint8_t dlc = id_info.dlc > 8 ? 8 : id_info.dlc;
+        vm_put_event_buffer(
+                (int)port_index,
+                (int)id_info.id,  // eventID = CAN Standard ID
+                (uchar*)&can_msg,
+                (int)(sizeof(can_msg.info) + dlc));  // size = info(2) + payload(dlc)
+    }
+#endif
 
     // 检查是否应该上报到 PC
     if (!should_upload_port_data()) {

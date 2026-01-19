@@ -222,6 +222,39 @@ const result = await api("GET", "/api/endpoint");
 
 ---
 
-**Last Updated**: 2026-01-01
-**Status**: Core features implemented, refinements needed
+## Updates (2026-01-19)
+
+### **New MCU Integration Features**
+
+#### Layout Discovery
+- MCU reports hardware layout via `CommandGetLayout = 0x06`
+- Returns: digital I/O counts, port count, port types/names
+- Frontend shows actual port names instead of generic "Port 0"
+
+#### CANMessage API
+```csharp
+// In MCU logic (RunOnMCU.cs)
+var msg = RunOnMCU.ReadCANMessage(4, 0x100);
+RunOnMCU.WriteCANMessage(5, new CANMessage { ID = 0x100, Payload = data });
+```
+
+#### DIVER Runtime Integration
+- Serial data → `vm_put_stream_buffer()`
+- CAN data → `vm_put_event_buffer()`
+
+### **Outstanding Architecture Issues**
+
+| Issue | Description |
+|-------|-------------|
+| Connect does too much | Should only open serial + GetVersion, not Config+Program |
+| No OFFLINE state | UI shows stale data when MCU disconnects |
+| Manual mcuUri | Should be dropdown from SerialPortResolver |
+| Manual logicName | Should be dropdown from compiled artifacts |
+| Variables split | Upper/Lower split is confusing |
+| No console logs | MCU printf not forwarded to web terminal |
+
+---
+
+**Last Updated**: 2026-01-19
+**Status**: Core features complete, MCU integration improved, architecture refinements needed
 

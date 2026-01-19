@@ -109,6 +109,25 @@ DLL_EXPORT MCUSerialBridgeError
 msb_version(msb_handle* handle, VersionInfoC* version, uint32_t timeout_ms);
 
 /**
+ * @brief 获取 MCU 硬件布局信息
+ *
+ * 查询 MCU 的硬件布局，包括数字输入/输出数量、
+ * 端口数量及各端口类型和名称。
+ *
+ * @param handle
+ *      MCU 句柄指针。
+ * @param layout
+ *      返回 MCU 硬件布局信息，结构体定义参考
+ *      @ref LayoutInfoC。
+ * @param timeout_ms 超时时间（毫秒）
+ *
+ * @return MCUSerialBridgeError
+ *      错误码，MSB_Error_OK 表示成功。
+ */
+DLL_EXPORT MCUSerialBridgeError
+mcu_get_layout(msb_handle* handle, LayoutInfoC* layout, uint32_t timeout_ms);
+
+/**
  * @brief 配置MCU端口
  *
  * @param handle MCU句柄
@@ -368,6 +387,10 @@ typedef struct MCUSerialBridgeAPI {
     MCUSerialBridgeError (*msb_version)(
             msb_handle* handle,
             VersionInfoC* version,
+            uint32_t timeout_ms);
+    MCUSerialBridgeError (*mcu_get_layout)(
+            msb_handle* handle,
+            LayoutInfoC* layout,
             uint32_t timeout_ms);
     MCUSerialBridgeError (*msb_configure)(
             msb_handle*,

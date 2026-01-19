@@ -107,6 +107,14 @@ typedef enum {
     CommandEnableWireTap = 0x05,
 
     /**
+     * @brief 获取 MCU 硬件布局信息 (PC → MCU)
+     *
+     * 查询 MCU 的硬件布局，包括数字输入/输出数量及端口配置。
+     * 响应命令：0x86（同 seq，携带 LayoutInfoC 数据）。
+     */
+    CommandGetLayout = 0x06,
+
+    /**
      * @brief 启动 MCU 运行 (PC → MCU)
      *
      * 上位机命令 MCU 开始执行（DIVER 模式运行程序，或透传模式开始转发）。
@@ -312,6 +320,35 @@ typedef union {
 
 STATIC_ASSERT(sizeof(MCUStateC) == 4, "MCUStateC size must be 4 bytes");
 
+/* ===============================
+ * Layout Info
+ * =============================== */
+
+/** @brief 端口描述结构 (16 bytes) */
+typedef struct {
+    u8 port_type;     /**< 端口类型 (PortTypeC) */
+    char name[15];    /**< 端口名称 (null-terminated, e.g., "RS485-1") */
+} PortDescriptor;
+
+STATIC_ASSERT(sizeof(PortDescriptor) == 16, "PortDescriptor size must be 16 bytes");
+
+/**
+ * @brief MCU 硬件布局信息
+ *
+ * 描述 MCU 的实际硬件配置：
+ * - 数字输入数量
+ * - 数字输出数量
+ * - 端口数量及各端口详细信息
+ */
+typedef struct {
+    i8 digital_input_count;   /**< 数字输入数量 */
+    i8 digital_output_count;  /**< 数字输出数量 */
+    i8 port_count;            /**< 端口数量 */
+    u8 reserved;              /**< 保留字节（对齐） */
+    PortDescriptor ports[PACKET_MAX_PORTS_NUM]; /**< 端口描述数组 */
+} LayoutInfoC;
+
+STATIC_ASSERT(sizeof(LayoutInfoC) == 4 + 16 * PACKET_MAX_PORTS_NUM, "LayoutInfoC size error");
 
 /* ===============================
  * Port Config

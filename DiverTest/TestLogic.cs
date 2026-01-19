@@ -106,19 +106,26 @@ namespace DiverTest
             }
 
             // ========================================
-            // CAN Port Tests (port 4, event_id 0x100)
+            // CAN Port Tests: Send on port 5, Receive on port 4
             // ========================================
 
-            // Write to CAN port 4
-            byte[] can4TxData = new byte[] { 0x11, 0x22, 0x33, 0x44, (byte)(iteration & 0xFF) };
-            RunOnMCU.WriteEvent(can4TxData, 4, 0x100);
+            // Write to CAN port 5 using CANMessage
+            RunOnMCU.WriteCANMessage(
+                5,
+                new CANMessage
+                {
+                    ID = 0x100,
+                    RTR = false,
+                    Payload = new byte[] { 0x11, 0x22, 0x33, 0x44, (byte)(iteration & 0xFF) },
+                }
+            );
 
-            // Read from CAN port 4
-            byte[] can4RxData = RunOnMCU.ReadEvent(4, 0x100);
-            cart.can4RxLen = can4RxData != null ? can4RxData.Length : 0;
-            if (can4RxData is not null)
+            // Read from CAN port 4 using CANMessage
+            CANMessage can4Rx = RunOnMCU.ReadCANMessage(4, 0x100);
+            cart.can4RxLen = can4Rx?.DLC ?? 0;
+            if (can4Rx != null)
             {
-                Console.WriteLine($"CAN 4 RX: Received OK!");
+                Console.WriteLine($"CAN 4 RX: ID=0x{can4Rx.ID:X3}, DLC={can4Rx.DLC}");
             }
             else
             {

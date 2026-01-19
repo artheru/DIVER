@@ -35,7 +35,7 @@ typedef struct {
     bool in_use;                  // 是否已被占用
     bool done_flag;               // 接收到响应后置为 true
     MCUSerialBridgeError result;  // MCU返回结果
-#define RETURN_DATA_MAX_SIZE 64
+#define RETURN_DATA_MAX_SIZE 512
     uint8_t return_data[RETURN_DATA_MAX_SIZE];  // MCU 返回的额外数据
     uint32_t return_data_len;  // MCU 返回的额外数据的长度
 } SeqWaiter;

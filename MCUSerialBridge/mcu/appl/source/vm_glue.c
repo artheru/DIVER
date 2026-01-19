@@ -33,6 +33,8 @@ void write_stream(
     console_printf_do(
             "VMGlue: write_stream, stm_id = %d, len = %d\n", streamID, size);
 
+    control_vm_write_port(streamID, buffer, size);
+    
     // if (!ports_add_buffer(streamID, 0, buffer, size)) {
     //     bsp_beep_play_once(BeepMusicError);
     //     g_state = State_ExecutionError;
@@ -52,6 +54,9 @@ void write_event(
             portID,
             eventID,
             size);
+
+    control_vm_write_port(portID, buffer, size);
+
     // console_print_buffer_do(buffer, size);
     // if (!ports_add_buffer(portID, eventID, buffer, size)) {
     //     bsp_beep_play_once(BeepMusicError);

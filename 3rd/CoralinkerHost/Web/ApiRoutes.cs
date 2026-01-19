@@ -229,7 +229,7 @@ public static class ApiRoutes
             return Results.Ok(new { ok = true, path = $"assets/inputs/{name}" });
         });
 
-        app.MapPost("/api/build", async (ProjectStore store, DiverBuildService builder, CancellationToken ct) =>
+        app.MapPost("/api/build", async (ProjectStore store, DiverBuildService builder, RuntimeSessionService runtime, CancellationToken ct) =>
         {
             var state = store.Get();
             if (string.IsNullOrWhiteSpace(state.SelectedAsset))
@@ -247,6 +247,7 @@ public static class ApiRoutes
             try
             {
                 var result = await builder.BuildFromLogicCsAsync(state.SelectedAsset!, logicCs, ct);
+                runtime.SetLastBuild(result, state.SelectedAsset!);
                 // Prefer selecting the first produced *.bin.json for quick inspection
                 var firstLogic = result.Artifacts.Keys.OrderBy(k => k).FirstOrDefault();
                 // Generated artifacts are written directly under assets/generated/ (no timestamp folder).
@@ -276,7 +277,7 @@ public static class ApiRoutes
             }
         });
 
-        app.MapPost("/api/run", async (ProjectStore store, RuntimeSessionService runtime, CancellationToken ct) =>
+        app.MapPost("/api/connect", async (ProjectStore store, RuntimeSessionService runtime, CancellationToken ct) =>
         {
             var state = store.Get();
             if (string.IsNullOrWhiteSpace(state.SelectedAsset))
@@ -287,19 +288,21 @@ public static class ApiRoutes
                 store.Set(state);
             }
 
-            var assetPath = Path.Combine(store.InputsDir, state.SelectedAsset!);
-            if (!File.Exists(assetPath)) return Results.BadRequest(new { error = $"Asset not found: {state.SelectedAsset}" });
-            var logicCs = await File.ReadAllTextAsync(assetPath, Encoding.UTF8, ct);
-
             try
             {
-                var snap = await runtime.RunAsync(state, state.SelectedAsset!, logicCs, ct);
-                return Results.Json(snap);
+                var nodes = await runtime.ConnectAsync(state, ct);
+                return Results.Ok(new { ok = true, nodes });
             }
             catch (Exception ex)
             {
                 return Results.BadRequest(new { ok = false, error = ex.Message });
             }
+        });
+
+        app.MapPost("/api/start", async (RuntimeSessionService runtime, CancellationToken ct) =>
+        {
+            await runtime.StartAsync(ct);
+            return Results.Ok(new { ok = true });
         });
 
         app.MapPost("/api/stop", async (RuntimeSessionService runtime, CancellationToken ct) =>
@@ -308,10 +311,11 @@ public static class ApiRoutes
             return Results.Ok();
         });
 
-        app.MapPost("/api/connectAll", () =>
+        // Backward-compatible alias
+        app.MapPost("/api/run", async (RuntimeSessionService runtime, CancellationToken ct) =>
         {
-            // Pending: pre-connect nodes without starting code.
-            return Results.Ok(new { ok = true, status = "Pending" });
+            await runtime.StartAsync(ct);
+            return Results.Ok(new { ok = true });
         });
 
         app.MapPost("/api/command", async (TerminalBroadcaster term, HttpRequest req, CancellationToken ct) =>
@@ -325,6 +329,42 @@ public static class ApiRoutes
         });
 
         app.MapGet("/api/runtime", (RuntimeSessionService runtime) => Results.Json(runtime.GetSnapshot()));
+
+        app.MapPost("/api/node/{nodeId}/ports", async (
+            string nodeId,
+            HttpRequest req,
+            TerminalBroadcaster term,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var payload = await req.ReadFromJsonAsync<PortConfigRequest>(cancellationToken: ct);
+                if (payload?.Ports == null)
+                    return Results.BadRequest(new { error = "Missing ports array" });
+
+                var session = CoralinkerSDK.DIVERSession.Instance;
+                var node = session.GetNode(nodeId);
+                if (node == null)
+                    return Results.NotFound(new { error = $"Node '{nodeId}' not found" });
+
+                var configs = new List<MCUSerialBridgeCLR.PortConfig>();
+                foreach (var p in payload.Ports)
+                {
+                    if (string.Equals(p.Type, "CAN", StringComparison.OrdinalIgnoreCase))
+                        configs.Add(new MCUSerialBridgeCLR.CANPortConfig(p.Baud, p.RetryTimeMs ?? 10));
+                    else
+                        configs.Add(new MCUSerialBridgeCLR.SerialPortConfig(p.Baud, p.ReceiveFrameMs ?? 0));
+                }
+                node.PortConfigs = configs.ToArray();
+
+                await term.LineAsync($"[api] Port config updated for node '{nodeId}'", ct);
+                return Results.Ok(new { ok = true });
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { ok = false, error = ex.Message });
+            }
+        });
 
         app.MapGet("/api/project/export", (ProjectStore store) =>
         {
@@ -381,5 +421,9 @@ public sealed record FileWriteRequest(string Path, string Kind, string? Text, st
 public sealed record FileDeleteRequest(string Path);
 
 public sealed record NewInputRequest(string Name, string? Template);
+
+public sealed record PortConfigRequest(PortConfigItem[] Ports);
+
+public sealed record PortConfigItem(string Type, uint Baud, uint? ReceiveFrameMs, uint? RetryTimeMs);
 
 

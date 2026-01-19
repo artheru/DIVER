@@ -128,10 +128,17 @@
       <button id="btnImport" class="iconBtn" title="Import from local">Import</button>
       <input id="importFile" type="file" accept="application/json" class="hidden" />
       <div class="spacer"></div>
-      <button id="btnConnectAll" class="iconBtn" title="Connect all (Pending)">Connect</button>
       <button id="btnBuild" class="iconBtn" title="Build">Build</button>
       <button id="btnClearTerminal" class="iconBtn" title="Clear terminal">Clear</button>
-      <button id="btnRun" class="iconBtn primary" title="Run">▶ Run</button>
+      <div class="toolbarDivider" aria-hidden="true"></div>
+      <button id="btnConnectAll" class="iconBtn withIcon" title="Connect">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="M6.2 6.2a4 4 0 0 1 5.6 0l.9.9a3 3 0 0 1 0 4.2l-1.3 1.3a3 3 0 0 1-4.2 0l-.7-.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          <path d="M13.8 13.8a4 4 0 0 1-5.6 0l-.9-.9a3 3 0 0 1 0-4.2l1.3-1.3a3 3 0 0 1 4.2 0l.7.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        <span>Connect</span>
+      </button>
+      <button id="btnRun" class="iconBtn primary" title="Start">▶ Start</button>
       <button id="btnStop" class="iconBtn danger" title="Stop">■ Stop</button>
     </div>
 

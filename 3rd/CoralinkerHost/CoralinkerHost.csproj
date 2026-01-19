@@ -22,6 +22,14 @@
     <Folder Include="res\" />
   </ItemGroup>
 
+  <Target Name="CopyMcuSerialBridgeDll" AfterTargets="Build">
+    <Copy
+      SourceFiles="$(ProjectDir)..\..\MCUSerialBridge\build\mcu_serial_bridge.dll"
+      DestinationFolder="$(OutDir)"
+      SkipUnchangedFiles="true"
+      Condition="Exists('$(ProjectDir)..\..\MCUSerialBridge\build\mcu_serial_bridge.dll')" />
+  </Target>
+
   <!-- Do not treat runtime workspace state as source code -->
   <ItemGroup>
     <Compile Remove="data\**\*.cs" />

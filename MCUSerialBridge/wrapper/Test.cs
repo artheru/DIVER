@@ -95,6 +95,22 @@ namespace MCUTest
                 Log("MSB GetVersion OK: {0}", version.ToString());
             }
 
+            err = bridge.GetLayout(out var layout, 100);
+            if (err != MCUSerialBridgeError.OK)
+            {
+                Log("MSB GetLayout FAILED: {0}", err.ToDescription());
+                return;
+            }
+            else
+            {
+                Log("MSB GetLayout OK: {0}", layout.ToString());
+                var validPorts = layout.GetValidPorts();
+                for (int i = 0; i < validPorts.Length; i++)
+                {
+                    Log("  Port[{0}]: {1}", i, validPorts[i].ToString());
+                }
+            }
+
             err = bridge.GetState(out var state, 100);
             if (err != MCUSerialBridgeError.OK)
             {
@@ -289,7 +305,6 @@ namespace MCUTest
                     {
                         ID = canIdBase,
                         RTR = false,
-                        DLC = 8,
                         Payload = new byte[8],
                     };
                     for (int i = 0; i < 8; i++)

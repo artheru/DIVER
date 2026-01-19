@@ -15,23 +15,28 @@ public static class HostRuntime
     #region Variable Storage
 
     /// <summary>
-    /// 节点变量存储: nodeId -> (fieldName -> value)
+    /// 全局变量存储: fieldName -> value
     /// </summary>
-    private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, object>> _nodeVariables = new();
+    private static readonly ConcurrentDictionary<string, object> _variables = new();
+
+    /// <summary>
+    /// 节点迭代计数存储: nodeId -> iteration
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, int> _nodeIterations = new();
 
     /// <summary>
     /// 初始化节点变量存储（根据 CartFields 设置默认值）
     /// </summary>
     public static void InitializeNodeVariables(string nodeId, CartFieldInfo[] fields)
     {
-        var vars = _nodeVariables.GetOrAdd(nodeId, _ => new ConcurrentDictionary<string, object>());
         foreach (var field in fields)
         {
-            if (!vars.ContainsKey(field.Name))
+            if (!_variables.ContainsKey(field.Name))
             {
-                vars[field.Name] = GetDefaultValue(field.TypeId);
+                _variables[field.Name] = GetDefaultValue(field.TypeId);
             }
         }
+        _nodeIterations.TryAdd(nodeId, 0);
     }
 
     /// <summary>
@@ -39,11 +44,9 @@ public static class HostRuntime
     /// </summary>
     public static object? GetCartVariable(string nodeId, string fieldName)
     {
-        if (_nodeVariables.TryGetValue(nodeId, out var vars) && vars.TryGetValue(fieldName, out var value))
-        {
-            return value;
-        }
-        return null;
+        if (fieldName == "__iteration")
+            return _nodeIterations.TryGetValue(nodeId, out var iteration) ? iteration : null;
+        return _variables.TryGetValue(fieldName, out var value) ? value : null;
     }
 
     /// <summary>
@@ -56,8 +59,13 @@ public static class HostRuntime
             return typed;
         if (value != null)
         {
-            try { return (T)Convert.ChangeType(value, typeof(T)); }
-            catch { }
+            try
+            {
+                return (T)Convert.ChangeType(value, typeof(T));
+            }
+            catch
+            {
+            }
         }
         return default;
     }
@@ -67,16 +75,29 @@ public static class HostRuntime
     /// </summary>
     public static void SetCartVariable(string nodeId, string fieldName, object value)
     {
-        var vars = _nodeVariables.GetOrAdd(nodeId, _ => new ConcurrentDictionary<string, object>());
-        vars[fieldName] = value;
+        if (fieldName == "__iteration")
+        {
+            _nodeIterations[nodeId] = Convert.ToInt32(value);
+            return;
+        }
+        _variables[fieldName] = value;
     }
 
     /// <summary>
     /// 获取节点所有变量
     /// </summary>
-    public static IReadOnlyDictionary<string, object>? GetAllVariables(string nodeId)
+    public static IReadOnlyDictionary<string, object> GetAllVariables()
     {
-        return _nodeVariables.TryGetValue(nodeId, out var vars) ? vars : null;
+        return _variables;
+    }
+
+    /// <summary>
+    /// 获取所有变量（兼容旧 API）
+    /// </summary>
+    public static IReadOnlyDictionary<string, object> GetAllVariables(string nodeId)
+    {
+        _ = nodeId;
+        return _variables;
     }
 
     /// <summary>
@@ -84,7 +105,7 @@ public static class HostRuntime
     /// </summary>
     public static void ClearNodeVariables(string nodeId)
     {
-        _nodeVariables.TryRemove(nodeId, out _);
+        _nodeIterations.TryRemove(nodeId, out _);
     }
 
     /// <summary>
@@ -92,7 +113,16 @@ public static class HostRuntime
     /// </summary>
     public static void ClearAllVariables()
     {
-        _nodeVariables.Clear();
+        _variables.Clear();
+        _nodeIterations.Clear();
+    }
+
+    /// <summary>
+    /// 获取节点迭代计数
+    /// </summary>
+    public static int? GetIteration(string nodeId)
+    {
+        return _nodeIterations.TryGetValue(nodeId, out var iteration) ? iteration : null;
     }
 
     #endregion
@@ -102,15 +132,15 @@ public static class HostRuntime
     /// <summary>
     /// 默认端口配置
     /// </summary>
-    public static PortConfig[] DefaultPortConfigs => new PortConfig[]
-    {
-        new SerialPortConfig(9600, 20),  // Port 0: RS485-1
-        new SerialPortConfig(9600, 20),  // Port 1: RS485-2
-        new SerialPortConfig(9600, 20),  // Port 2: RS485-3
-        new SerialPortConfig(9600, 20),  // Port 3: RS232-1
-        new CANPortConfig(500000, 10),   // Port 4: CAN1
-        new CANPortConfig(500000, 10),   // Port 5: CAN2
-    };
+    public static PortConfig[] DefaultPortConfigs =>
+    [
+        new SerialPortConfig(9600, 20), // Port 0: RS485-1
+        new SerialPortConfig(9600, 20), // Port 1: RS485-2
+        new SerialPortConfig(9600, 20), // Port 2: RS485-3
+        new SerialPortConfig(9600, 20), // Port 3: RS232-1
+        new CANPortConfig(500000, 10),  // Port 4: CAN1
+        new CANPortConfig(500000, 10),  // Port 5: CAN2
+    ];
 
     #endregion
 
@@ -132,9 +162,11 @@ public static class HostRuntime
 
         // 启发式查找: 优先选择名称以 "Vehicle" 结尾的类型，否则选择第一个可实例化的类
         var type =
-            asm.GetTypes().FirstOrDefault(t => t is { IsAbstract: false, IsClass: true } 
+            asm.GetTypes().FirstOrDefault(t =>
+                t is { IsAbstract: false, IsClass: true }
                 && t.Name.EndsWith("Vehicle", StringComparison.OrdinalIgnoreCase))
-            ?? asm.GetTypes().First(t => t is { IsAbstract: false, IsClass: true } 
+            ?? asm.GetTypes().First(t =>
+                t is { IsAbstract: false, IsClass: true }
                 && t.GetConstructor(Type.EmptyTypes) != null);
 
         return Activator.CreateInstance(type)!;
@@ -151,12 +183,13 @@ public static class HostRuntime
         if (entries == null) return Array.Empty<CartFieldInfo>();
 
         return entries.Select(e => new CartFieldInfo
-        {
-            Name = e.field ?? "",
-            Offset = e.offset,
-            TypeId = (byte)e.typeid,
-            Flags = (byte)e.flags
-        }).ToArray();
+            {
+                Name = e.field ?? "",
+                Offset = e.offset,
+                TypeId = (byte)e.typeid,
+                Flags = (byte)e.flags,
+            })
+            .ToArray();
     }
 
     /// <summary>
@@ -167,12 +200,17 @@ public static class HostRuntime
         var type = cartTarget.GetType();
         foreach (var field in fields)
         {
-            field.ReflectionInfo = type.GetField(field.Name, 
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-            
+            field.ReflectionInfo = type.GetField(
+                field.Name,
+                BindingFlags.Public
+                | BindingFlags.NonPublic
+                | BindingFlags.Instance
+                | BindingFlags.Static);
+
             if (field.ReflectionInfo == null)
             {
-                Console.WriteLine($"[HostRuntime] Warning: Field '{field.Name}' not found in {type.FullName}");
+                Console.WriteLine(
+                    $"[HostRuntime] Warning: Field '{field.Name}' not found in {type.FullName}");
             }
         }
     }
@@ -252,7 +290,8 @@ public static class HostRuntime
             if (!field.IsUpperIO && !field.IsMutual) continue;
 
             bw.Write(field.TypeId);
-            var val = GetCartVariable(nodeId, field.Name) ?? GetDefaultValue(field.TypeId);
+            var val = GetCartVariable(nodeId, field.Name)
+                      ?? GetDefaultValue(field.TypeId);
             WriteTypedValue(bw, field.TypeId, val);
         }
 
@@ -266,7 +305,10 @@ public static class HostRuntime
     /// <param name="data">LowerIO 字节数据</param>
     /// <param name="fields">字段信息</param>
     /// <returns>解析结果（字段名 -> 值）</returns>
-    public static Dictionary<string, object> DeserializeLowerIO(string nodeId, byte[] data, CartFieldInfo[] fields)
+    public static Dictionary<string, object> DeserializeLowerIO(
+        string nodeId,
+        byte[] data,
+        CartFieldInfo[] fields)
     {
         var result = new Dictionary<string, object>();
         using var ms = new MemoryStream(data);
@@ -352,7 +394,7 @@ public static class HostRuntime
             6 => br.ReadInt32(),
             7 => br.ReadUInt32(),
             8 => br.ReadSingle(),
-            _ => null
+            _ => null,
         };
     }
 
@@ -361,15 +403,33 @@ public static class HostRuntime
         val ??= GetDefaultValue(typeid);
         switch (typeid)
         {
-            case 0: bw.Write(Convert.ToBoolean(val)); break;
-            case 1: bw.Write(Convert.ToByte(val)); break;
-            case 2: bw.Write(Convert.ToSByte(val)); break;
-            case 3: bw.Write(Convert.ToChar(val)); break;
-            case 4: bw.Write(Convert.ToInt16(val)); break;
-            case 5: bw.Write(Convert.ToUInt16(val)); break;
-            case 6: bw.Write(Convert.ToInt32(val)); break;
-            case 7: bw.Write(Convert.ToUInt32(val)); break;
-            case 8: bw.Write(Convert.ToSingle(val)); break;
+            case 0:
+                bw.Write(Convert.ToBoolean(val));
+                break;
+            case 1:
+                bw.Write(Convert.ToByte(val));
+                break;
+            case 2:
+                bw.Write(Convert.ToSByte(val));
+                break;
+            case 3:
+                bw.Write(Convert.ToChar(val));
+                break;
+            case 4:
+                bw.Write(Convert.ToInt16(val));
+                break;
+            case 5:
+                bw.Write(Convert.ToUInt16(val));
+                break;
+            case 6:
+                bw.Write(Convert.ToInt32(val));
+                break;
+            case 7:
+                bw.Write(Convert.ToUInt32(val));
+                break;
+            case 8:
+                bw.Write(Convert.ToSingle(val));
+                break;
         }
     }
 
@@ -389,7 +449,7 @@ public static class HostRuntime
             6 => 0,
             7 => 0u,
             8 => 0f,
-            _ => 0
+            _ => 0,
         };
     }
 
@@ -409,7 +469,7 @@ public static class HostRuntime
             6 => "Int32",
             7 => "UInt32",
             8 => "Single",
-            _ => $"Unknown({typeid})"
+            _ => $"Unknown({typeid})",
         };
     }
 

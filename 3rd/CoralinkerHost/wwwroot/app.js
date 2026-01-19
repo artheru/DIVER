@@ -55,9 +55,54 @@ function fmtBytes(n) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-async function connectAll() {
-  await api("POST", "/api/connectAll");
-  logTerminal("[ui] Connect all requested.");
+async function connectSession() {
+  const res = await api("POST", "/api/connect");
+  if (res?.nodes) applyNodeRuntimeInfo(res.nodes);
+  logTerminal("[ui] Connect requested.");
+}
+
+function applyNodeRuntimeInfo(nodes) {
+  if (!graph || !Array.isArray(nodes)) return;
+  const byId = new Map(nodes.map((n) => [String(n.nodeId), n]));
+  for (const node of graph._nodes || []) {
+    const info = byId.get(String(node.id));
+    if (!info) continue;
+    applyNodeVersionInfo(node, info.version || null);
+    node.setDirtyCanvas(true, true);
+  }
+}
+
+function applyNodeVersionInfo(node, version) {
+  if (!node || !version) return;
+  node.properties.versionInfo = {
+    productionName: version.productionName || "",
+    gitTag: version.gitTag || "",
+    gitCommit: version.gitCommit || "",
+    buildTime: version.buildTime || "",
+  };
+  node.properties.version = version.gitTag || "";
+  node.properties.info = version.productionName || "";
+}
+
+function applyNodeSnapshot(snap) {
+  if (!graph || !snap || !Array.isArray(snap.nodes)) return;
+  const byNodeId = new Map(snap.nodes.map((n) => [String(n.nodeId), n]));
+  for (const node of graph._nodes || []) {
+    const info = byNodeId.get(String(node.id));
+    if (!info) continue;
+    // Update state fields
+    if (info.runState) node.properties.runState = String(info.runState);
+    node.properties.isConfigured = !!info.isConfigured;
+    node.properties.isProgrammed = !!info.isProgrammed;
+    node.properties.mode = info.mode || "Unknown";
+    // Update version info
+    if (info.version) applyNodeVersionInfo(node, info.version);
+    // Update layout info
+    if (info.layout) node.properties.layout = info.layout;
+    // Update ports
+    if (Array.isArray(info.ports)) node.properties.ports = info.ports;
+    node.setDirtyCanvas(true, true);
+  }
 }
 
 async function api(method, path, body) {
@@ -439,8 +484,8 @@ function installNodeResizing(lgCanvas) {
 
     const node = r.node;
     // Keep enough space for our custom UI sections (status + tools).
-    const minW = node.type === "coral/root" ? 200 : 260;
-    const minH = node.type === "coral/root" ? 90 : 210;
+    const minW = node.type === "coral/root" ? 200 : 400;
+    const minH = node.type === "coral/root" ? 90 : 480;
 
     let x = r.startPos[0];
     let y = r.startPos[1];
@@ -576,17 +621,20 @@ function registerLiteGraphNodes() {
   CoralNode = class extends LiteGraph.LGraphNode {
     constructor(title = "node") {
       super(title);
-      this.size = [260, 210];
+      this.size = [300, 360];
       this.resizable = true;
       this.flags = this.flags || {};
-      this.flags.resizable = true;  // Explicitly enable resizing
+      this.flags.resizable = true;
       this.properties = this.properties || {};
-      this.properties.mcuUri ??= "serial://COM3,2000000";
+      this.properties.mcuUri ??= "serial://name=COM3&baudrate=1000000";
       this.properties.logicName ??= "TestLogic";
-      // Status fields are indicators, not editable widgets
-      this.properties.state ??= "offline"; // offline | idle | running
-      this.properties.version ??= "??";
-      this.properties.info ??= "??";
+      // Runtime state from MCU (updated via nodeSnapshot)
+      this.properties.runState ??= "offline";
+      this.properties.isConfigured ??= false;
+      this.properties.isProgrammed ??= false;
+      this.properties.mode ??= "Unknown";
+      this.properties.versionInfo ??= null;
+      this.properties.ports ??= [];
 
       this.addInput("in", "flow");
       this.addOutput("out", "flow");
@@ -594,9 +642,9 @@ function registerLiteGraphNodes() {
       this.addWidget("text", "mcuUri", this.properties.mcuUri, (v) => (this.properties.mcuUri = v));
       this.addWidget("text", "logicName", this.properties.logicName, (v) => (this.properties.logicName = v));
 
-      this.__ui = { updateRect: null, configRect: null };
+      this.__ui = { updateRect: null, configPortRect: null };
     }
-    
+
     onPropertyChanged(name, value) {
       this.properties[name] = value;
     }
@@ -607,48 +655,111 @@ function registerLiteGraphNodes() {
       const gap = 4;
       const w = this.size[0];
       const h = this.size[1];
-
-      // separators between sections: props / status / tools
-      const propsCount = 2; // mcuUri + logicName only
+      const propsCount = 2;
       const afterPropsY = titleH + propsCount * (widgetH + gap) + 6;
       _drawSeparator(ctx, afterPropsY, w);
 
-      // Status block (read-only indicators)
-      const state = String(this.properties.state || "offline");
-      const offline = String(state).toLowerCase() === "offline";
-      const ver = offline ? "??" : String(this.properties.version || "??");
-      const info = offline ? "??" : String(this.properties.info || "??");
+      const runState = String(this.properties.runState || "offline");
+      const offline = runState.toLowerCase() === "offline";
+      const v = this.properties.versionInfo || {};
+      const ports = this.properties.ports || [];
 
-      const y0 = afterPropsY + 10;
       ctx.save();
-      ctx.font = "12px ui-sans-serif, system-ui, Segoe UI, Roboto, Arial";
+      ctx.font = "11px ui-sans-serif, system-ui, Segoe UI, Roboto, Arial";
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
-      ctx.fillStyle = "rgba(214,226,255,0.75)";
-      ctx.fillText("State", 10, y0);
-      // dot + value
+
+      let y0 = afterPropsY + 12;
+
+      // State line: Running/Idle/Error + Configured + Programmed + Mode
+      ctx.fillStyle = "rgba(214,226,255,0.6)";
+      ctx.fillText("State:", 10, y0);
+      ctx.fillStyle = _stateColor(runState);
       ctx.beginPath();
-      ctx.fillStyle = _stateColor(state);
-      ctx.arc(60, y0, 4.2, 0, Math.PI * 2);
+      ctx.arc(50, y0, 4, 0, Math.PI * 2);
       ctx.fill();
+      const flags = [];
+      flags.push(runState.toUpperCase());
+      if (this.properties.isConfigured) flags.push("Cfg");
+      if (this.properties.isProgrammed) flags.push("Prog");
+      flags.push(this.properties.mode === "DIVER" ? "DIVER" : "Bridge");
       ctx.fillStyle = "rgba(214,226,255,0.95)";
-      ctx.fillText(String(state).toUpperCase(), 70, y0);
+      ctx.fillText(flags.join(" | "), 58, y0);
+      y0 += 16;
 
-      ctx.fillStyle = "rgba(214,226,255,0.75)";
-      ctx.fillText("Version", 10, y0 + 18);
+      // Product: ProductionName
+      ctx.fillStyle = "rgba(214,226,255,0.6)";
+      ctx.fillText("Product:", 10, y0);
       ctx.fillStyle = "rgba(214,226,255,0.95)";
-      ctx.fillText(ver, 70, y0 + 18);
+      ctx.fillText(offline ? "??" : (v.productionName || "??"), 58, y0);
+      y0 += 16;
 
-      ctx.fillStyle = "rgba(214,226,255,0.75)";
-      ctx.fillText("Info", 10, y0 + 36);
+      // Version: Commit(Tag) + BuildTime
+      ctx.fillStyle = "rgba(214,226,255,0.6)";
+      ctx.fillText("Version:", 10, y0);
+      const commit = v.gitCommit || "";
+      const tag = v.gitTag || "";
+      const buildTime = v.buildTime || "";
+      const verStr = offline ? "??" : `${commit}(${tag}) ${buildTime}`.trim();
       ctx.fillStyle = "rgba(214,226,255,0.95)";
-      ctx.fillText(info, 70, y0 + 36);
+      ctx.fillText(verStr.substring(0, 35), 58, y0);
+      y0 += 20;
+
+      _drawSeparator(ctx, y0 - 4, w);
+
+      // Snapshots: use layout if available
+      const layout = this.properties.layout;
+      const diCount = layout?.digitalInputCount ?? 16;
+      const doCount = layout?.digitalOutputCount ?? 16;
+      const portCount = layout?.portCount ?? ports.length ?? 0;
+
+      ctx.fillStyle = "rgba(214,226,255,0.6)";
+      ctx.fillText("Snapshots:", 10, y0 + 6);
+      y0 += 18;
+      // Input row
+      ctx.fillStyle = "rgba(214,226,255,0.5)";
+      ctx.fillText(`In(${diCount}):`, 10, y0);
+      const maxLightsPerRow = Math.min(diCount, 16);
+      for (let i = 0; i < maxLightsPerRow; i++) {
+        ctx.beginPath();
+        ctx.fillStyle = "rgba(100,100,100,0.5)";
+        ctx.arc(50 + i * 14, y0, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      y0 += 14;
+      // Output row
+      ctx.fillStyle = "rgba(214,226,255,0.5)";
+      ctx.fillText(`Out(${doCount}):`, 10, y0);
+      const maxOutputLights = Math.min(doCount, 16);
+      for (let i = 0; i < maxOutputLights; i++) {
+        ctx.beginPath();
+        ctx.fillStyle = "rgba(100,100,100,0.5)";
+        ctx.arc(50 + i * 14, y0, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      y0 += 18;
+
+      _drawSeparator(ctx, y0 - 4, w);
+
+      // Ports
+      ctx.fillStyle = "rgba(214,226,255,0.6)";
+      ctx.fillText(`Ports: ${portCount} Total`, 10, y0 + 6);
+      y0 += 18;
+      ctx.font = "10px ui-monospace, monospace";
+      const maxPortsToShow = Math.min(portCount || ports.length, 8);
+      for (let i = 0; i < maxPortsToShow; i++) {
+        const p = ports[i];
+        const portName = p?.name || `Port${i}`;
+        const pStr = p ? `[${i}] ${portName}: ${p.type}, ${p.baud}` : `[${i}] --`;
+        ctx.fillStyle = "rgba(214,226,255,0.7)";
+        ctx.fillText(pStr.substring(0, 45), 10, y0);
+        y0 += 12;
+      }
       ctx.restore();
 
-      const toolsSepY = y0 + 48;
-      _drawSeparator(ctx, toolsSepY, w);
+      _drawSeparator(ctx, h - 40, w);
 
-      // Tool buttons
+      // Bottom buttons: UpdateFW, ConfigPort
       const btnH = 22;
       const pad = 10;
       const gapBtn = 8;
@@ -657,11 +768,11 @@ function registerLiteGraphNodes() {
       const r1 = { x: pad, y: btnY, w: btnW, h: btnH };
       const r2 = { x: pad + btnW + gapBtn, y: btnY, w: btnW, h: btnH };
       this.__ui.updateRect = r1;
-      this.__ui.configRect = r2;
+      this.__ui.configPortRect = r2;
       _drawButton(ctx, r1, "Update FW", true);
-      _drawButton(ctx, r2, "Config", false);
+      _drawButton(ctx, r2, "Config Port", false);
 
-      // Visible resize handle (bottom-right), ~10x10 triangle for easy discovery
+      // Resize handle
       try {
         const s = this.size;
         const x = s[0] - 2;
@@ -697,29 +808,75 @@ function registerLiteGraphNodes() {
         );
         return true;
       }
-      if (_hitRect(pos, this.__ui?.configRect)) {
-        showGenericDialog(
-          "Node Config",
-          `<div style="color:var(--muted);margin-bottom:10px;">Edit config for this node.</div>
-           <label style="display:block;margin:8px 0;color:var(--muted);">Version</label>
-           <input id="dlgVersion" class="dialogInput" value="${escapeHtml(this.properties.version || "")}" />
-           <label style="display:block;margin:8px 0;color:var(--muted);">Info</label>
-           <input id="dlgInfo" class="dialogInput" value="${escapeHtml(this.properties.info || "")}" />`,
-          () => {
-            const verEl = byId("dlgVersion");
-            const infoEl = byId("dlgInfo");
-            this.properties.version = verEl?.value || "";
-            this.properties.info = infoEl?.value || "";
-            // If user configures, consider node at least idle if it was offline.
-            if (String(this.properties.state || "").toLowerCase() === "offline") this.properties.state = "idle";
-            this.setDirtyCanvas(true, true);
-            scheduleAutoSave("node config");
-          },
-          "Save"
-        );
+      if (_hitRect(pos, this.__ui?.configPortRect)) {
+        this._showPortConfigDialog();
         return true;
       }
       return false;
+    }
+
+    _showPortConfigDialog() {
+      const ports = this.properties.ports || [];
+      const layout = this.properties.layout;
+      const nodeId = this.id;
+      const portCount = layout?.portCount ?? ports.length ?? 0;
+
+      if (portCount === 0) {
+        showGenericDialog(
+          "Port Configuration",
+          `<div style="color:var(--muted);">No ports available. Connect to MCU first to discover hardware layout.</div>`,
+          () => {},
+          "Close"
+        );
+        return;
+      }
+
+      let html = `<div style="color:var(--muted);margin-bottom:10px;">Configure ${portCount} port(s)</div>`;
+      for (let i = 0; i < portCount; i++) {
+        const p = ports[i] || {};
+        const portName = p.name || `Port ${i}`;
+        const layoutType = p.layoutType || "Serial";
+        const isSerial = (p.type || layoutType) === "Serial";
+        const isCAN = layoutType === "CAN";
+        html += `
+          <div style="margin:8px 0;padding:8px;background:rgba(0,0,0,0.2);border-radius:4px;">
+            <div style="color:var(--text);font-weight:600;margin-bottom:4px;">[${i}] ${escapeHtml(portName)} <span style="color:var(--muted);font-weight:normal;">(${layoutType})</span></div>
+            <label style="display:inline-block;width:50px;color:var(--muted);">Baud:</label>
+            <input id="portBaud${i}" class="dialogInput" style="width:100px;" type="number" value="${p.baud || (isCAN ? 500000 : 9600)}" />
+            ${isCAN ? `
+              <label style="display:inline-block;width:70px;margin-left:10px;color:var(--muted);">RetryMs:</label>
+              <input id="portExtra${i}" class="dialogInput" style="width:60px;" type="number" value="${p.retryTimeMs || 10}" />
+            ` : `
+              <label style="display:inline-block;width:70px;margin-left:10px;color:var(--muted);">FrameMs:</label>
+              <input id="portExtra${i}" class="dialogInput" style="width:60px;" type="number" value="${p.receiveFrameMs || 0}" />
+            `}
+            <input type="hidden" id="portType${i}" value="${layoutType}" />
+          </div>`;
+      }
+      showGenericDialog(
+        "Port Configuration",
+        html,
+        () => {
+          const newPorts = [];
+          for (let i = 0; i < portCount; i++) {
+            const type = byId(`portType${i}`)?.value || "Serial";
+            const baud = parseInt(byId(`portBaud${i}`)?.value || "9600", 10);
+            const extra = parseInt(byId(`portExtra${i}`)?.value || "20", 10);
+            if (type === "CAN") {
+              newPorts.push({ type, baud, retryTimeMs: extra });
+            } else {
+              newPorts.push({ type, baud, receiveFrameMs: extra });
+            }
+          }
+          this.properties.ports = newPorts;
+          api("POST", `/api/node/${nodeId}/ports`, { ports: newPorts })
+            .then(() => logTerminal(`[ui] Port config saved for node ${nodeId}`))
+            .catch((err) => logTerminal(`[ui] Port config save failed: ${err.message}`));
+          this.setDirtyCanvas(true, true);
+          scheduleAutoSave("port config");
+        },
+        "Save"
+      );
     }
   };
 
@@ -735,19 +892,12 @@ function registerLiteGraphNodes() {
       this.properties.mcuUri ??= "PC";
       this.properties.logicName ??= "Root";
       this.addOutput("out", "flow");
-      this.__ui = { connectRect: null };
+      this.__ui = {};
     }
 
     onDrawForeground(ctx) {
       const w = this.size[0];
       const h = this.size[1];
-
-      // Root toolbox: Connect All (moved from bottom toolbar)
-      const btnH = 22;
-      const pad = 10;
-      const r = { x: pad, y: h - btnH - 10, w: w - pad * 2, h: btnH };
-      this.__ui.connectRect = r;
-      _drawButton(ctx, r, "Connect All", true);
 
       // Visible resize handle (bottom-right), ~10x10 triangle
       try {
@@ -772,11 +922,7 @@ function registerLiteGraphNodes() {
       }
     }
 
-    onMouseDown(e, pos) {
-      if (_hitRect(pos, this.__ui?.connectRect)) {
-        connectAll().catch((err) => logTerminal(`[ui] Connect All failed: ${err.message || String(err)}`));
-        return true;
-      }
+    onMouseDown() {
       return false;
     }
   };
@@ -1086,8 +1232,8 @@ async function loadServerProject() {
         node.pos = [n.x, n.y];
         if (typeof n.w === "number" && typeof n.h === "number") {
           // Enforce minimum sizes so the node UI is never cramped (status + tool buttons)
-          const minW = type === "coral/root" ? 200 : 260;
-          const minH = type === "coral/root" ? 90 : 210;
+          const minW = type === "coral/root" ? 200 : 300;
+          const minH = type === "coral/root" ? 90 : 360;
           node.size = [Math.max(minW, n.w), Math.max(minH, n.h)];
         }
         node.properties = node.properties || {};
@@ -2270,6 +2416,7 @@ async function initSignalR() {
 
     conn.on("terminalLine", (line) => logTerminal(line));
     conn.on("varsSnapshot", (snap) => renderVars(snap));
+    conn.on("nodeSnapshot", (snap) => applyNodeSnapshot(snap));
 
     await conn.start();
     logTerminal("[ui] Connected to terminal hub.");
@@ -2494,11 +2641,10 @@ function initButtons() {
     if (file) importProjectFile(file);
   };
 
-  // Connect All moved into Root node toolbox. Keep toolbar button hidden as a fallback.
   const connectBtn = byId("btnConnectAll");
   if (connectBtn) {
-    connectBtn.style.display = "none";
-    connectBtn.onclick = () => connectAll().catch((err) => logTerminal(`[ui] Connect all failed: ${err.message || String(err)}`));
+    connectBtn.style.display = "";
+    connectBtn.onclick = () => connectSession().catch((err) => logTerminal(`[ui] Connect failed: ${err.message || String(err)}`));
   }
 
   byId("btnBuild").onclick = async () => {
@@ -2551,8 +2697,8 @@ function initButtons() {
         logTerminal("[ui] Select a .cs asset first.");
         return;
       }
-      await api("POST", "/api/run");
-      logTerminal("[ui] Run requested.");
+      await api("POST", "/api/start");
+      logTerminal("[ui] Start requested.");
     } catch (e) {
       logTerminal(String(e));
     } finally {

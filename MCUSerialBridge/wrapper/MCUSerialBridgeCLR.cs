@@ -203,6 +203,80 @@ namespace MCUSerialBridgeCLR
     }
 
     /// <summary>
+    /// 端口类型枚举
+    /// </summary>
+    public enum PortType : byte
+    {
+        /// <summary>串口</summary>
+        Serial = 0x01,
+        /// <summary>CAN 总线</summary>
+        CAN = 0x02,
+        /// <summary>LED / IO 类端口</summary>
+        LED = 0x03,
+    }
+
+    /// <summary>
+    /// 端口描述符结构体 (16 bytes)
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi, Size = 16)]
+    public struct PortDescriptor
+    {
+        /// <summary>端口类型</summary>
+        public PortType Type;
+
+        /// <summary>端口名称（最多15字符，null-terminated）</summary>
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 15)]
+        public string Name;
+
+        /// <summary>
+        /// 转换为可读字符串
+        /// </summary>
+        public override string ToString() => $"{Type}: {Name}";
+    }
+
+    /// <summary>
+    /// MCU 硬件布局信息结构体
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LayoutInfo
+    {
+        /// <summary>数字输入数量</summary>
+        public sbyte DigitalInputCount;
+
+        /// <summary>数字输出数量</summary>
+        public sbyte DigitalOutputCount;
+
+        /// <summary>端口数量</summary>
+        public sbyte PortCount;
+
+        /// <summary>保留字节（对齐）</summary>
+        public byte Reserved;
+
+        /// <summary>端口描述数组（最多16个）</summary>
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+        public PortDescriptor[] Ports;
+
+        /// <summary>
+        /// 获取有效的端口描述列表
+        /// </summary>
+        public PortDescriptor[] GetValidPorts()
+        {
+            if (Ports == null || PortCount <= 0) return Array.Empty<PortDescriptor>();
+            return Ports.Take(Math.Min(PortCount, Ports.Length)).ToArray();
+        }
+
+        /// <summary>
+        /// 转换为可读字符串
+        /// </summary>
+        public override string ToString()
+        {
+            var ports = GetValidPorts();
+            var portStr = string.Join(", ", ports.Select(p => p.ToString()));
+            return $"DI={DigitalInputCount}, DO={DigitalOutputCount}, Ports=[{portStr}]";
+        }
+    }
+
+    /// <summary>
     /// 抽象端口配置基类
     /// </summary>
     public abstract class PortConfig
@@ -216,7 +290,7 @@ namespace MCUSerialBridgeCLR
 
         /// <summary>
         /// 从 JSON 对象反序列化 PortConfig
-        /// JSON 格式: { "type": "serial", "baud": 9600, "receiveFrameMs": 20 }
+        /// JSON 格式: { "type": "serial", "baud": 9600, "receiveFrameMs": 0 }
         ///        或: { "type": "can", "baud": 500000, "retryTimeMs": 10 }
         /// </summary>
         public static PortConfig FromJson(Newtonsoft.Json.Linq.JObject json)
@@ -226,7 +300,7 @@ namespace MCUSerialBridgeCLR
             
             return type switch
             {
-                "serial" => new SerialPortConfig(baud, (uint)(json["receiveFrameMs"]?.ToObject<uint>() ?? 20)),
+                "serial" => new SerialPortConfig(baud, (uint)(json["receiveFrameMs"]?.ToObject<uint>() ?? 0)),
                 "can" => new CANPortConfig(baud, (uint)(json["retryTimeMs"]?.ToObject<uint>() ?? 10)),
                 _ => throw new ArgumentException($"Unknown port type: {type}")
             };
@@ -335,7 +409,8 @@ namespace MCUSerialBridgeCLR
     }
 
     /// <summary>
-    /// CAN 帧结构（标准帧 11-bit ID + 1-bit RTR + 4-bit DLC + Payload）
+    /// CAN 帧结构（标准帧 11-bit ID + 1-bit RTR + Payload）
+    /// DLC 由 Payload.Length 自动推导
     /// </summary>
     public class CANMessage
     {
@@ -345,39 +420,36 @@ namespace MCUSerialBridgeCLR
         /// <summary>远程帧标志：false = 数据帧，true = 远程帧</summary>
         public bool RTR { get; set; }
 
-        /// <summary>数据长度码：0~8</summary>
-        public byte DLC { get; set; }
+        /// <summary>数据负载（0~8 字节），长度即为 DLC</summary>
+        public byte[] Payload { get; set; } = Array.Empty<byte>();
 
-        /// <summary>数据负载，长度必须严格等于 DLC（DLC=0 时可为 null）</summary>
-        public byte[] Payload { get; set; }
+        /// <summary>数据长度码（只读，由 Payload.Length 推导）</summary>
+        public int DLC => Payload?.Length ?? 0;
 
         /// <summary>
         /// 序列化为 MCU 协议字节流
         /// </summary>
-        /// <returns>返回字节数组：2 bytes header + Payload</returns>
-        /// <exception cref="ArgumentOutOfRangeException">如果 DLC > 8</exception>
-        /// <exception cref="ArgumentException">如果 Payload 长度 != DLC</exception>
+        /// <returns>返回字节数组：2 bytes header + Payload，失败返回 null</returns>
         public byte[] ToBytes()
         {
-            if (DLC > 8)
-                throw new ArgumentOutOfRangeException(nameof(DLC), "DLC must be 0-8");
-            if (DLC > 0 && (Payload == null || Payload.Length != DLC))
-                throw new ArgumentException("Payload length must equal DLC");
+            int dlc = Payload?.Length ?? 0;
+            if (dlc > 8)
+                return null; // Payload 超长，返回 null
 
             // 构造 2 字节 header
             ushort header = 0;
             header |= (ushort)(ID & 0x7FF); // bits 0-10
             if (RTR)
                 header |= (1 << 11); // bit 11
-            header |= (ushort)((DLC & 0xF) << 12); // bits 12-15
+            header |= (ushort)((dlc & 0xF) << 12); // bits 12-15
 
-            byte[] result = new byte[2 + DLC];
+            byte[] result = new byte[2 + dlc];
             byte[] headerBytes = BitConverter.GetBytes(header); // 小端序
             result[0] = headerBytes[0];
             result[1] = headerBytes[1];
 
-            if (DLC > 0)
-                Buffer.BlockCopy(Payload, 0, result, 2, DLC);
+            if (dlc > 0)
+                Buffer.BlockCopy(Payload!, 0, result, 2, dlc);
             return result;
         }
 
@@ -386,35 +458,32 @@ namespace MCUSerialBridgeCLR
         /// </summary>
         /// <param name="data">原始字节数组</param>
         /// <param name="length">实际有效长度</param>
-        /// <returns>CANMessage 实例</returns>
-        /// <exception cref="ArgumentException">数据长度错误</exception>
+        /// <returns>CANMessage 实例，失败返回 null</returns>
         public static CANMessage FromBytes(byte[] data, uint length)
         {
             if (data == null || length > data.Length || length < 2)
-                throw new ArgumentException("Data must be at least 2 bytes");
+                return null;
 
             ushort header = BitConverter.ToUInt16(data, 0);
 
-            var msg = new CANMessage
-            {
-                ID = (ushort)(header & 0x7FF),
-                RTR = (header & (1 << 11)) != 0,
-                DLC = (byte)((header >> 12) & 0xF),
-            };
+            ushort id = (ushort)(header & 0x7FF);
+            bool rtr = (header & (1 << 11)) != 0;
+            int dlc = (header >> 12) & 0xF;
 
-            if (msg.DLC > 0)
+            byte[] payload;
+            if (dlc > 0)
             {
-                if (length < 2 + msg.DLC)
-                    throw new ArgumentException("Data length less than DLC");
-                msg.Payload = new byte[msg.DLC];
-                Buffer.BlockCopy(data, 2, msg.Payload, 0, msg.DLC);
+                if (length < 2 + dlc)
+                    return null; // 数据长度不足
+                payload = new byte[dlc];
+                Buffer.BlockCopy(data, 2, payload, 0, dlc);
             }
             else
             {
-                msg.Payload = Array.Empty<byte>();
+                payload = Array.Empty<byte>();
             }
 
-            return msg;
+            return new CANMessage { ID = id, RTR = rtr, Payload = payload };
         }
 
         public override string ToString()
@@ -452,6 +521,13 @@ namespace MCUSerialBridgeCLR
         public static extern MCUSerialBridgeError msb_version(
             IntPtr handle,
             out VersionInfo version,
+            uint timeout_ms
+        );
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        public static extern MCUSerialBridgeError mcu_get_layout(
+            IntPtr handle,
+            out LayoutInfo layout,
             uint timeout_ms
         );
 
@@ -657,6 +733,19 @@ namespace MCUSerialBridgeCLR
                 return MCUSerialBridgeError.Win_HandleNotFound;
 
             return MCUSerialBridgeCoreAPI.msb_version(nativeHandle, out version, timeout);
+        }
+
+        /// <summary>获取 MCU 硬件布局信息</summary>
+        /// <param name="layout">输出布局信息</param>
+        /// <param name="timeout">超时时间（ms）</param>
+        /// <returns>错误码</returns>
+        public MCUSerialBridgeError GetLayout(out LayoutInfo layout, uint timeout = 200)
+        {
+            layout = new LayoutInfo();
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            return MCUSerialBridgeCoreAPI.mcu_get_layout(nativeHandle, out layout, timeout);
         }
 
         /// <summary>获取 MCU 当前状态</summary>

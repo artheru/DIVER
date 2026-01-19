@@ -17,6 +17,9 @@ public sealed class DIVERSession : IDisposable
     private readonly CancellationTokenSource _upperCts = new();
     private readonly Thread _upperWorker;
     private readonly AutoResetEvent _upperSignal = new(false);
+    private readonly object _statePollLock = new();
+    private CancellationTokenSource _stateCts = new();
+    private Thread? _stateWorker;
     private readonly object _stateLock = new();
     private object? _cartTarget;
     private CartFieldInfo[] _cartFields = Array.Empty<CartFieldInfo>();
@@ -110,6 +113,7 @@ public sealed class DIVERSession : IDisposable
         }
         _nodes.Clear();
         _upperPending.Clear();
+        StopStatePolling();
     }
 
     #endregion
@@ -190,6 +194,10 @@ public sealed class DIVERSession : IDisposable
                 Console.WriteLine($"[DIVERSession] Node '{node.NodeId}' connect failed: {node.LastError}");
             }
         }
+        if (connected > 0)
+            StartStatePolling();
+        else
+            StopStatePolling();
         return connected;
     }
 
@@ -203,6 +211,7 @@ public sealed class DIVERSession : IDisposable
             node.Disconnect();
         }
         SetState(DIVERSessionState.Idle);
+        StopStatePolling();
     }
 
     /// <summary>
@@ -277,6 +286,51 @@ public sealed class DIVERSession : IDisposable
         return stopped;
     }
 
+    private void StartStatePolling()
+    {
+        lock (_statePollLock)
+        {
+            if (_stateWorker != null && _stateWorker.IsAlive) return;
+            _stateCts = new CancellationTokenSource();
+            _stateWorker = new Thread(() => StateLoop(_stateCts.Token))
+            {
+                IsBackground = true,
+                Name = "DIVERSession-State"
+            };
+            _stateWorker.Start();
+        }
+    }
+
+    private void StopStatePolling()
+    {
+        lock (_statePollLock)
+        {
+            try
+            {
+                _stateCts.Cancel();
+            }
+            catch
+            {
+                // ignore
+            }
+            _stateWorker = null;
+        }
+    }
+
+    private void StateLoop(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            foreach (var node in _nodes.Values)
+            {
+                if (node.IsConnected)
+                    node.RefreshState();
+            }
+
+            token.WaitHandle.WaitOne(1200);
+        }
+    }
+
     #endregion
 
     #region Data Exchange
@@ -290,10 +344,8 @@ public sealed class DIVERSession : IDisposable
         {
             if (node.IsRunning && node.CartFields.Length > 0)
             {
-                // 优先使用变量存储，否则使用 Cart 对象
-                var data = _cartTarget != null
-                    ? HostRuntime.SerializeUpperIO(_cartTarget, node.CartFields)
-                    : HostRuntime.SerializeUpperIO(node.NodeId, node.CartFields);
+                // 使用全局变量存储序列化 UpperIO
+                var data = HostRuntime.SerializeUpperIO(node.NodeId, node.CartFields);
                 node.SendUpperIO(data);
             }
         }
@@ -307,10 +359,8 @@ public sealed class DIVERSession : IDisposable
         var node = GetNode(nodeId);
         if (node == null || !node.IsRunning || node.CartFields.Length == 0) return false;
 
-        // 优先使用 Cart 对象，否则使用变量存储
-        var data = _cartTarget != null
-            ? HostRuntime.SerializeUpperIO(_cartTarget, node.CartFields)
-            : HostRuntime.SerializeUpperIO(nodeId, node.CartFields);
+        // 使用全局变量存储序列化 UpperIO
+        var data = HostRuntime.SerializeUpperIO(nodeId, node.CartFields);
         return node.SendUpperIO(data);
     }
 
@@ -319,12 +369,15 @@ public sealed class DIVERSession : IDisposable
     /// </summary>
     public void SetCartField(string fieldName, object value)
     {
+        HostRuntime.SetCartVariable(string.Empty, fieldName, value);
         if (_cartTarget == null) return;
-        
+
         var field = _cartFields.FirstOrDefault(f => f.Name == fieldName);
         if (field?.ReflectionInfo != null)
         {
-            field.ReflectionInfo.SetValue(_cartTarget, Convert.ChangeType(value, field.ReflectionInfo.FieldType));
+            field.ReflectionInfo.SetValue(
+                _cartTarget,
+                Convert.ChangeType(value, field.ReflectionInfo.FieldType));
         }
     }
 
@@ -333,8 +386,10 @@ public sealed class DIVERSession : IDisposable
     /// </summary>
     public object? GetCartField(string fieldName)
     {
+        var value = HostRuntime.GetCartVariable(string.Empty, fieldName);
+        if (value != null) return value;
         if (_cartTarget == null) return null;
-        
+
         var field = _cartFields.FirstOrDefault(f => f.Name == fieldName);
         return field?.ReflectionInfo?.GetValue(_cartTarget);
     }
@@ -389,9 +444,7 @@ public sealed class DIVERSession : IDisposable
                 // consume flag
                 _upperPending[kv.Key] = 0;
 
-                var upper = _cartTarget != null
-                    ? HostRuntime.SerializeUpperIO(_cartTarget, node.CartFields)
-                    : HostRuntime.SerializeUpperIO(node.NodeId, node.CartFields);
+                var upper = HostRuntime.SerializeUpperIO(node.NodeId, node.CartFields);
                 node.SendUpperIO(upper, 20);
             }
         }

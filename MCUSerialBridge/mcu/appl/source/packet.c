@@ -4,6 +4,7 @@
 #include "appl/threads.h"
 #include "appl/version.h"
 #include "bsp/digital_io.h"
+#include "bsp/ports.h"
 #include "hal/usart.h"
 #include "msb_protocol.h"
 #include "util/console.h"
@@ -143,6 +144,19 @@ void packet_parse(const void* data_void, uint32_t length, ...)
         case CommandEnableWireTap:
             ret = control_on_enable_wire_tap(other_data, other_data_len);
             break;
+        case CommandGetLayout: {
+            static LayoutInfoC layout_info;
+            bsp_get_layout(&layout_info);
+            ret = MSB_Error_OK;
+            return_buffer = (void*)&layout_info;
+            return_buffer_size = sizeof(layout_info);
+            console_printf_do(
+                    "CONTROL: GET LAYOUT, DI=%d, DO=%d, Ports=%d\n",
+                    layout_info.digital_input_count,
+                    layout_info.digital_output_count,
+                    layout_info.port_count);
+            break;
+        }
         case CommandStart:
             ret = control_on_start(other_data, other_data_len);
             break;

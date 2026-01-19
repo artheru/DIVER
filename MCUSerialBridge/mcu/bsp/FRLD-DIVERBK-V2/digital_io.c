@@ -82,3 +82,13 @@ uint32_t bsp_get_inputs()
     }
     return input;
 }
+
+uint32_t bsp_get_digital_input_count()
+{
+    return BSP_DIGITAL_IO_INPUT_NUM;
+}
+
+uint32_t bsp_get_digital_output_count()
+{
+    return BSP_DIGITAL_IO_OUTPUT_NUM;
+}

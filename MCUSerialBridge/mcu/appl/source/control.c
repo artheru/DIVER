@@ -517,6 +517,8 @@ MCUSerialBridgeError control_vm_write_port(
         // CAN 类型：直接发送，不需要缓冲
         // 数据格式: CANIDInfo (2 bytes) + data (0~8 bytes)
         if (data_length < sizeof(CANIDInfo)) {
+            console_printf_do("CONTROL: WRITE CAN PORT, data_length < "
+                              "sizeof(CANIDInfo)\n");
             return MSB_Error_CAN_DataError;
         }
 
@@ -525,6 +527,8 @@ MCUSerialBridgeError control_vm_write_port(
 
         // 验证 DLC 和数据长度
         if (id_info.dlc > 8 || data_length < sizeof(CANIDInfo) + id_info.dlc) {
+            console_printf_do("CONTROL: WRITE CAN PORT, data_length < "
+                              "sizeof(CANIDInfo) + id_info.dlc\n");
             return MSB_Error_CAN_DataError;
         }
 

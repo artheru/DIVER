@@ -118,6 +118,13 @@ html,body{height:100%; margin:0; font-family: ui-sans-serif,system-ui,Segoe UI,R
   padding:8px 10px;
   border-bottom:1px solid var(--border);
 }
+.toolbarDivider{
+  width:1px;
+  height:22px;
+  background:var(--border);
+  opacity:0.7;
+  margin:0 2px;
+}
 .spacer{flex:1;}
 
 .iconBtn{
@@ -127,6 +134,16 @@ html,body{height:100%; margin:0; font-family: ui-sans-serif,system-ui,Segoe UI,R
   border-radius:8px;
   padding:8px 10px;
   cursor:pointer;
+}
+.iconBtn.withIcon{
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.iconBtn.withIcon svg{
+  width:14px;
+  height:14px;
+  display:block;
 }
 .iconBtn:disabled{
   opacity:0.55;

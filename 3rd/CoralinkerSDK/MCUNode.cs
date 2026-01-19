@@ -29,6 +29,9 @@ public class MCUNode : IDisposable
     /// <summary>MCU 版本信息</summary>
     public VersionInfo? Version { get; private set; }
     
+    /// <summary>MCU 硬件布局信息</summary>
+    public LayoutInfo? Layout { get; private set; }
+    
     /// <summary>MCU 状态</summary>
     public MCUState? State { get; private set; }
     
@@ -38,8 +41,11 @@ public class MCUNode : IDisposable
     /// <summary>DIVER 程序字节码</summary>
     public byte[] ProgramBytes { get; set; } = Array.Empty<byte>();
     
-    /// <summary>端口配置</summary>
+    /// <summary>端口配置（如果为空，Connect 后会根据 Layout 初始化）</summary>
     public PortConfig[] PortConfigs { get; set; } = Array.Empty<PortConfig>();
+    
+    /// <summary>PortConfigs 是否由用户显式设置（用于判断是否需要初始化）</summary>
+    private bool _portConfigsExplicitlySet;
     
     /// <summary>Cart 字段元数据（从 MetaJson 解析）</summary>
     public CartFieldInfo[] CartFields { get; set; } = Array.Empty<CartFieldInfo>();
@@ -99,6 +105,20 @@ public class MCUNode : IDisposable
             }
             Version = version;
 
+            // Get hardware layout
+            err = _bridge.GetLayout(out var layout, DefaultTimeout);
+            if (err == MCUSerialBridgeError.OK)
+            {
+                Layout = layout;
+                // Initialize or validate PortConfigs based on Layout
+                InitializeOrValidatePortConfigs(layout);
+            }
+            else
+            {
+                // Layout not available (older firmware), continue without it
+                Console.WriteLine($"[MCUNode] GetLayout failed: {err.ToDescription()} - using default config");
+            }
+
             // Get state
             err = _bridge.GetState(out var state, DefaultTimeout);
             if (err == MCUSerialBridgeError.OK)
@@ -133,6 +153,70 @@ public class MCUNode : IDisposable
         }
         State = null;
         Version = null;
+        Layout = null;
+    }
+
+    /// <summary>
+    /// 根据 Layout 初始化或验证 PortConfigs
+    /// </summary>
+    private void InitializeOrValidatePortConfigs(LayoutInfo layout)
+    {
+        var validPorts = layout.GetValidPorts();
+        if (validPorts.Length == 0) return;
+
+        // 如果已有 PortConfigs，验证数量是否匹配
+        if (PortConfigs.Length > 0)
+        {
+            if (PortConfigs.Length != validPorts.Length)
+            {
+                Console.WriteLine($"[MCUNode] Warning: PortConfigs count ({PortConfigs.Length}) doesn't match Layout ({validPorts.Length}), reinitializing");
+                PortConfigs = Array.Empty<PortConfig>();
+            }
+            else
+            {
+                // 验证端口类型是否匹配
+                for (int i = 0; i < validPorts.Length; i++)
+                {
+                    var expectedType = validPorts[i].Type;
+                    var actualType = PortConfigs[i].PortType;
+                    var expectedByte = expectedType == PortType.CAN ? (byte)0x02 : (byte)0x01;
+                    if (actualType != expectedByte)
+                    {
+                        Console.WriteLine($"[MCUNode] Warning: Port[{i}] type mismatch (expected {expectedType}, got {actualType}), reinitializing");
+                        PortConfigs = Array.Empty<PortConfig>();
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 如果 PortConfigs 为空，根据 Layout 初始化
+        if (PortConfigs.Length == 0)
+        {
+            var configs = new List<PortConfig>();
+            foreach (var port in validPorts)
+            {
+                if (port.Type == PortType.CAN)
+                {
+                    configs.Add(new CANPortConfig(500000, 10));
+                }
+                else
+                {
+                    configs.Add(new SerialPortConfig(9600, 20));
+                }
+            }
+            PortConfigs = configs.ToArray();
+            Console.WriteLine($"[MCUNode] Initialized {configs.Count} port configs from Layout");
+        }
+    }
+
+    /// <summary>
+    /// 设置端口配置（显式设置）
+    /// </summary>
+    public void SetPortConfigs(PortConfig[] configs)
+    {
+        PortConfigs = configs;
+        _portConfigsExplicitlySet = true;
     }
 
     /// <summary>
