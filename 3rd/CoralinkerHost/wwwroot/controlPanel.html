@@ -1,0 +1,790 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Control Panel - Coralinker</title>
+  <link rel="stylesheet" href="app.css?v=20260119" />
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+    }
+    
+    #controlApp {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+    }
+    
+    .controlHeader {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+    
+    .controlTitle {
+      flex: 1;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    
+    .controlStatus {
+      font-size: 12px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      background: rgba(255,79,109,0.15);
+      color: #ff8a9e;
+    }
+    
+    .controlStatus.connected {
+      background: rgba(60,180,110,0.15);
+      color: #7cefa0;
+    }
+    
+    .controlArea {
+      flex: 1;
+      display: flex;
+      flex-wrap: wrap;
+      align-content: flex-start;
+      justify-content: center;
+      gap: 16px;
+      padding: 24px;
+      overflow: auto;
+      min-height: 0;
+    }
+    
+    .controlFooter {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      background: var(--panel);
+    }
+    
+    .ctrlWidget {
+      min-width: 160px;
+      min-height: 160px;
+    }
+    
+    .ctrlWidgetRemove {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      width: 20px;
+      height: 20px;
+      border: none;
+      background: rgba(255,79,109,0.2);
+      color: var(--danger);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    
+    .ctrlWidget:hover .ctrlWidgetRemove {
+      opacity: 1;
+    }
+    
+    .ctrlWidgetRemove:hover {
+      background: rgba(255,79,109,0.4);
+    }
+    
+    .emptyHint {
+      color: var(--muted);
+      text-align: center;
+      padding: 60px 20px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="controlApp">
+    <div class="controlHeader">
+      <span class="controlTitle">🎮 Control Panel</span>
+      <span id="statusIndicator" class="controlStatus">Disconnected</span>
+    </div>
+    
+    <div id="controlArea" class="controlArea">
+      <div class="emptyHint" id="emptyHint">
+        Click "Add Widget" below to add control widgets.<br>
+        <span class="muted">Widgets are synced with the main page.</span>
+      </div>
+    </div>
+    
+    <div class="controlFooter">
+      <button id="btnAddWidget" class="iconBtn primary">+ Add Widget</button>
+      <div class="spacer"></div>
+      <span class="muted">Layout saved automatically</span>
+    </div>
+  </div>
+
+  <!-- Widget Type Selection Dialog -->
+  <div id="widgetTypeDialog" class="modal hidden">
+    <div class="modalCard modalCardWide">
+      <div class="modalHeader">
+        <div>Add Control Widget</div>
+      </div>
+      <div class="modalBody">
+        <div class="widgetTypeGrid">
+          <button class="widgetTypeBtn" data-type="slider-h">
+            <div class="widgetIcon">━━━━●━━</div>
+            <div class="widgetLabel">Horizontal Slider</div>
+          </button>
+          <button class="widgetTypeBtn" data-type="slider-v">
+            <div class="widgetIcon">┃<br>●<br>┃</div>
+            <div class="widgetLabel">Vertical Slider</div>
+          </button>
+          <button class="widgetTypeBtn" data-type="joystick">
+            <div class="widgetIcon">╋</div>
+            <div class="widgetLabel">Joystick</div>
+          </button>
+          <button class="widgetTypeBtn" data-type="switch2">
+            <div class="widgetIcon">○━●</div>
+            <div class="widgetLabel">Switch (0/1)</div>
+          </button>
+          <button class="widgetTypeBtn" data-type="switch3">
+            <div class="widgetIcon">●━○━●</div>
+            <div class="widgetLabel">Switch (-1/0/1)</div>
+          </button>
+        </div>
+      </div>
+      <div class="modalActions">
+        <button id="widgetTypeCancel" class="iconBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Widget Config Dialog -->
+  <div id="widgetConfigDialog" class="modal hidden">
+    <div class="modalCard">
+      <div class="modalHeader">
+        <div id="widgetConfigTitle">Configure Widget</div>
+      </div>
+      <div id="widgetConfigBody" class="modalBody"></div>
+      <div class="modalActions">
+        <button id="widgetConfigCancel" class="iconBtn">Cancel</button>
+        <button id="widgetConfigOk" class="iconBtn primary">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="lib/signalr.min.js"></script>
+  <script>
+    // Control Panel Page Script
+    const $ = (id) => document.getElementById(id);
+    
+    let widgets = [];
+    let widgetIdCounter = 0;
+    let artifactVariables = [];
+    let signalRConnection = null;
+    
+    // --- API Helper ---
+    async function api(method, url, body) {
+      const opts = { method, headers: {} };
+      if (body) {
+        opts.headers["Content-Type"] = "application/json";
+        opts.body = JSON.stringify(body);
+      }
+      const res = await fetch(url, opts);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`${method} ${url} failed: ${res.status} ${text}`);
+      }
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        return res.json();
+      }
+      return { ok: true };
+    }
+    
+    // --- Variable Sending ---
+    async function setVariable(name, value, type) {
+      let finalValue = value;
+      // Round to int if type is int
+      if (type && (type.toLowerCase().includes("int") || type === "byte" || type === "sbyte" || type === "short" || type === "ushort")) {
+        finalValue = Math.round(parseFloat(value));
+        if (isNaN(finalValue)) finalValue = 0;
+      }
+      try {
+        await api("POST", "/api/variable/set", { name, value: finalValue, typeHint: type });
+      } catch (err) {
+        console.error("Failed to set variable:", err);
+      }
+    }
+    
+    // --- Load Variables from Artifact ---
+    async function loadArtifactVariables() {
+      try {
+        const projectState = await api("GET", "/api/project");
+        if (!projectState.selectedAsset) return;
+        
+        const logicName = projectState.selectedAsset.replace(/\.cs$/i, "");
+        const file = await api("GET", `/api/files/read?path=assets/generated/${logicName}.bin.json`);
+        const fields = JSON.parse(file.text);
+        
+        artifactVariables = fields
+          .filter(f => (f.flags || 0) !== 0x02) // Not LowerIO
+          .map(f => ({
+            name: f.field,
+            type: getTypeNameFromId(f.typeid),
+            typeId: f.typeid
+          }));
+          
+        updateStatus(true);
+      } catch (err) {
+        console.warn("Could not load artifact variables:", err);
+      }
+    }
+    
+    function getTypeNameFromId(typeid) {
+      const types = {
+        0: "bool", 1: "byte", 2: "sbyte", 3: "short", 4: "ushort",
+        5: "int", 6: "uint", 7: "long", 8: "ulong", 9: "float",
+        10: "double", 11: "char", 12: "string", 16: "int[]", 17: "byte[]", 18: "float[]"
+      };
+      return types[typeid] || `type${typeid}`;
+    }
+    
+    function getControllableVarOptions() {
+      return artifactVariables
+        .map(v => `<option value="${escapeHtml(v.name)}" data-type="${escapeHtml(v.type)}">${escapeHtml(v.name)} (${escapeHtml(v.type)})</option>`)
+        .join("");
+    }
+    
+    function escapeHtml(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+    
+    // --- Status ---
+    function updateStatus(connected) {
+      const el = $("statusIndicator");
+      if (connected && artifactVariables.length > 0) {
+        el.textContent = `Connected (${artifactVariables.length} vars)`;
+        el.classList.add("connected");
+      } else {
+        el.textContent = "Disconnected";
+        el.classList.remove("connected");
+      }
+    }
+    
+    // --- Widget Creation ---
+    function showWidgetTypeDialog() {
+      $("widgetTypeDialog").classList.remove("hidden");
+    }
+    
+    function showWidgetConfigDialog(widgetType) {
+      $("widgetTypeDialog").classList.add("hidden");
+      
+      const dialog = $("widgetConfigDialog");
+      const title = $("widgetConfigTitle");
+      const body = $("widgetConfigBody");
+      
+      const typeLabels = {
+        "slider-h": "Horizontal Slider",
+        "slider-v": "Vertical Slider",
+        "joystick": "Joystick",
+        "switch2": "Toggle Switch (0/1)",
+        "switch3": "Three-way Switch (-1/0/1)"
+      };
+      
+      title.textContent = `Configure ${typeLabels[widgetType] || widgetType}`;
+      
+      let configHtml = "";
+      
+      if (widgetType === "joystick") {
+        configHtml = `
+          <div class="configRow">
+            <label class="configLabel">X Variable</label>
+            <select class="configSelect" id="widgetVarX">
+              <option value="">-- Select Variable --</option>
+              ${getControllableVarOptions()}
+            </select>
+          </div>
+          <div class="configRow">
+            <label class="configLabel">Y Variable</label>
+            <select class="configSelect" id="widgetVarY">
+              <option value="">-- Select Variable --</option>
+              ${getControllableVarOptions()}
+            </select>
+          </div>
+          <div class="configRow">
+            <label class="configLabel">Range</label>
+            <input type="number" class="configInput" id="widgetRange" value="1" step="any" />
+          </div>
+          <div class="configRow">
+            <label class="configLabel">Auto Return</label>
+            <input type="checkbox" class="configCheckbox" id="widgetAutoReturn" checked />
+          </div>
+        `;
+      } else if (widgetType.startsWith("switch")) {
+        configHtml = `
+          <div class="configRow">
+            <label class="configLabel">Variable</label>
+            <select class="configSelect" id="widgetVar">
+              <option value="">-- Select Variable --</option>
+              ${getControllableVarOptions()}
+            </select>
+          </div>
+        `;
+      } else {
+        // Slider
+        configHtml = `
+          <div class="configRow">
+            <label class="configLabel">Variable</label>
+            <select class="configSelect" id="widgetVar">
+              <option value="">-- Select Variable --</option>
+              ${getControllableVarOptions()}
+            </select>
+          </div>
+          <div class="configRow">
+            <label class="configLabel">Min Value</label>
+            <input type="number" class="configInput" id="widgetMin" value="0" step="any" />
+          </div>
+          <div class="configRow">
+            <label class="configLabel">Max Value</label>
+            <input type="number" class="configInput" id="widgetMax" value="100" step="any" />
+          </div>
+          <div class="configRow">
+            <label class="configLabel">Auto Return</label>
+            <input type="checkbox" class="configCheckbox" id="widgetAutoReturn" />
+          </div>
+          <div class="configRow">
+            <label class="configLabel">Logarithmic</label>
+            <input type="checkbox" class="configCheckbox" id="widgetLog" />
+          </div>
+        `;
+      }
+      
+      body.innerHTML = configHtml;
+      
+      $("widgetConfigOk").onclick = () => {
+        const config = { type: widgetType, id: `widget-${++widgetIdCounter}` };
+        
+        if (widgetType === "joystick") {
+          config.varX = $("widgetVarX")?.value;
+          config.varY = $("widgetVarY")?.value;
+          config.typeX = $("widgetVarX")?.selectedOptions[0]?.dataset.type || "float";
+          config.typeY = $("widgetVarY")?.selectedOptions[0]?.dataset.type || "float";
+          config.range = parseFloat($("widgetRange")?.value) || 1;
+          config.autoReturn = $("widgetAutoReturn")?.checked ?? true;
+          if (!config.varX && !config.varY) {
+            alert("Please select at least one variable");
+            return;
+          }
+        } else if (widgetType.startsWith("switch")) {
+          config.variable = $("widgetVar")?.value;
+          config.varType = $("widgetVar")?.selectedOptions[0]?.dataset.type || "int";
+          if (!config.variable) {
+            alert("Please select a variable");
+            return;
+          }
+        } else {
+          config.variable = $("widgetVar")?.value;
+          config.varType = $("widgetVar")?.selectedOptions[0]?.dataset.type || "float";
+          config.min = parseFloat($("widgetMin")?.value) || 0;
+          config.max = parseFloat($("widgetMax")?.value) || 100;
+          config.autoReturn = $("widgetAutoReturn")?.checked ?? false;
+          config.logarithmic = $("widgetLog")?.checked ?? false;
+          if (!config.variable) {
+            alert("Please select a variable");
+            return;
+          }
+        }
+        
+        dialog.classList.add("hidden");
+        addWidget(config);
+        saveWidgets();
+      };
+      
+      dialog.classList.remove("hidden");
+    }
+    
+    function addWidget(config) {
+      widgets.push(config);
+      renderWidget(config);
+      $("emptyHint").classList.add("hidden");
+    }
+    
+    function removeWidget(widgetId) {
+      const el = document.getElementById(widgetId);
+      if (el) el.remove();
+      widgets = widgets.filter(w => w.id !== widgetId);
+      if (widgets.length === 0) {
+        $("emptyHint").classList.remove("hidden");
+      }
+      saveWidgets();
+    }
+    
+    function renderWidget(config) {
+      const container = $("controlArea");
+      const widget = document.createElement("div");
+      widget.className = "ctrlWidget";
+      widget.id = config.id;
+      
+      const label = config.type === "joystick"
+        ? `X: ${config.varX || "-"}<br>Y: ${config.varY || "-"}`
+        : config.variable;
+      
+      switch (config.type) {
+        case "slider-h":
+          widget.innerHTML = `
+            <button class="ctrlWidgetRemove" onclick="removeWidget('${config.id}')">×</button>
+            <div class="ctrlWidgetLabel">${label}</div>
+            <div class="sliderTrack horizontal">
+              <div class="sliderThumb" style="left:${config.autoReturn ? 50 : 0}%;top:50%;transform:translate(-50%,-50%);"></div>
+            </div>
+            <div class="ctrlWidgetValue">0</div>
+          `;
+          initSlider(widget, config, "horizontal");
+          break;
+          
+        case "slider-v":
+          widget.innerHTML = `
+            <button class="ctrlWidgetRemove" onclick="removeWidget('${config.id}')">×</button>
+            <div class="ctrlWidgetLabel">${label}</div>
+            <div class="sliderTrack vertical">
+              <div class="sliderThumb" style="left:50%;top:${config.autoReturn ? 50 : 100}%;transform:translate(-50%,-50%);"></div>
+            </div>
+            <div class="ctrlWidgetValue">0</div>
+          `;
+          initSlider(widget, config, "vertical");
+          break;
+          
+        case "joystick":
+          widget.innerHTML = `
+            <button class="ctrlWidgetRemove" onclick="removeWidget('${config.id}')">×</button>
+            <div class="ctrlWidgetLabel">${label}</div>
+            <div class="joystickArea">
+              <div class="joystickCross"></div>
+              <div class="joystickThumb"></div>
+            </div>
+            <div class="ctrlWidgetValue">X: 0, Y: 0</div>
+          `;
+          initJoystick(widget, config);
+          break;
+          
+        case "switch2":
+          widget.innerHTML = `
+            <button class="ctrlWidgetRemove" onclick="removeWidget('${config.id}')">×</button>
+            <div class="ctrlWidgetLabel">${label}</div>
+            <div class="switchTrack">
+              <button class="switchOption active" data-val="0">OFF</button>
+              <button class="switchOption" data-val="1">ON</button>
+            </div>
+            <div class="ctrlWidgetValue">0</div>
+          `;
+          initSwitch(widget, config, [0, 1]);
+          break;
+          
+        case "switch3":
+          widget.innerHTML = `
+            <button class="ctrlWidgetRemove" onclick="removeWidget('${config.id}')">×</button>
+            <div class="ctrlWidgetLabel">${label}</div>
+            <div class="switchTrack">
+              <button class="switchOption" data-val="-1">-1</button>
+              <button class="switchOption active" data-val="0">0</button>
+              <button class="switchOption" data-val="1">+1</button>
+            </div>
+            <div class="ctrlWidgetValue">0</div>
+          `;
+          initSwitch(widget, config, [-1, 0, 1]);
+          break;
+      }
+      
+      container.appendChild(widget);
+    }
+    
+    // --- Slider ---
+    function initSlider(widget, config, orientation) {
+      const track = widget.querySelector(".sliderTrack");
+      const thumb = widget.querySelector(".sliderThumb");
+      const valueDisplay = widget.querySelector(".ctrlWidgetValue");
+      let isDragging = false;
+      
+      const updateValue = (ratio) => {
+        let val;
+        if (config.logarithmic && config.min > 0 && config.max > 0) {
+          // Logarithmic only works with positive min/max
+          val = config.min * Math.pow(config.max / config.min, ratio);
+        } else {
+          val = config.min + ratio * (config.max - config.min);
+        }
+        val = Math.max(config.min, Math.min(config.max, val));
+        
+        // Round for int types
+        const isInt = config.varType && (config.varType.includes("int") || config.varType === "byte" || config.varType === "sbyte" || config.varType === "short" || config.varType === "ushort");
+        if (isInt) {
+          val = Math.round(val);
+          valueDisplay.textContent = val;
+        } else {
+          valueDisplay.textContent = val.toFixed(2);
+        }
+        
+        setVariable(config.variable, val, config.varType);
+      };
+      
+      const updateThumbPosition = (clientX, clientY) => {
+        const rect = track.getBoundingClientRect();
+        let ratio;
+        if (orientation === "horizontal") {
+          ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+          thumb.style.left = `${ratio * 100}%`;
+        } else {
+          ratio = 1 - Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+          thumb.style.top = `${(1 - ratio) * 100}%`;
+        }
+        updateValue(ratio);
+      };
+      
+      const getCenterRatio = () => {
+        if (config.min >= 0) return 0; // Start at min
+        if (config.max <= 0) return 1; // Start at max
+        return -config.min / (config.max - config.min); // Center at 0
+      };
+      
+      thumb.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        isDragging = true;
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+      });
+      
+      // Touch support
+      thumb.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        isDragging = true;
+        document.addEventListener("touchmove", onTouchMove);
+        document.addEventListener("touchend", onTouchEnd);
+      });
+      
+      const onMove = (e) => {
+        if (!isDragging) return;
+        updateThumbPosition(e.clientX, e.clientY);
+      };
+      
+      const onTouchMove = (e) => {
+        if (!isDragging || !e.touches[0]) return;
+        updateThumbPosition(e.touches[0].clientX, e.touches[0].clientY);
+      };
+      
+      const onUp = () => {
+        isDragging = false;
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        if (config.autoReturn) {
+          const centerRatio = getCenterRatio();
+          if (orientation === "horizontal") {
+            thumb.style.left = `${centerRatio * 100}%`;
+          } else {
+            thumb.style.top = `${(1 - centerRatio) * 100}%`;
+          }
+          updateValue(centerRatio);
+        }
+      };
+      
+      const onTouchEnd = () => {
+        isDragging = false;
+        document.removeEventListener("touchmove", onTouchMove);
+        document.removeEventListener("touchend", onTouchEnd);
+        if (config.autoReturn) {
+          const centerRatio = getCenterRatio();
+          if (orientation === "horizontal") {
+            thumb.style.left = `${centerRatio * 100}%`;
+          } else {
+            thumb.style.top = `${(1 - centerRatio) * 100}%`;
+          }
+          updateValue(centerRatio);
+        }
+      };
+    }
+    
+    // --- Joystick ---
+    function initJoystick(widget, config) {
+      const area = widget.querySelector(".joystickArea");
+      const thumb = widget.querySelector(".joystickThumb");
+      const valueDisplay = widget.querySelector(".ctrlWidgetValue");
+      let isDragging = false;
+      
+      const isIntX = config.typeX && (config.typeX.includes("int") || config.typeX === "byte");
+      const isIntY = config.typeY && (config.typeY.includes("int") || config.typeY === "byte");
+      
+      const updateValue = (ratioX, ratioY) => {
+        let valX = ratioX * config.range;
+        let valY = ratioY * config.range;
+        
+        if (isIntX) valX = Math.round(valX);
+        if (isIntY) valY = Math.round(valY);
+        
+        const dispX = isIntX ? valX : valX.toFixed(2);
+        const dispY = isIntY ? valY : valY.toFixed(2);
+        valueDisplay.textContent = `X: ${dispX}, Y: ${dispY}`;
+        
+        if (config.varX) setVariable(config.varX, valX, config.typeX);
+        if (config.varY) setVariable(config.varY, valY, config.typeY);
+      };
+      
+      const updateThumbPosition = (clientX, clientY) => {
+        const rect = area.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const maxRadius = rect.width / 2 - 15;
+        
+        let dx = clientX - centerX;
+        let dy = clientY - centerY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist > maxRadius) {
+          dx = dx / dist * maxRadius;
+          dy = dy / dist * maxRadius;
+        }
+        
+        thumb.style.left = `calc(50% + ${dx}px)`;
+        thumb.style.top = `calc(50% + ${dy}px)`;
+        
+        const ratioX = dx / maxRadius;
+        const ratioY = -dy / maxRadius;
+        updateValue(ratioX, ratioY);
+      };
+      
+      thumb.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        isDragging = true;
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+      });
+      
+      thumb.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        isDragging = true;
+        document.addEventListener("touchmove", onTouchMove);
+        document.addEventListener("touchend", onTouchEnd);
+      });
+      
+      const onMove = (e) => {
+        if (!isDragging) return;
+        updateThumbPosition(e.clientX, e.clientY);
+      };
+      
+      const onTouchMove = (e) => {
+        if (!isDragging || !e.touches[0]) return;
+        updateThumbPosition(e.touches[0].clientX, e.touches[0].clientY);
+      };
+      
+      const onUp = () => {
+        isDragging = false;
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        if (config.autoReturn) {
+          thumb.style.left = "50%";
+          thumb.style.top = "50%";
+          updateValue(0, 0);
+        }
+      };
+      
+      const onTouchEnd = () => {
+        isDragging = false;
+        document.removeEventListener("touchmove", onTouchMove);
+        document.removeEventListener("touchend", onTouchEnd);
+        if (config.autoReturn) {
+          thumb.style.left = "50%";
+          thumb.style.top = "50%";
+          updateValue(0, 0);
+        }
+      };
+    }
+    
+    // --- Switch ---
+    function initSwitch(widget, config, values) {
+      const buttons = widget.querySelectorAll(".switchOption");
+      const valueDisplay = widget.querySelector(".ctrlWidgetValue");
+      let currentValue = values.includes(0) ? 0 : values[0];
+      
+      buttons.forEach(btn => {
+        const val = parseInt(btn.dataset.val);
+        btn.onclick = () => {
+          currentValue = val;
+          buttons.forEach(b => b.classList.remove("active"));
+          btn.classList.add("active");
+          valueDisplay.textContent = val;
+          setVariable(config.variable, val, "int");
+        };
+      });
+    }
+    
+    // --- Save/Load ---
+    function saveWidgets() {
+      try {
+        localStorage.setItem("coralinker-control-widgets", JSON.stringify(widgets));
+      } catch (e) {
+        console.warn("Failed to save widgets:", e);
+      }
+    }
+    
+    function loadWidgets() {
+      try {
+        const saved = localStorage.getItem("coralinker-control-widgets");
+        if (saved) {
+          const loaded = JSON.parse(saved);
+          for (const config of loaded) {
+            widgetIdCounter = Math.max(widgetIdCounter, parseInt(config.id?.split("-")[1]) || 0);
+            widgets.push(config);
+            renderWidget(config);
+          }
+          if (widgets.length > 0) {
+            $("emptyHint").classList.add("hidden");
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to load widgets:", e);
+      }
+    }
+    
+    // --- SignalR for status updates ---
+    async function initSignalR() {
+      if (!window.signalR) return;
+      
+      try {
+        signalRConnection = new signalR.HubConnectionBuilder()
+          .withUrl("/hubs/terminal")
+          .withAutomaticReconnect()
+          .build();
+        
+        signalRConnection.on("varsSnapshot", (snap) => {
+          if (snap && snap.fields) {
+            updateStatus(true);
+          }
+        });
+        
+        await signalRConnection.start();
+      } catch (err) {
+        console.warn("SignalR connection failed:", err);
+      }
+    }
+    
+    // --- Init ---
+    async function boot() {
+      $("btnAddWidget").onclick = showWidgetTypeDialog;
+      $("widgetTypeCancel").onclick = () => $("widgetTypeDialog").classList.add("hidden");
+      $("widgetConfigCancel").onclick = () => $("widgetConfigDialog").classList.add("hidden");
+      
+      document.querySelectorAll(".widgetTypeBtn").forEach(btn => {
+        btn.onclick = () => showWidgetConfigDialog(btn.dataset.type);
+      });
+      
+      await loadArtifactVariables();
+      loadWidgets();
+      await initSignalR();
+    }
+    
+    boot();
+  </script>
+</body>
+</html>

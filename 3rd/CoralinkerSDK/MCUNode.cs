@@ -351,12 +351,23 @@ public class MCUNode : IDisposable
     /// </summary>
     public void RefreshState()
     {
-        if (_bridge == null || !_bridge.IsOpen) return;
+        if (_bridge == null || !_bridge.IsOpen)
+        {
+            State = null; // Mark as offline
+            return;
+        }
         
         var err = _bridge.GetState(out var state, DefaultTimeout);
         if (err == MCUSerialBridgeError.OK)
         {
             State = state;
+            LastError = null;
+        }
+        else
+        {
+            // Timeout or communication error - mark as offline
+            State = null;
+            LastError = $"GetState failed: {err.ToDescription()}";
         }
     }
 

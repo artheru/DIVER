@@ -58,6 +58,8 @@ function fmtBytes(n) {
 async function connectSession() {
   const res = await api("POST", "/api/connect");
   if (res?.nodes) applyNodeRuntimeInfo(res.nodes);
+  // Fetch controllable variables after connection
+  await fetchControllableVars();
   logTerminal("[ui] Connect requested.");
 }
 
@@ -161,6 +163,8 @@ function scheduleAutoSave(reason = "") {
     saveOnServer({ silent: true, reason: reason || "autosave" }).catch((err) => {
       console.warn("Auto-save failed:", reason, err);
     });
+    // Update node log tabs when graph changes
+    updateNodeLogTabs();
   }, 700);
 }
 
@@ -485,7 +489,7 @@ function installNodeResizing(lgCanvas) {
     const node = r.node;
     // Keep enough space for our custom UI sections (status + tools).
     const minW = node.type === "coral/root" ? 200 : 400;
-    const minH = node.type === "coral/root" ? 90 : 480;
+    const minH = node.type === "coral/root" ? 90 : 360;
 
     let x = r.startPos[0];
     let y = r.startPos[1];
@@ -619,13 +623,14 @@ function registerLiteGraphNodes() {
   }
 
   CoralNode = class extends LiteGraph.LGraphNode {
-    constructor(title = "node") {
+    constructor(title = "Node") {
       super(title);
-      this.size = [300, 360];
+      this.size = [300, 400]; // Increased height for 3 widgets + status
       this.resizable = true;
       this.flags = this.flags || {};
       this.flags.resizable = true;
       this.properties = this.properties || {};
+      this.properties.nodeName ??= title; // Display name (Node1, Node2, etc.)
       this.properties.mcuUri ??= "serial://name=COM3&baudrate=1000000";
       this.properties.logicName ??= "TestLogic";
       // Runtime state from MCU (updated via nodeSnapshot)
@@ -639,6 +644,11 @@ function registerLiteGraphNodes() {
       this.addInput("in", "flow");
       this.addOutput("out", "flow");
 
+      this.addWidget("text", "nodeName", this.properties.nodeName, (v) => {
+        this.properties.nodeName = v;
+        this.title = v; // Sync title with nodeName
+        scheduleAutoSave("nodeNameChanged");
+      });
       this.addWidget("text", "mcuUri", this.properties.mcuUri, (v) => (this.properties.mcuUri = v));
       this.addWidget("text", "logicName", this.properties.logicName, (v) => (this.properties.logicName = v));
 
@@ -655,7 +665,7 @@ function registerLiteGraphNodes() {
       const gap = 4;
       const w = this.size[0];
       const h = this.size[1];
-      const propsCount = 2;
+      const propsCount = 3; // nodeName, mcuUri, logicName
       const afterPropsY = titleH + propsCount * (widgetH + gap) + 6;
       _drawSeparator(ctx, afterPropsY, w);
 
@@ -941,15 +951,48 @@ function ensureRoot() {
   }
 }
 
+function getNextNodeName() {
+  if (!graph) return "Node1";
+  
+  // Find all existing node names that match "NodeN" pattern
+  const existingNumbers = new Set();
+  for (const node of graph._nodes || []) {
+    if (node.type === "coral/node" && node.properties?.nodeName) {
+      const match = node.properties.nodeName.match(/^Node(\d+)$/);
+      if (match) {
+        existingNumbers.add(parseInt(match[1], 10));
+      }
+    }
+  }
+  
+  // Find the next available number
+  let num = 1;
+  while (existingNumbers.has(num)) {
+    num++;
+  }
+  return `Node${num}`;
+}
+
 function addNode() {
   if (!graph) {
     logTerminal("[ui] ERROR: Graph not initialized");
     return;
   }
+  
+  const nodeName = getNextNodeName();
   const n = LiteGraph.createNode("coral/node");
+  n.title = nodeName;
+  n.properties.nodeName = nodeName;
+  
+  // Sync widget value with property
+  if (n.widgets) {
+    const nameWidget = n.widgets.find(w => w.name === "nodeName");
+    if (nameWidget) nameWidget.value = nodeName;
+  }
+  
   n.pos = [320 + Math.random() * 160, 120 + Math.random() * 140];
   graph.add(n);
-  logTerminal("[ui] Added new node to graph");
+  logTerminal(`[ui] Added new node: ${nodeName}`);
   scheduleAutoSave("addNode");
 }
 
@@ -1142,6 +1185,7 @@ async function saveOnServer(opts) {
     w: n.size?.[0] ?? null,
     h: n.size?.[1] ?? null,
     properties: {
+      nodeName: n.properties?.nodeName ?? n.title ?? "",
       mcuUri: n.properties?.mcuUri ?? "",
       logicName: n.properties?.logicName ?? "",
     },
@@ -1233,16 +1277,37 @@ async function loadServerProject() {
         if (typeof n.w === "number" && typeof n.h === "number") {
           // Enforce minimum sizes so the node UI is never cramped (status + tool buttons)
           const minW = type === "coral/root" ? 200 : 300;
-          const minH = type === "coral/root" ? 90 : 360;
+          const minH = type === "coral/root" ? 90 : 400;
           node.size = [Math.max(minW, n.w), Math.max(minH, n.h)];
         }
         node.properties = node.properties || {};
+        node.properties.nodeName = n.properties?.nodeName ?? n.title ?? node.properties.nodeName;
         node.properties.mcuUri = n.properties?.mcuUri ?? node.properties.mcuUri;
         node.properties.logicName = n.properties?.logicName ?? node.properties.logicName;
+        // Sync title with nodeName
+        if (node.properties.nodeName) {
+          node.title = node.properties.nodeName;
+        }
         // Status fields are now indicators (state/version/info)
         if (n.properties?.state) node.properties.state = n.properties.state;
         if (n.properties?.version) node.properties.version = n.properties.version;
         if (n.properties?.info) node.properties.info = n.properties.info;
+        
+        // Sync widget values with properties (widgets are created with default values in constructor)
+        if (node.widgets) {
+          for (const w of node.widgets) {
+            if (w.name === "nodeName" && node.properties.nodeName) {
+              w.value = node.properties.nodeName;
+            }
+            if (w.name === "mcuUri" && node.properties.mcuUri) {
+              w.value = node.properties.mcuUri;
+            }
+            if (w.name === "logicName" && node.properties.logicName) {
+              w.value = node.properties.logicName;
+            }
+          }
+        }
+        
         // Preserve stable ids for link restoration
         node.id = n.id;
         graph.add(node);
@@ -2417,9 +2482,22 @@ async function initSignalR() {
     conn.on("terminalLine", (line) => logTerminal(line));
     conn.on("varsSnapshot", (snap) => renderVars(snap));
     conn.on("nodeSnapshot", (snap) => applyNodeSnapshot(snap));
+    conn.on("nodeLogLine", (data) => {
+      // data: { nodeId, line }
+      if (data && data.nodeId && data.line) {
+        // Ensure tab exists for this node
+        const node = graph?._nodes?.find(n => String(n.id) === String(data.nodeId));
+        const nodeName = node?.properties?.nodeName || node?.title || data.nodeId;
+        ensureNodeLogTab(data.nodeId, nodeName);
+        appendNodeLogLine(data.nodeId, data.line);
+      }
+    });
 
     await conn.start();
     logTerminal("[ui] Connected to terminal hub.");
+    
+    // Update node log tabs after SignalR is connected
+    updateNodeLogTabs();
   } catch (err) {
     logTerminal(`[ui] SignalR connection failed: ${err.message}`);
   }
@@ -2428,6 +2506,171 @@ async function initSignalR() {
 let currentArtifact = null; // Store current artifact metadata
 let isRunning = false;
 let _lastLoadedArtifactLogic = null;
+let controllableVars = new Map(); // Track which variables are controllable by Host
+let varsTableBuilt = false; // Track if variable table DOM has been built
+let editingVarName = null; // Track which variable is currently being edited
+
+// Fetch controllable variables info from backend
+async function fetchControllableVars() {
+  try {
+    const resp = await api("GET", "/api/variables/controllable");
+    controllableVars.clear();
+    if (resp.variables) {
+      for (const v of resp.variables) {
+        controllableVars.set(v.name.toLowerCase(), v);
+      }
+    }
+  } catch (err) {
+    // Ignore - controllable info not available yet
+  }
+}
+
+// Check if a variable is controllable (not LowerIO by any node)
+function isVarControllable(fieldName) {
+  const info = controllableVars.get(fieldName.toLowerCase());
+  if (info) return info.controllable;
+  // If not in controllableVars, check from artifact flags
+  if (!currentArtifact?.variables) return false;
+  const v = currentArtifact.variables.find(x => x.name.toLowerCase() === fieldName.toLowerCase());
+  // Controllable if NOT LowerIO (flags 0x02)
+  return v && v.flags !== 0x02;
+}
+
+// Send variable change to backend
+async function setVariable(name, value, type) {
+  try {
+    // Round to int if type is int
+    let finalValue = value;
+    if (type && (type.toLowerCase().includes("int") || type === "byte" || type === "sbyte" || type === "short" || type === "ushort")) {
+      finalValue = Math.round(parseFloat(value));
+      if (isNaN(finalValue)) finalValue = 0;
+    }
+    const resp = await api("POST", "/api/variable/set", { name, value: finalValue, typeHint: type });
+    if (resp.ok) {
+      logTerminal(`[var] ${name} = ${resp.value}`);
+    } else {
+      logTerminal(`[var] ERROR: ${resp.error}`);
+    }
+  } catch (err) {
+    logTerminal(`[var] ERROR: ${err.message || err}`);
+  }
+}
+
+// Show inline edit input for a variable
+function showVarEdit(varName, currentValue, varType, targetCell) {
+  editingVarName = varName; // Mark as editing
+  
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "varInlineInput";
+  input.value = currentValue === "Not Running" ? "" : currentValue;
+  input.placeholder = `Enter ${varType} value`;
+  
+  const originalContent = targetCell.innerHTML;
+  targetCell.innerHTML = "";
+  targetCell.appendChild(input);
+  input.focus();
+  input.select();
+  
+  const commit = async () => {
+    editingVarName = null; // Clear editing state
+    const newValue = input.value;
+    targetCell.innerHTML = escapeHtml(newValue || currentValue);
+    if (newValue && newValue !== currentValue) {
+      await setVariable(varName, newValue, varType);
+    }
+  };
+  
+  const cancel = () => {
+    editingVarName = null; // Clear editing state
+    targetCell.innerHTML = originalContent;
+  };
+  
+  input.addEventListener("blur", commit);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      input.blur();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      cancel();
+    }
+  });
+}
+
+// Build the variable table structure (called once when artifact changes or on connect)
+function buildVarsTable() {
+  const host = byId("vars");
+  
+  if (!currentArtifact) {
+    host.innerHTML = '<div class="varsEmpty">Artifact not available<br><span class="muted">Build a .cs file first</span></div>';
+    varsTableBuilt = false;
+    return;
+  }
+
+  if (!currentArtifact.variables || currentArtifact.variables.length === 0) {
+    host.innerHTML = '<div class="varsEmpty">No variables in artifact</div>';
+    varsTableBuilt = false;
+    return;
+  }
+
+  const rows = currentArtifact.variables.map(v => {
+    const controllable = v.flags !== 0x02; // NOT LowerIO
+    const editBtn = controllable
+      ? `<button class="varEditBtn" data-var="${escapeHtml(v.name)}" data-type="${escapeHtml(v.type)}" title="Edit value">✎</button>`
+      : `<span class="varReadOnly" title="Controlled by MCU">🔒</span>`;
+    
+    return `<tr data-var-row="${escapeHtml(v.name)}">
+      <td class="varName">${escapeHtml(v.name)} <span class="muted">(${escapeHtml(v.type)})</span>${editBtn}</td>
+      <td class="varValue notRunning" data-var="${escapeHtml(v.name)}">Not Running</td>
+    </tr>`;
+  }).join("");
+
+  host.innerHTML = `<div class="varsHeader">${escapeHtml(currentArtifact.name)}</div><table class="varsTable">${rows}</table>`;
+  
+  // Attach click handlers for edit buttons
+  host.querySelectorAll(".varEditBtn").forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const varName = btn.dataset.var;
+      const varType = btn.dataset.type;
+      const valueCell = host.querySelector(`td.varValue[data-var="${varName}"]`);
+      if (valueCell) {
+        showVarEdit(varName, valueCell.textContent, varType, valueCell);
+      }
+    };
+  });
+  
+  varsTableBuilt = true;
+}
+
+// Update variable values only (called on SignalR snapshot)
+function updateVarsValues(snap) {
+  if (!snap || !snap.fields) return;
+  
+  const host = byId("vars");
+  
+  // Update header if target type changed
+  const header = host.querySelector(".varsHeader");
+  if (header && snap.targetType) {
+    header.textContent = snap.targetType;
+  }
+  
+  isRunning = true;
+  
+  for (const f of snap.fields) {
+    // Skip if this variable is currently being edited
+    if (editingVarName && editingVarName.toLowerCase() === f.name.toLowerCase()) {
+      continue;
+    }
+    
+    const valueCell = host.querySelector(`td.varValue[data-var="${f.name}"]`);
+    if (valueCell) {
+      valueCell.textContent = f.value;
+      valueCell.classList.remove("notRunning");
+    }
+  }
+}
 
 function renderVars(snap) {
   const host = byId("vars");
@@ -2435,37 +2678,18 @@ function renderVars(snap) {
   // Check if we have a built artifact
   if (!currentArtifact) {
     host.innerHTML = '<div class="varsEmpty">Artifact not available<br><span class="muted">Build a .cs file first</span></div>';
+    varsTableBuilt = false;
     return;
   }
 
-  // If we have an artifact but it's from SignalR update
+  // If table not built yet, build it
+  if (!varsTableBuilt) {
+    buildVarsTable();
+  }
+  
+  // If we have a snapshot, just update values (not rebuild DOM)
   if (snap && snap.fields) {
-    isRunning = true;
-    const rows = snap.fields
-      .map((f) => {
-        const icon = f.icon === "arrow-down" ? "⬇" : f.icon === "arrow-up" ? "⬆" : "○";
-        const editable = f.icon === "arrow-up" ? ' contenteditable="true" class="editable"' : '';
-        return `<tr><td class="varName">${icon} ${escapeHtml(f.name)} <span class="muted">(${f.type})</span></td><td class="varValue"${editable}>${escapeHtml(
-          f.value
-        )}</td></tr>`;
-      })
-      .join("");
-    host.innerHTML = `<div class="varsHeader">${escapeHtml(snap.targetType || currentArtifact.name)}</div><table class="varsTable">${rows}</table>`;
-    return;
-  }
-
-  // Show artifact variables but with "Not Running" status
-  if (currentArtifact.variables) {
-    const rows = currentArtifact.variables
-      .map((v) => {
-        const icon = v.direction === "output" ? "⬆" : "⬇";
-        const editable = v.direction === "output" ? ' contenteditable="true" class="editable"' : '';
-        return `<tr><td class="varName">${icon} ${escapeHtml(v.name)} <span class="muted">(${v.type})</span></td><td class="varValue notRunning"${editable}>Not Running</td></tr>`;
-      })
-      .join("");
-    host.innerHTML = `<div class="varsHeader">${escapeHtml(currentArtifact.name)}</div><table class="varsTable">${rows}</table>`;
-  } else {
-    host.innerHTML = '<div class="varsEmpty">No variables in artifact</div>';
+    updateVarsValues(snap);
   }
 }
 
@@ -2685,9 +2909,8 @@ function initButtons() {
     }
   };
 
-  byId("btnClearTerminal").onclick = () => {
-    byId("terminal").innerHTML = "";
-  };
+  // Initialize log tabs (Terminal + per-node tabs)
+  initLogTabs();
 
   byId("btnRun").onclick = async () => {
     try {
@@ -2798,6 +3021,191 @@ function initButtons() {
   });
 }
 
+// --- Node Logs (Dynamic Tabs) ---
+
+let activeLogTab = "terminal"; // "terminal" or nodeId
+const nodeLogPanes = new Map(); // nodeId -> { element, content, lineCount }
+const nodeLogMaxLines = 2000; // Max lines to keep per node log
+
+function initLogTabs() {
+  // Set up terminal tab click
+  const terminalTab = document.querySelector('.termTab[data-tab="terminal"]');
+  if (terminalTab) {
+    terminalTab.onclick = () => switchLogTab("terminal");
+  }
+  
+  // Set up clear button
+  const btnClear = byId("btnClearLog");
+  if (btnClear) {
+    btnClear.onclick = clearCurrentLog;
+  }
+}
+
+function switchLogTab(tabId) {
+  activeLogTab = tabId;
+  
+  // Update tab buttons
+  document.querySelectorAll(".termTab").forEach(tab => {
+    tab.classList.toggle("active", tab.dataset.tab === tabId);
+  });
+  
+  // Hide all panes in container
+  const container = byId("logPanesContainer");
+  if (container) {
+    container.querySelectorAll(".logPane").forEach(pane => {
+      pane.classList.remove("active");
+    });
+  }
+  
+  // Show selected pane
+  if (tabId === "terminal") {
+    const terminalPane = byId("terminalPane");
+    if (terminalPane) terminalPane.classList.add("active");
+  } else {
+    const pane = nodeLogPanes.get(tabId);
+    if (pane) pane.element.classList.add("active");
+  }
+}
+
+function clearCurrentLog() {
+  if (activeLogTab === "terminal") {
+    byId("terminal").innerHTML = "";
+  } else {
+    const pane = nodeLogPanes.get(activeLogTab);
+    if (pane) {
+      pane.content.innerHTML = "";
+      pane.lineCount = 0;
+    }
+    // Also clear on server
+    api("POST", `/api/logs/node/${encodeURIComponent(activeLogTab)}/clear`).catch(() => {});
+  }
+}
+
+function ensureNodeLogTab(nodeId, nodeName) {
+  if (nodeLogPanes.has(nodeId)) return;
+  
+  // Create tab button
+  const tabsContainer = byId("nodeLogTabs");
+  const tabBtn = document.createElement("button");
+  tabBtn.className = "termTab";
+  tabBtn.dataset.tab = nodeId;
+  tabBtn.textContent = nodeName || nodeId;
+  tabBtn.onclick = () => switchLogTab(nodeId);
+  tabsContainer.appendChild(tabBtn);
+  
+  // Create pane in the unified container
+  const panesContainer = byId("logPanesContainer");
+  const pane = document.createElement("div");
+  pane.className = "logPane"; // Use same class as terminal pane
+  pane.dataset.nodeId = nodeId;
+  
+  const content = document.createElement("div");
+  content.className = "terminal";
+  pane.appendChild(content);
+  
+  const status = document.createElement("div");
+  status.className = "nodeLogStatus";
+  status.textContent = "0 lines";
+  pane.appendChild(status);
+  
+  panesContainer.appendChild(pane);
+  
+  nodeLogPanes.set(nodeId, { element: pane, content, status, lineCount: 0 });
+  
+  // Load initial history
+  loadNodeLogHistory(nodeId);
+}
+
+function removeNodeLogTab(nodeId) {
+  const pane = nodeLogPanes.get(nodeId);
+  if (!pane) return;
+  
+  // Remove tab button
+  const tabBtn = document.querySelector(`.termTab[data-tab="${nodeId}"]`);
+  if (tabBtn) tabBtn.remove();
+  
+  // Remove pane
+  pane.element.remove();
+  nodeLogPanes.delete(nodeId);
+  
+  // Switch to terminal if this was active
+  if (activeLogTab === nodeId) {
+    switchLogTab("terminal");
+  }
+}
+
+async function loadNodeLogHistory(nodeId) {
+  const pane = nodeLogPanes.get(nodeId);
+  if (!pane) return;
+  
+  try {
+    const res = await api("GET", `/api/logs/node/${encodeURIComponent(nodeId)}?offset=0&limit=1000`);
+    if (res.lines && res.lines.length > 0) {
+      for (const line of res.lines) {
+        appendNodeLogLine(nodeId, line, false);
+      }
+      pane.content.scrollTop = pane.content.scrollHeight;
+    }
+  } catch (err) {
+    console.warn(`Failed to load log history for ${nodeId}:`, err);
+  }
+}
+
+function appendNodeLogLine(nodeId, line, autoScroll = true) {
+  const pane = nodeLogPanes.get(nodeId);
+  if (!pane) return;
+  
+  const div = document.createElement("div");
+  div.textContent = line;
+  pane.content.appendChild(div);
+  pane.lineCount++;
+  
+  // Trim old lines if over limit
+  while (pane.lineCount > nodeLogMaxLines && pane.content.firstChild) {
+    pane.content.removeChild(pane.content.firstChild);
+    pane.lineCount--;
+  }
+  
+  // Update status
+  pane.status.textContent = `${pane.lineCount} lines`;
+  
+  // Auto-scroll if near bottom
+  if (autoScroll) {
+    const isNearBottom = pane.content.scrollHeight - pane.content.scrollTop - pane.content.clientHeight < 100;
+    if (isNearBottom) {
+      pane.content.scrollTop = pane.content.scrollHeight;
+    }
+  }
+}
+
+function updateNodeLogTabs() {
+  // Sync tabs with graph nodes
+  if (!graph) return;
+  
+  const currentNodeIds = new Set();
+  for (const node of graph._nodes || []) {
+    if (node.type === "coral/node") {
+      const nodeId = String(node.id);
+      const nodeName = node.properties?.nodeName || node.title || nodeId;
+      currentNodeIds.add(nodeId);
+      ensureNodeLogTab(nodeId, nodeName);
+      
+      // Update tab name if changed
+      const tabBtn = document.querySelector(`.termTab[data-tab="${nodeId}"]`);
+      if (tabBtn && tabBtn.textContent !== nodeName) {
+        tabBtn.textContent = nodeName;
+      }
+    }
+  }
+  
+  // Remove tabs for deleted nodes
+  for (const nodeId of nodeLogPanes.keys()) {
+    if (!currentNodeIds.has(nodeId)) {
+      removeNodeLogTab(nodeId);
+    }
+  }
+}
+
 // --- Boot ---
 
 (async function boot() {
@@ -2843,6 +3251,10 @@ function initButtons() {
     
     logTerminal("[ui] Connecting SignalR...");
     await initSignalR();
+    
+    // Update node log tabs based on loaded graph
+    updateNodeLogTabs();
+    
     logTerminal("[ui] Boot complete.");
     booting = false;
   } catch (err) {

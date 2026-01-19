@@ -19,15 +19,20 @@ public sealed class DiverBuildService
     public async Task<BuildResult> BuildFromLogicCsAsync(string logicFileName, string logicCs, CancellationToken ct)
     {
         _store.EnsureDataLayout();
+        
+        await _terminal.LineAsync($"[build] ========== Starting Build Process ==========", ct);
+        await _terminal.LineAsync($"[build] Target file: {logicFileName}", ct);
+        await _terminal.LineAsync($"[build] Source length: {logicCs.Length} characters", ct);
 
         // Use single fixed build folder - clear it before each build
         var buildRoot = Path.Combine(_store.BuildsDir, "current");
         if (Directory.Exists(buildRoot))
         {
-            await _terminal.LineAsync($"[build] Cleaning previous build folder...", ct);
+            await _terminal.LineAsync($"[build] Cleaning previous build folder: {buildRoot}", ct);
             try
             {
                 Directory.Delete(buildRoot, recursive: true);
+                await _terminal.LineAsync($"[build] Clean completed successfully", ct);
             }
             catch (Exception ex)
             {
@@ -36,7 +41,7 @@ public sealed class DiverBuildService
         }
         
         Directory.CreateDirectory(buildRoot);
-        await _terminal.LineAsync($"[build] Creating build project: {buildRoot}", ct);
+        await _terminal.LineAsync($"[build] Build root created: {buildRoot}", ct);
         var projDir = Path.Combine(buildRoot, "proj");
         Directory.CreateDirectory(projDir);
 
@@ -73,14 +78,15 @@ public sealed class DiverBuildService
         if (Directory.Exists(_store.InputsDir))
         {
             var sourceFiles = Directory.GetFiles(_store.InputsDir, "*.cs", SearchOption.AllDirectories);
+            await _terminal.LineAsync($"[build] Copying {sourceFiles.Length} source file(s) from inputs:", ct);
             foreach (var src in sourceFiles)
             {
                 var rel = Path.GetRelativePath(_store.InputsDir, src);
                 var dest = Path.Combine(projDir, rel);
                 Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
                 File.Copy(src, dest, overwrite: true);
+                await _terminal.LineAsync($"[build]   + {rel}", ct);
             }
-            await _terminal.LineAsync($"[build] Included {sourceFiles.Length} source file(s) from inputs.", ct);
         }
         else
         {
@@ -132,6 +138,8 @@ public sealed class DiverBuildService
                           """;
         await File.WriteAllTextAsync(Path.Combine(projDir, "FodyWeavers.xml"), fodyWeavers, Encoding.UTF8, ct);
 
+        await _terminal.LineAsync($"[build] Preparing MSBuild process...", ct);
+        
         var psi = new ProcessStartInfo
         {
             FileName = "dotnet",
@@ -140,9 +148,19 @@ public sealed class DiverBuildService
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
         };
+        
+        // Set environment to force UTF-8 output from dotnet
+        psi.Environment["DOTNET_CLI_UI_LANGUAGE"] = "en";
+        psi.Environment["DOTNET_NOLOGO"] = "true";
 
+        await _terminal.LineAsync($"[build] Executing: dotnet build -c Debug", ct);
+        await _terminal.LineAsync($"[build] Working directory: {projDir}", ct);
+        await _terminal.LineAsync($"[build] ---------- MSBuild Output ----------", ct);
+        
         using var proc = Process.Start(psi);
         if (proc == null) throw new InvalidOperationException("Failed to start dotnet build.");
 
@@ -157,18 +175,30 @@ public sealed class DiverBuildService
         await Task.WhenAll(stdout, stderr);
         await proc.WaitForExitAsync(ct);
 
+        await _terminal.LineAsync($"[build] ---------- End MSBuild Output ----------", ct);
+        
         if (proc.ExitCode != 0)
+        {
+            await _terminal.LineAsync($"[build] BUILD FAILED with exit code {proc.ExitCode}", ct);
             throw new BuildFailedException(proc.ExitCode, logPath, ring.Snapshot());
+        }
+        
+        await _terminal.LineAsync($"[build] MSBuild completed successfully (exit code 0)", ct);
 
         var outDir = Path.Combine(projDir, "bin", "Debug", "net8.0");
         var dllPath = Path.Combine(outDir, assemblyName + ".dll");
+        await _terminal.LineAsync($"[build] Looking for output assembly: {dllPath}", ct);
+        
         if (!File.Exists(dllPath))
             throw new FileNotFoundException("Build succeeded but output DLL not found.", dllPath);
+        
+        var dllSize = new FileInfo(dllPath).Length;
+        await _terminal.LineAsync($"[build] Output assembly found: {dllSize:N0} bytes", ct);
 
         // Clear previous generated artifacts before extracting new ones
         if (Directory.Exists(_store.GeneratedDir))
         {
-            await _terminal.LineAsync($"[build] Clearing previous generated artifacts...", ct);
+            await _terminal.LineAsync($"[build] Clearing previous generated artifacts from: {_store.GeneratedDir}", ct);
             foreach (var f in Directory.GetFiles(_store.GeneratedDir, "*", SearchOption.TopDirectoryOnly))
             {
                 try { File.Delete(f); } catch { /* ignore locked files */ }
@@ -177,8 +207,21 @@ public sealed class DiverBuildService
         Directory.CreateDirectory(_store.GeneratedDir);
 
         // Extract artifacts directly into generated folder (no subfolders)
+        await _terminal.LineAsync($"[build] Extracting DIVER artifacts from assembly...", ct);
         var artifacts = ExtractArtifacts(dllPath, _store.GeneratedDir);
-        await _terminal.LineAsync($"[build] OK. Extracted {artifacts.Count} logic artifact set(s) to generated/", ct);
+        
+        foreach (var kv in artifacts)
+        {
+            var art = kv.Value;
+            await _terminal.LineAsync($"[build]   + {kv.Key}:", ct);
+            await _terminal.LineAsync($"[build]       .bin:          {new FileInfo(art.BinPath).Length:N0} bytes", ct);
+            await _terminal.LineAsync($"[build]       .bin.json:     {new FileInfo(art.MetaJsonPath).Length:N0} bytes", ct);
+            await _terminal.LineAsync($"[build]       .diver:        {new FileInfo(art.DiverPath).Length:N0} bytes", ct);
+            await _terminal.LineAsync($"[build]       .diver.map.json: {new FileInfo(art.DiverMapPath).Length:N0} bytes", ct);
+        }
+        
+        await _terminal.LineAsync($"[build] ========== Build Complete ==========", ct);
+        await _terminal.LineAsync($"[build] Successfully extracted {artifacts.Count} logic artifact set(s)", ct);
 
         return new BuildResult(buildRoot, projDir, dllPath, artifacts) { BuildId = buildId };
     }

@@ -330,6 +330,127 @@ public static class ApiRoutes
 
         app.MapGet("/api/runtime", (RuntimeSessionService runtime) => Results.Json(runtime.GetSnapshot()));
 
+        // Node logs API - list nodes with logs
+        app.MapGet("/api/logs/nodes", (RuntimeSessionService runtime) =>
+        {
+            var nodeIds = runtime.GetLoggedNodeIds();
+            return Results.Json(new { nodes = nodeIds });
+        });
+
+        // Node logs API - get log chunk for a specific node
+        app.MapGet("/api/logs/node/{nodeId}", (RuntimeSessionService runtime, string nodeId, int? offset, int? limit) =>
+        {
+            var chunk = runtime.GetNodeLogs(nodeId, offset ?? 0, limit ?? 200);
+            return Results.Json(chunk);
+        });
+
+        // Node logs API - clear logs for a specific node
+        app.MapPost("/api/logs/node/{nodeId}/clear", (RuntimeSessionService runtime, string nodeId) =>
+        {
+            runtime.ClearNodeLogs(nodeId);
+            return Results.Ok(new { ok = true });
+        });
+
+        // Node logs API - clear all node logs
+        app.MapPost("/api/logs/clear", (RuntimeSessionService runtime) =>
+        {
+            runtime.ClearAllNodeLogs();
+            return Results.Ok(new { ok = true });
+        });
+
+        // Set cart variable from Host (for controllable variables)
+        app.MapPost("/api/variable/set", async (HttpRequest req, TerminalBroadcaster term, CancellationToken ct) =>
+        {
+            try
+            {
+                var payload = await req.ReadFromJsonAsync<SetVariableRequest>(cancellationToken: ct);
+                if (payload == null || string.IsNullOrWhiteSpace(payload.Name))
+                    return Results.BadRequest(new { ok = false, error = "Missing variable name" });
+
+                var session = CoralinkerSDK.DIVERSession.Instance;
+                
+                // Check if variable is controlled by any node (LowerIO)
+                // TODO: Multi-node check - if any child node declares this as LowerIO, Host can't modify it
+                // For now, we allow modification if it's not declared as LowerIO by any connected node
+                bool isLowerIOByAnyNode = false;
+                foreach (var node in session.Nodes.Values)
+                {
+                    var field = node.CartFields.FirstOrDefault(f => 
+                        string.Equals(f.Name, payload.Name, StringComparison.OrdinalIgnoreCase));
+                    if (field != null && field.IsLowerIO)
+                    {
+                        isLowerIOByAnyNode = true;
+                        break;
+                    }
+                }
+
+                if (isLowerIOByAnyNode)
+                {
+                    return Results.BadRequest(new { ok = false, error = $"Variable '{payload.Name}' is controlled by MCU (LowerIO)" });
+                }
+
+                // Parse value based on type
+                object? parsedValue = payload.Value;
+                if (payload.TypeHint != null)
+                {
+                    parsedValue = ValueParser.ParseValueByType(payload.Value, payload.TypeHint);
+                }
+
+                // Set the variable in HostRuntime (will be sent to MCU on next UpperIO cycle)
+                CoralinkerSDK.HostRuntime.SetCartVariable("", payload.Name, parsedValue ?? 0);
+                
+                await term.LineAsync($"[var] Set {payload.Name} = {parsedValue}", ct);
+                return Results.Ok(new { ok = true, name = payload.Name, value = parsedValue });
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { ok = false, error = ex.Message });
+            }
+        });
+
+        // Get controllable variables info (which variables Host can modify)
+        app.MapGet("/api/variables/controllable", () =>
+        {
+            var session = CoralinkerSDK.DIVERSession.Instance;
+            var controllable = new List<object>();
+
+            // Collect all fields from all nodes
+            var allFields = new Dictionary<string, (CoralinkerSDK.CartFieldInfo field, bool isLowerIO)>(StringComparer.OrdinalIgnoreCase);
+            foreach (var node in session.Nodes.Values)
+            {
+                foreach (var field in node.CartFields)
+                {
+                    if (!allFields.ContainsKey(field.Name))
+                    {
+                        allFields[field.Name] = (field, field.IsLowerIO);
+                    }
+                    else if (field.IsLowerIO)
+                    {
+                        // If any node declares it as LowerIO, mark it
+                        var existing = allFields[field.Name];
+                        allFields[field.Name] = (existing.field, true);
+                    }
+                }
+            }
+
+            foreach (var kv in allFields)
+            {
+                var (field, isLowerIO) = kv.Value;
+                controllable.Add(new
+                {
+                    name = field.Name,
+                    type = CoralinkerSDK.HostRuntime.GetTypeName(field.TypeId),
+                    typeId = field.TypeId,
+                    controllable = !isLowerIO, // Host can control if NOT LowerIO
+                    isLowerIO,
+                    isUpperIO = field.IsUpperIO,
+                    isMutual = field.IsMutual
+                });
+            }
+
+            return Results.Json(new { variables = controllable });
+        });
+
         app.MapPost("/api/node/{nodeId}/ports", async (
             string nodeId,
             HttpRequest req,
@@ -425,5 +546,44 @@ public sealed record NewInputRequest(string Name, string? Template);
 public sealed record PortConfigRequest(PortConfigItem[] Ports);
 
 public sealed record PortConfigItem(string Type, uint Baud, uint? ReceiveFrameMs, uint? RetryTimeMs);
+
+public sealed record SetVariableRequest(string Name, object? Value, string? TypeHint);
+
+internal static class ValueParser
+{
+    public static object? ParseValueByType(object? value, string typeHint)
+    {
+        if (value == null) return null;
+        var str = value.ToString() ?? "";
+        
+        return typeHint.ToLowerInvariant() switch
+        {
+            "boolean" or "bool" => bool.TryParse(str, out var b) ? b : str == "1",
+            "byte" => byte.TryParse(str, out var by) ? by : (byte)0,
+            "sbyte" => sbyte.TryParse(str, out var sb) ? sb : (sbyte)0,
+            "int16" or "short" => short.TryParse(str, out var s) ? s : (short)0,
+            "uint16" or "ushort" => ushort.TryParse(str, out var us) ? us : (ushort)0,
+            "int32" or "int" => int.TryParse(str, out var i) ? i : 0,
+            "uint32" or "uint" => uint.TryParse(str, out var ui) ? ui : 0u,
+            "single" or "float" => float.TryParse(str, out var f) ? f : 0f,
+            "byte[]" => ParseHexBytes(str),
+            _ => value
+        };
+    }
+
+    private static byte[] ParseHexBytes(string str)
+    {
+        // Support formats: "01 02 03", "010203", "0x01,0x02,0x03"
+        str = str.Replace("0x", "").Replace(",", " ").Replace("-", " ");
+        var parts = str.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var bytes = new List<byte>();
+        foreach (var part in parts)
+        {
+            if (byte.TryParse(part, System.Globalization.NumberStyles.HexNumber, null, out var b))
+                bytes.Add(b);
+        }
+        return bytes.ToArray();
+    }
+}
 
 

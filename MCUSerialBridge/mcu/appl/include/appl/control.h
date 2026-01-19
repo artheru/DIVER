@@ -16,7 +16,7 @@ extern uint8_t* g_program_buffer;
 extern uint32_t g_program_length;
 
 /** @brief 程序缓冲区总大小（用于 VM 内存分配） */
-#define PROGRAM_BUFFER_MAX_SIZE (16 * 1024)
+#define PROGRAM_BUFFER_MAX_SIZE (20 * 1024)
 
 /*
 下列所有命令返回的错误码都会直接被交互层（packet）直接同步地返回给PC

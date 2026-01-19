@@ -147,3 +147,31 @@ No internet connection required - fully offline application.
 
 All requested features have been implemented and tested. The application is functional and ready for use.
 
+---
+
+## Updates (2026-01-19): MCU Integration Enhancements
+
+### **New Features**
+
+| Feature | Description |
+|---------|-------------|
+| Layout Discovery | MCU reports hardware layout (I/O counts, port types/names) |
+| CANMessage API | `ReadCANMessage` / `WriteCANMessage` syntax sugar in RunOnMCU |
+| DIVER Runtime | Serial/CAN data forwarded to `vm_put_stream_buffer` / `vm_put_event_buffer` |
+
+### **Files Changed**
+- `MCUSerialBridge/c_core/` - Protocol structs, mcu_get_layout
+- `MCUSerialBridge/wrapper/MCUSerialBridgeCLR.cs` - LayoutInfo, GetLayout wrapper
+- `MCUSerialBridge/mcu/appl/source/` - packet.c, upload.c
+- `DiverTest/RunOnMCU.cs` - CANMessage class
+- `3rd/CoralinkerSDK/MCUNode.cs` - Auto fetch Layout
+
+### **Outstanding Issues**
+
+1. **Node console logs** - MCU printf not in web terminal
+2. **OFFLINE state** - Show when connection fails
+3. **Snapshots** - Digital I/O display not implemented
+4. **logicName dropdown** - Should select from compiled artifacts
+5. **mcuUri dropdown** - Should use SerialPortResolver
+6. **Variables unified** - Remove Upper/Lower split
+7. **Connect/Start/Reset** - Should be separate operations with state indicators

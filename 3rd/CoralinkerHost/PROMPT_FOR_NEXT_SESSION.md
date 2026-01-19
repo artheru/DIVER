@@ -383,3 +383,65 @@ curl http://localhost:4499/api/project
 
 **Status**: Ready for production use. All critical functionality verified through automated testing.
 
+---
+
+## 🔧 Session 2026-01-19: MCU Integration Enhancements
+
+### **New Features Implemented**
+
+#### MCU Layout Discovery Protocol
+- Added `CommandGetLayout = 0x06` to MCU protocol
+- MCU reports: digital input/output counts, port count, port types and names
+- MCUNode auto-fetches Version + Layout after Connect
+- Frontend port config uses discovered layout (type + name)
+
+#### CANMessage API
+- `CANMessage` class in `RunOnMCU.cs` (DIVER-compatible)
+- `ReadCANMessage(port, canId)` / `WriteCANMessage(port, message)` syntax sugar
+- DLC derived from `Payload.Length` (no separate field)
+
+#### DIVER Runtime Integration
+- `upload.c` calls `vm_put_stream_buffer()` for Serial data
+- `upload.c` calls `vm_put_event_buffer()` for CAN data (using `CANData` struct)
+
+### **Files Modified**
+- `MCUSerialBridge/c_core/include/msb_protocol.h` - LayoutInfoC, PortDescriptor
+- `MCUSerialBridge/c_core/src/msb_bridge.c` - mcu_get_layout implementation
+- `MCUSerialBridge/wrapper/MCUSerialBridgeCLR.cs` - LayoutInfo, GetLayout wrapper
+- `MCUSerialBridge/mcu/appl/source/packet.c` - CommandGetLayout handler
+- `MCUSerialBridge/mcu/appl/source/upload.c` - DIVER runtime integration
+- `MCUSerialBridge/mcu/bsp/FRLD-DIVERBK-V2/ports.c` - bsp_get_layout
+- `DiverTest/RunOnMCU.cs` - CANMessage class
+- `3rd/CoralinkerSDK/MCUNode.cs` - Auto fetch Layout
+
+---
+
+## ⚠️ Outstanding Issues (2026-01-19)
+
+### **1. Node Console Logs Not Displayed**
+MCU `console_printf()` output not forwarded to web terminal.
+
+### **2. Node State Shows Stale Data**
+Should display "OFFLINE" when connection/query fails.
+
+### **3. Snapshots Not Implemented**
+Digital I/O snapshot display (16 input + 16 output LEDs) not working.
+
+### **4. logicName Should Be Dropdown**
+Currently manual text input. Should select from compiled artifacts in `generated/latest/`.
+
+### **5. mcuUri Should Be Simplified**
+Currently manual entry like `serial://COM3,2000000`. Should be dropdown with:
+- Port discovery from `SerialPortResolver`
+- Format: `COM3@2000000` or `SN:ABC123@2000000`
+
+### **6. Variables Panel Split**
+Cart variables split into Upper/Lower (⬆/⬇). Should be unified list.
+
+### **7. Connect/Start/Reset Separation**
+Current: Connect does Config+Program automatically.
+Expected:
+- **Connect**: Only open serial + GetVersion + GetLayout
+- **Start**: Config + Program + Start execution
+- **Reset**: Stop + clear state
+- Each button needs visual state indicator

@@ -364,6 +364,12 @@ int newobj(int clsid)
 {
 	ASSERT_LANG(clsid != -1, "bad clsid:-1");
 	int reference_id = heap_newobj_id;
+	
+	// Bounds check: heap_obj array has 1024 slots, and id must be >= 1
+	if (reference_id < 1 || reference_id >= 1024) {
+		ASSERT_RT(0, "heap_obj invalid in newobj: heap_newobj_id=%d (must be 1-1023)", reference_id);
+	}
+	
 	heap_newobj_id++;
 	uchar* tail = reference_id == 1 ? heap_tail : heap_obj[reference_id - 1].pointer;
 	short is_builtin = (clsid & 0xf000);
@@ -415,6 +421,12 @@ int newobj(int clsid)
 int newstr(short len, uchar* src)
 {
 	int reference_id = heap_newobj_id;
+	
+	// Bounds check: heap_obj array has 1024 slots, and id must be >= 1
+	if (reference_id < 1 || reference_id >= 1024) {
+		ASSERT_RT(0, "heap_obj invalid: heap_newobj_id=%d (must be 1-1023)", reference_id);
+	}
+	
 	uchar* tail = heap_newobj_id == 1 ? heap_tail : heap_obj[heap_newobj_id - 1].pointer;
 	int mysz = len + StringHeaderSize + 1;
 	struct string_val* my_ptr = tail - mysz;
@@ -435,6 +447,12 @@ int newstr(short len, uchar* src)
 int newarr(short len, uchar type_id)
 {
 	int reference_id = heap_newobj_id;
+	
+	// Bounds check: heap_obj array has 1024 slots, and id must be >= 1
+	if (reference_id < 1 || reference_id >= 1024) {
+		ASSERT_RT(0, "heap_obj invalid in newarr: heap_newobj_id=%d (must be 1-1023)", reference_id);
+	}
+	
 	uchar* tail = heap_newobj_id == 1 ? heap_tail : heap_obj[heap_newobj_id - 1].pointer;
 	int elemSz = get_type_sz(type_id); //no header.
 	int mysz = elemSz * len + ArrayHeaderSize;
@@ -3057,6 +3075,13 @@ void clean_up()
 		}
 	}
 	heap_newobj_id = lastobj + 1;
+	
+	// Sanity check: heap_newobj_id must be at least 1 (object 0 is null, object 1 is root)
+	if (heap_newobj_id < 1) {
+		ASSERT_RT(0, "clean_up bug: heap_newobj_id=%d (lastobj=%d), must be >= 1", heap_newobj_id, lastobj);
+		heap_newobj_id = 1; // Recovery: reset to valid state
+	}
+	
 	DBG("Heap cleanup complete. objcnt: %d->%d, size=%dB\n", prev_obj_n, lastobj, heap_tail - tail);
 
 
@@ -4510,6 +4535,12 @@ void builtin_RunOnMCU_WriteStream(uchar** reptr) {
 
 	enter_critical();
 	int n_offset = writing_buf->offset;
+	// Bounds check: prevent buffer overflow
+	if (writing_buf->offset + arr->len > BUF_SZ - sizeof(struct io_buf)) {
+		leave_critical();
+		ASSERT_RT(0, "WriteStream buffer overflow: offset=%d + len=%d > max", n_offset, arr->len);
+		return;
+	}
 	writing_buf->offset += arr->len;
 	leave_critical();
 
@@ -4538,6 +4569,12 @@ void builtin_RunOnMCU_WriteEvent(uchar** reptr) {
 
 	enter_critical();
 	int n_offset = writing_buf->offset;
+	// Bounds check: prevent buffer overflow
+	if (writing_buf->offset + arr->len > BUF_SZ - sizeof(struct io_buf)) {
+		leave_critical();
+		ASSERT_RT(0, "WriteEvent buffer overflow: offset=%d + len=%d > max", n_offset, arr->len);
+		return;
+	}
 	writing_buf->offset += arr->len;
 	leave_critical();
 
@@ -4565,6 +4602,12 @@ void builtin_RunOnMCU_WriteSnapshot(uchar** reptr) {
 	// don't have to have same snapshot layout.
 	enter_critical();
 	int n_offset = writing_buf->offset;
+	// Bounds check: prevent buffer overflow
+	if (writing_buf->offset + arr->len > BUF_SZ - sizeof(struct io_buf)) {
+		leave_critical();
+		ASSERT_RT(0, "WriteSnapshot buffer overflow: offset=%d + len=%d > max", n_offset, arr->len);
+		return;
+	}
 	writing_buf->offset += arr->len;
 	leave_critical();
 

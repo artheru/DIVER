@@ -129,7 +129,6 @@
       <input id="importFile" type="file" accept="application/json" class="hidden" />
       <div class="spacer"></div>
       <button id="btnBuild" class="iconBtn" title="Build">Build</button>
-      <button id="btnClearTerminal" class="iconBtn" title="Clear terminal">Clear</button>
       <div class="toolbarDivider" aria-hidden="true"></div>
       <button id="btnConnectAll" class="iconBtn withIcon" title="Connect">
         <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -142,19 +141,33 @@
       <button id="btnStop" class="iconBtn danger" title="Stop">■ Stop</button>
     </div>
 
-      <div class="panelTitle panelTitleRow">
-        <span>Terminal</span>
+      <div class="terminalTabs">
+        <button class="termTab active" data-tab="terminal">Terminal</button>
+        <div id="nodeLogTabs"></div>
+        <div class="termTabSpacer"></div>
+        <button id="btnClearLog" class="termTabBtn" title="Clear current log">🗑</button>
         <span id="syncIndicator" class="syncIndicator syncSynced" title="Project sync status">Synced</span>
       </div>
-      <div id="terminal" class="terminal"></div>
-      <div class="cmdRow">
-        <input id="cmdInput" placeholder="command" />
-        <button id="cmdSend" class="iconBtn" title="Send (Pending)">Send</button>
+      
+      <!-- All log panes container -->
+      <div id="logPanesContainer">
+        <!-- Terminal Pane (main build/system output) -->
+        <div id="terminalPane" class="logPane active" data-pane="terminal">
+          <div id="terminal" class="terminal"></div>
+          <div class="cmdRow">
+            <input id="cmdInput" placeholder="command" />
+            <button id="cmdSend" class="iconBtn" title="Send (Pending)">Send</button>
+          </div>
+        </div>
+        <!-- Node Log Panes will be dynamically created here -->
       </div>
     </div>
 
     <div id="bottomRight" class="panel">
-      <div class="panelTitle">Variables</div>
+      <div class="panelTitle panelTitleRow">
+        <span>Variables</span>
+        <a href="controlPanel.html" target="_blank" class="controlPanelLink" title="Open Control Panel">🎮</a>
+      </div>
       <div id="vars" class="vars"></div>
     </div>
   </div>

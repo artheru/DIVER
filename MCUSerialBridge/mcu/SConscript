@@ -70,7 +70,7 @@ default_defines = {
     'ASYNC_QUEUE_CAPACITY_LP': 2,
     'CONSOLE_MAX_STR': 512,
     'CONSOLE_UPSTREAM_BUFFER_SIZE': 2048,
-    'MEMPOOL_SIZE': 48 * 1024,
+    'MEMPOOL_SIZE': 32 * 1024,
     'HAS_DIVER_RUNTIME': HAS_DIVER_RUNTIME_VALUE,
 }
 merged_defines = {**default_defines, **conf_defines, 'PRODUCTION_NAME': f'"{PDN}"'}
