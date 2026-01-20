@@ -1,192 +1,51 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Coralinker DIVER Host</title>
-  <!-- Cache-bust app assets so browser always picks up latest UI changes during development -->
-  <link rel="stylesheet" href="app.css?v=20260101" />
-  <!-- Font Awesome removed for offline use - using text labels instead -->
-</head>
-<body>
-  <div id="newProjectDialog" class="modal hidden">
-    <div class="modalCard">
-      <div class="modalHeader">
-        <div>Create New Project?</div>
-      </div>
-      <div class="modalBody">
-        <p>Choose an option:</p>
-        <button id="btnNewClear" class="dialogBtn">Clear and New</button>
-        <button id="btnNewExport" class="dialogBtn">Export then New</button>
-        <button id="btnNewCancel" class="dialogBtn">Cancel</button>
-      </div>
-    </div>
-  </div>
+  <head>
+    <script>self["MonacoEnvironment"] = (function (paths) {
+          return {
+            globalAPI: false,
+            getWorkerUrl : function (moduleId, label) {
+              var result =  paths[label];
+              if (/^((http:)|(https:)|(file:)|(\/\/))/.test(result)) {
+                var currentUrl = String(window.location);
+                var currentOrigin = currentUrl.substr(0, currentUrl.length - window.location.hash.length - window.location.search.length - window.location.pathname.length);
+                if (result.substring(0, currentOrigin.length) !== currentOrigin) {
+                  var js = '/*' + label + '*/importScripts("' + result + '");';
+                  var blob = new Blob([js], { type: 'application/javascript' });
+                  return URL.createObjectURL(blob);
+                }
+              }
+              return result;
+            }
+          };
+        })({
+  "editorWorkerService": "/monacoeditorwork/editor.worker.bundle.js",
+  "css": "/monacoeditorwork/css.worker.bundle.js",
+  "html": "/monacoeditorwork/html.worker.bundle.js",
+  "json": "/monacoeditorwork/json.worker.bundle.js",
+  "typescript": "/monacoeditorwork/ts.worker.bundle.js",
+  "javascript": "/monacoeditorwork/ts.worker.bundle.js",
+  "less": "/monacoeditorwork/css.worker.bundle.js",
+  "scss": "/monacoeditorwork/css.worker.bundle.js",
+  "handlebars": "/monacoeditorwork/html.worker.bundle.js",
+  "razor": "/monacoeditorwork/html.worker.bundle.js"
+});</script>
 
-  <div id="newInputDialog" class="modal hidden">
-    <div class="modalCard">
-      <div class="modalHeader">
-        <div>New Input File</div>
-      </div>
-      <div class="modalBody">
-        <p>Enter file name (.cs will be added automatically):</p>
-        <input type="text" id="newInputName" class="dialogInput" placeholder="MyLogic" />
-        <button id="btnNewInputOK" class="dialogBtn">Create</button>
-        <button id="btnNewInputCancel" class="dialogBtn">Cancel</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="genericDialog" class="modal hidden" aria-modal="true" role="dialog">
-    <div class="modalCard">
-      <div class="modalHeader">
-        <div id="genericDialogTitle">Dialog</div>
-      </div>
-      <div id="genericDialogBody" class="modalBody"></div>
-      <div class="modalActions">
-        <button id="genericDialogCancel" class="iconBtn">Cancel</button>
-        <button id="genericDialogOk" class="iconBtn primary">OK</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="app">
-    <div id="topLeft" class="panel">
-      <div id="tabBar" class="tabBar"></div>
-      <div id="graphWrap">
-        <div id="graphToolbox" class="graphToolbox">
-          <button id="btnAddNode" class="toolboxBtn" title="Add Node">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect x="2" y="2" width="16" height="16" rx="3" stroke="currentColor" stroke-width="1.5"/>
-              <line x1="10" y1="6" x2="10" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-              <line x1="6" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
-          </button>
-        </div>
-        <canvas id="graphCanvas"></canvas>
-      </div>
-      <div id="tabEditor" class="tabEditorContainer hidden">
-        <div class="editorHeader">
-          <div id="tabEditorPath" class="editorPath">No file selected</div>
-          <div id="hexTools" class="hexTools hidden">
-            <span class="hexLabel">Addr</span>
-            <input id="hexAddr" class="hexAddr" placeholder="0x00000000" />
-            <button id="hexGo" class="iconBtn" title="Go to address">Go</button>
-            <span class="hexLabel">Cols</span>
-            <select id="hexCols" class="hexSelect" title="Bytes per row">
-              <option value="8">8</option>
-              <option value="16" selected>16</option>
-              <option value="32">32</option>
-            </select>
-            <span class="hexLabel">Group</span>
-            <select id="hexGroup" class="hexSelect" title="Group size (padding)">
-              <option value="4">4</option>
-              <option value="8" selected>8</option>
-              <option value="16">16</option>
-            </select>
-            <label class="hexToggle"><input id="hexInsertMode" type="checkbox" /> Insert</label>
-            <span id="hexStatus" class="hexStatus"></span>
-          </div>
-          <div class="editorBtns">
-            <button id="btnTabEditorDownload" class="iconBtn" title="Download">⬇</button>
-            <button id="btnTabEditorDelete" class="iconBtn danger" title="Delete">🗑</button>
-            <button id="btnTabEditorSave" class="iconBtn primary" title="Save (Ctrl+S)">💾</button>
-          </div>
-        </div>
-        <div id="tabMonacoHost" class="monacoHost hidden">
-          <div id="cmHost" class="cmHost"></div>
-          <div id="hexSplitHost" class="hexSplitHost hidden">
-            <div id="hexInspector" class="hexInspector" aria-label="Data inspector"></div>
-            <div class="hexMain">
-              <div id="hexScroll" class="hexScroll" tabindex="0" aria-label="Hex editor">
-                <div class="hexGrid">
-                  <div id="hexAddrCol" class="hexAddrCol" aria-label="Addresses"></div>
-                  <div id="hexHexCol" class="hexHexCol" aria-label="Hex bytes"></div>
-                  <div id="hexAsciiCol" class="hexAsciiCol" aria-label="ASCII"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div id="topRight" class="panel">
-      <div class="panelTitle">Assets</div>
-      <div id="assetsDrop" class="dropZone">
-        <div><i class="fa-solid fa-file-code"></i> Drop a <b>.cs</b> file here</div>
-        <div class="muted">Example: DiverTest/TestLogic.cs</div>
-      </div>
-      <div id="assetsTree" class="tree"></div>
-    </div>
-
-    <div id="bottomLeft" class="panel">
-    <div class="toolbar">
-      <button id="btnNew" class="iconBtn" title="New project">New</button>
-      <button id="btnSaveServer" class="iconBtn" title="Save on server">Save</button>
-      <button id="btnExport" class="iconBtn" title="Export to local">Export</button>
-      <button id="btnImport" class="iconBtn" title="Import from local">Import</button>
-      <input id="importFile" type="file" accept="application/json" class="hidden" />
-      <div class="spacer"></div>
-      <button id="btnBuild" class="iconBtn" title="Build">Build</button>
-      <div class="toolbarDivider" aria-hidden="true"></div>
-      <button id="btnConnectAll" class="iconBtn withIcon" title="Connect">
-        <svg viewBox="0 0 20 20" aria-hidden="true">
-          <path d="M6.2 6.2a4 4 0 0 1 5.6 0l.9.9a3 3 0 0 1 0 4.2l-1.3 1.3a3 3 0 0 1-4.2 0l-.7-.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-          <path d="M13.8 13.8a4 4 0 0 1-5.6 0l-.9-.9a3 3 0 0 1 0-4.2l1.3-1.3a3 3 0 0 1 4.2 0l.7.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-        </svg>
-        <span>Connect</span>
-      </button>
-      <button id="btnRun" class="iconBtn primary" title="Start">▶ Start</button>
-      <button id="btnStop" class="iconBtn danger" title="Stop">■ Stop</button>
-    </div>
-
-      <div class="terminalTabs">
-        <button class="termTab active" data-tab="terminal">Terminal</button>
-        <div id="nodeLogTabs"></div>
-        <div class="termTabSpacer"></div>
-        <button id="btnClearLog" class="termTabBtn" title="Clear current log">🗑</button>
-        <span id="syncIndicator" class="syncIndicator syncSynced" title="Project sync status">Synced</span>
-      </div>
-      
-      <!-- All log panes container -->
-      <div id="logPanesContainer">
-        <!-- Terminal Pane (main build/system output) -->
-        <div id="terminalPane" class="logPane active" data-pane="terminal">
-          <div id="terminal" class="terminal"></div>
-          <div class="cmdRow">
-            <input id="cmdInput" placeholder="command" />
-            <button id="cmdSend" class="iconBtn" title="Send (Pending)">Send</button>
-          </div>
-        </div>
-        <!-- Node Log Panes will be dynamically created here -->
-      </div>
-    </div>
-
-    <div id="bottomRight" class="panel">
-      <div class="panelTitle panelTitleRow">
-        <span>Variables</span>
-        <a href="controlPanel.html" target="_blank" class="controlPanelLink" title="Open Control Panel">🎮</a>
-      </div>
-      <div id="vars" class="vars"></div>
-    </div>
-  </div>
-
-  <script src="lib/litegraph.min.js"></script>
-  <script>
-    // Monaco editor disabled for offline use - fallback to textarea
-    window.__monacoReady = Promise.resolve(false);
-    // Disable AMD to allow SignalR to load as global
-    window.define = undefined;
-  </script>
-  <script src="lib/signalr.min.js"></script>
-  <link rel="stylesheet" href="lib/codemirror/codemirror.min.css" />
-  <link rel="stylesheet" href="lib/codemirror/monokai.min.css" />
-  <script src="lib/codemirror/codemirror.min.js"></script>
-  <script src="lib/codemirror/clike.min.js"></script>
-  <script src="lib/codemirror/simple.min.js"></script>
-  <script src="app.js?v=20260101"></script>
-</body>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Coralinker DIVER Host</title>
+    
+    <!-- Preconnect to improve font loading -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    
+    <!-- Inter + JetBrains Mono fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script type="module" crossorigin src="/assets/index-CEhpWVgd.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DZbsYAEZ.css">
+  </head>
+  <body>
+    <div id="app"></div>
+  </body>
 </html>
-
-

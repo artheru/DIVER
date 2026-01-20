@@ -1,0 +1,210 @@
+/**
+ * @file styles/main.css
+ * @description 全局样式
+ * 
+ * 包含：
+ * - CSS 变量定义
+ * - 基础重置样式
+ * - 通用工具类
+ */
+
+/* ============================================
+   CSS 变量定义
+   ============================================ */
+
+:root {
+  /* 主色调 */
+  --primary: #4f8cff;
+  --primary-hover: #6a9fff;
+  --primary-pressed: #3d7aed;
+  
+  /* 语义色 */
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #ff4f6d;
+  --info: #3b82f6;
+  
+  /* 背景色 */
+  --body-color: #0b1220;
+  --panel-color: #111827;
+  --panel-color-2: #1a2332;
+  --card-color: #1e293b;
+  
+  /* 边框 */
+  --border-color: #2d3748;
+  --border-color-hover: #4a5568;
+  
+  /* 文字 */
+  --text-color: #e2e8f0;
+  --text-muted: #a0aec0;
+  --text-disabled: #718096;
+  
+  /* 字体 */
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+  
+  /* 圆角 */
+  --radius: 8px;
+  --radius-sm: 4px;
+  --radius-lg: 12px;
+  
+  /* 阴影 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  
+  /* 过渡 */
+  --transition-fast: 0.15s ease;
+  --transition: 0.2s ease;
+  --transition-slow: 0.3s ease;
+}
+
+/* ============================================
+   基础重置
+   ============================================ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-family);
+  background: var(--body-color);
+  color: var(--text-color);
+  overflow: hidden;
+}
+
+/* 链接 */
+a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--primary-hover);
+}
+
+/* 按钮重置 */
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+/* 输入框 */
+input,
+textarea,
+select {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* ============================================
+   通用工具类
+   ============================================ */
+
+/* Flex 布局 */
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.flex-1 { flex: 1; }
+.items-center { align-items: center; }
+.justify-center { justify-content: center; }
+.justify-between { justify-content: space-between; }
+.gap-1 { gap: 4px; }
+.gap-2 { gap: 8px; }
+.gap-3 { gap: 12px; }
+.gap-4 { gap: 16px; }
+
+/* 间距 */
+.p-1 { padding: 4px; }
+.p-2 { padding: 8px; }
+.p-3 { padding: 12px; }
+.p-4 { padding: 16px; }
+.m-0 { margin: 0; }
+
+/* 文字 */
+.text-sm { font-size: 12px; }
+.text-muted { color: var(--text-muted); }
+.text-center { text-align: center; }
+.font-mono { font-family: var(--font-mono); }
+
+/* 隐藏 */
+.hidden { display: none !important; }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+/* 溢出处理 */
+.overflow-hidden { overflow: hidden; }
+.overflow-auto { overflow: auto; }
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================
+   LiteGraph 样式覆盖
+   ============================================ */
+
+/* 覆盖 LiteGraph 默认样式以匹配暗色主题 */
+.litegraph {
+  background: var(--body-color) !important;
+}
+
+.litegraph .litecontextmenu {
+  background: var(--panel-color-2) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: var(--radius) !important;
+}
+
+/* ============================================
+   Monaco Editor 样式覆盖
+   ============================================ */
+
+.monaco-editor {
+  border-radius: var(--radius);
+}
+
+.monaco-editor .margin {
+  background: var(--panel-color) !important;
+}

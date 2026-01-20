@@ -1,0 +1,185 @@
+/**
+ * @file composables/useSignalR.ts
+ * @description SignalR 连接管理组合式函数
+ * 
+ * 关键功能：
+ * 1. 建立与后端的 SignalR 连接
+ * 2. 自动重连机制
+ * 3. 分发实时事件到对应的 Store
+ * 
+ * 事件类型：
+ * - terminalLine: 终端日志行
+ * - nodeLogLine: 节点日志行  
+ * - variables: 变量值更新
+ * - runtimeUpdate: 运行时状态更新
+ */
+
+import { ref, onMounted, onUnmounted } from 'vue'
+import * as signalR from '@microsoft/signalr'
+import { useLogStore } from '@/stores/logs'
+import { useRuntimeStore } from '@/stores/runtime'
+
+/** SignalR 连接状态 */
+export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
+
+export function useSignalR() {
+  // ============================================
+  // 状态
+  // ============================================
+  
+  /** SignalR 连接实例 */
+  const connection = ref<signalR.HubConnection | null>(null)
+  
+  /** 连接状态 */
+  const state = ref<ConnectionState>('disconnected')
+  
+  /** 错误信息 */
+  const error = ref<string | null>(null)
+  
+  // ============================================
+  // Store 引用
+  // ============================================
+  
+  const logStore = useLogStore()
+  const runtimeStore = useRuntimeStore()
+  
+  // ============================================
+  // 方法
+  // ============================================
+  
+  /**
+   * 建立 SignalR 连接
+   * 配置自动重连和事件处理器
+   */
+  async function connect() {
+    if (connection.value?.state === signalR.HubConnectionState.Connected) {
+      return // 已连接
+    }
+    
+    state.value = 'connecting'
+    error.value = null
+    
+    try {
+      // 创建连接，配置自动重连策略
+      connection.value = new signalR.HubConnectionBuilder()
+        .withUrl('/hubs/terminal')
+        .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
+        .configureLogging(signalR.LogLevel.Warning)
+        .build()
+      
+      // 注册事件处理器
+      registerEventHandlers()
+      
+      // 注册连接状态回调
+      connection.value.onreconnecting(() => {
+        state.value = 'reconnecting'
+        console.log('[SignalR] Reconnecting...')
+      })
+      
+      connection.value.onreconnected(() => {
+        state.value = 'connected'
+        console.log('[SignalR] Reconnected')
+      })
+      
+      connection.value.onclose((err) => {
+        state.value = 'disconnected'
+        if (err) {
+          error.value = err.message
+          console.error('[SignalR] Connection closed with error:', err)
+        } else {
+          console.log('[SignalR] Connection closed')
+        }
+      })
+      
+      // 启动连接
+      await connection.value.start()
+      
+      state.value = 'connected'
+      console.log('[SignalR] Connected to /hubs/terminal')
+      
+    } catch (err) {
+      state.value = 'disconnected'
+      error.value = err instanceof Error ? err.message : String(err)
+      console.error('[SignalR] Failed to connect:', err)
+      throw err
+    }
+  }
+  
+  /**
+   * 注册 SignalR 事件处理器
+   * 将收到的事件分发到对应的 Store
+   */
+  function registerEventHandlers() {
+    if (!connection.value) return
+    
+    // 终端日志事件
+    // 格式: terminalLine(line: string)
+    connection.value.on('terminalLine', (line: string) => {
+      logStore.appendTerminal(line)
+    })
+    
+    // 节点日志事件
+    // 格式: nodeLogLine(nodeId: string, line: string)
+    connection.value.on('nodeLogLine', (nodeId: string, line: string) => {
+      logStore.appendNodeLog(nodeId, line)
+    })
+    
+    // 变量更新事件
+    // 格式: variables(snapshot: Record<string, unknown>)
+    connection.value.on('variables', (snapshot: Record<string, unknown>) => {
+      runtimeStore.updateVariables(snapshot)
+    })
+    
+    // 运行时状态更新事件
+    // 格式: runtimeUpdate(snapshot: RuntimeSnapshot)
+    connection.value.on('runtimeUpdate', (snapshot: { nodes: Array<{ nodeId: string }> }) => {
+      for (const node of snapshot.nodes || []) {
+        runtimeStore.updateNodeSnapshot(node as any)
+      }
+    })
+  }
+  
+  /**
+   * 断开连接
+   */
+  async function disconnect() {
+    if (connection.value) {
+      await connection.value.stop()
+      connection.value = null
+      state.value = 'disconnected'
+      console.log('[SignalR] Disconnected')
+    }
+  }
+  
+  /**
+   * 检查是否已连接
+   */
+  function isConnected(): boolean {
+    return connection.value?.state === signalR.HubConnectionState.Connected
+  }
+  
+  // ============================================
+  // 生命周期
+  // ============================================
+  
+  // 组件挂载时自动连接
+  onMounted(() => {
+    connect().catch(() => {
+      // 连接失败时静默处理，UI 会显示状态
+    })
+  })
+  
+  // 组件卸载时断开连接
+  onUnmounted(() => {
+    disconnect()
+  })
+  
+  return {
+    connection,
+    state,
+    error,
+    connect,
+    disconnect,
+    isConnected
+  }
+}

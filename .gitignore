@@ -383,3 +383,7 @@ tmp_ref/
 /DiverTest/native/code.json
 /DiverTest/native/code.lib
 /3rd/CoralinkerHost/data
+
+
+/3rd/CoralinkerHost/wwwroot/
+/3rd/CoralinkerHost/wwwroot/*
