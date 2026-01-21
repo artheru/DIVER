@@ -2,6 +2,12 @@
 
 #include "common.h"
 
+/** @brief 当前数字输入状态（位图），由 bsp_get_inputs() 更新 */
+extern volatile uint32_t g_bsp_digital_inputs;
+
+/** @brief 当前数字输出状态（位图），由 bsp_set_outputs() 更新 */
+extern volatile uint32_t g_bsp_digital_outputs;
+
 void bsp_init_digital_io();
 
 void bsp_set_outputs(uint32_t outputs);

@@ -182,6 +182,18 @@ void packet_parse(const void* data_void, uint32_t length, ...)
         case CommandMemoryUpperIO:
             ret = control_on_memory_upper_io(other_data, other_data_len);
             break;
+        case CommandGetStats: {
+            static RuntimeStatsC runtime_stats;
+            control_get_runtime_stats(&runtime_stats);
+            ret = MSB_Error_OK;
+            return_buffer = (void*)&runtime_stats;
+            return_buffer_size = sizeof(runtime_stats);
+            console_printf_do(
+                    "CONTROL: GET STATS, uptime=%ums, ports=%d\n",
+                    runtime_stats.uptime_ms,
+                    runtime_stats.port_count);
+            break;
+        }
         default:
             break;
         }

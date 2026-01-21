@@ -833,6 +833,65 @@ public static class ApiRoutes
         });
 
         // ============================================
+        // Node Stats API - Get cached runtime statistics (no direct serial access)
+        // Stats are refreshed by DIVERSession.StateLoop every 1.2s when running
+        // ============================================
+
+        app.MapGet("/api/node/{nodeId}/stats", (string nodeId, RuntimeSessionService runtime) =>
+        {
+            try
+            {
+                var session = CoralinkerSDK.DIVERSession.Instance;
+                var node = session.GetNode(nodeId);
+                
+                if (node == null)
+                {
+                    return Results.Json(new { ok = false, error = $"Node '{nodeId}' not found" });
+                }
+                
+                if (!node.IsConnected)
+                {
+                    return Results.Json(new { ok = false, error = "Node not connected" });
+                }
+                
+                // Return cached stats (refreshed by DIVERSession background thread)
+                var stats = node.Stats;
+                if (stats == null)
+                {
+                    return Results.Json(new { ok = false, error = "Stats not available (node may not be running)" });
+                }
+                
+                // Build response with cached statistics
+                var validPorts = stats.Value.GetValidPorts();
+                var layout = node.Layout;
+                
+                return Results.Json(new
+                {
+                    ok = true,
+                    nodeId = nodeId,
+                    uptimeMs = stats.Value.UptimeMs,
+                    digitalInputs = stats.Value.DigitalInputs,
+                    digitalOutputs = stats.Value.DigitalOutputs,
+                    digitalInputCount = layout?.DigitalInputCount ?? 0,
+                    digitalOutputCount = layout?.DigitalOutputCount ?? 0,
+                    portCount = stats.Value.PortCount,
+                    ports = validPorts.Select((p, i) => new
+                    {
+                        index = i,
+                        txFrames = p.TxFrames,
+                        rxFrames = p.RxFrames,
+                        txBytes = p.TxBytes,
+                        rxBytes = p.RxBytes
+                    }).ToArray()
+                });
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, error = ex.Message });
+            }
+        });
+
+        // ============================================
         // Logic List API - Get compiled logic files
         // ============================================
 

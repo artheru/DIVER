@@ -13,7 +13,8 @@ import type {
   NodeLogInfo,
   LogChunkResponse,
   PortConfig,
-  NodeStateInfo
+  NodeStateInfo,
+  RuntimeStats
 } from '@/types'
 
 // ============================================
@@ -184,4 +185,16 @@ export async function clearAllLogs(): Promise<void> {
  */
 export async function sendCommand(command: string): Promise<{ ok: boolean }> {
   return post('/api/command', { command })
+}
+
+// ============================================
+// 节点统计
+// ============================================
+
+/**
+ * 获取节点运行时统计数据
+ * @param nodeId 节点 ID
+ */
+export async function getNodeStats(nodeId: string): Promise<{ ok: boolean } & Partial<RuntimeStats> & { error?: string }> {
+  return get(`/api/node/${nodeId}/stats`)
 }

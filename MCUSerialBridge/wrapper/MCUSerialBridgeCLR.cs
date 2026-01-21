@@ -235,6 +235,81 @@ namespace MCUSerialBridgeCLR
     }
 
     /// <summary>
+    /// 单个端口的统计数据结构体
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PortStats
+    {
+        /// <summary>发送帧数</summary>
+        public uint TxFrames;
+
+        /// <summary>接收帧数</summary>
+        public uint RxFrames;
+
+        /// <summary>发送字节数</summary>
+        public uint TxBytes;
+
+        /// <summary>接收字节数</summary>
+        public uint RxBytes;
+
+        /// <summary>
+        /// 转换为可读字符串
+        /// </summary>
+        public override readonly string ToString() =>
+            $"TX: {TxFrames} frames/{TxBytes} bytes, RX: {RxFrames} frames/{RxBytes} bytes";
+    }
+
+    /// <summary>
+    /// MCU 运行时统计数据结构体
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RuntimeStats
+    {
+        /// <summary>MCU 运行时间（毫秒）</summary>
+        public uint UptimeMs;
+
+        /// <summary>数字输入状态（位图）</summary>
+        public uint DigitalInputs;
+
+        /// <summary>数字输出状态（位图）</summary>
+        public uint DigitalOutputs;
+
+        /// <summary>有效端口数量</summary>
+        public byte PortCount;
+
+        /// <summary>保留字节（对齐）</summary>
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 3)]
+        public byte[] Reserved;
+
+        /// <summary>各端口统计数据（最多16个）</summary>
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+        public PortStats[] Ports;
+
+        /// <summary>
+        /// 获取有效的端口统计列表
+        /// </summary>
+        public readonly PortStats[] GetValidPorts()
+        {
+            if (Ports == null || PortCount <= 0) return Array.Empty<PortStats>();
+            return Ports.Take(Math.Min(PortCount, Ports.Length)).ToArray();
+        }
+
+        /// <summary>
+        /// 获取运行时间（TimeSpan 格式）
+        /// </summary>
+        public readonly TimeSpan Uptime => TimeSpan.FromMilliseconds(UptimeMs);
+
+        /// <summary>
+        /// 转换为可读字符串
+        /// </summary>
+        public override readonly string ToString()
+        {
+            var uptime = TimeSpan.FromMilliseconds(UptimeMs);
+            return $"Uptime={uptime}, DI=0x{DigitalInputs:X8}, DO=0x{DigitalOutputs:X8}, Ports={PortCount}";
+        }
+    }
+
+    /// <summary>
     /// MCU 硬件布局信息结构体
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
@@ -645,6 +720,13 @@ namespace MCUSerialBridgeCLR
             IntPtr handle,
             msb_on_console_writeline_callback_function_t callback,
             IntPtr user_ctx
+        );
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern MCUSerialBridgeError msb_get_stats(
+            IntPtr handle,
+            out RuntimeStats stats,
+            uint timeout_ms
         );
     }
 
@@ -1241,6 +1323,27 @@ namespace MCUSerialBridgeCLR
                 _memoryLowerIOCallback,
                 IntPtr.Zero
             );
+        }
+
+        /// <summary>
+        /// 获取 MCU 运行时统计数据
+        /// </summary>
+        /// <param name="stats">输出统计数据</param>
+        /// <param name="timeout">超时时间（ms）</param>
+        /// <returns>错误码</returns>
+        /// <remarks>
+        /// 统计数据包括：
+        /// - MCU 运行时间
+        /// - 数字 IO 当前状态
+        /// - 各端口的收发帧数和字节数
+        /// </remarks>
+        public MCUSerialBridgeError GetStats(out RuntimeStats stats, uint timeout = 200)
+        {
+            stats = new RuntimeStats();
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            return MCUSerialBridgeCoreAPI.msb_get_stats(nativeHandle, out stats, timeout);
         }
 
         /// <summary>

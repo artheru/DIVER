@@ -101,15 +101,24 @@
         </div>
       </div>
 
-      <!-- Port Config -->
-      <div class="section" v-if="hasPortsToShow">
+      <!-- Port Stats (统计和 IO 状态) -->
+      <PortStatsView
+        v-if="data.isConnected"
+        :stats="nodeStats"
+        :port-configs="portConfigs"
+        :digital-input-count="digitalInputCount"
+        :digital-output-count="digitalOutputCount"
+      />
+
+      <!-- Port Config (可编辑配置) -->
+      <div class="section" v-if="hasPortsToShow && canEdit">
         <div class="section-title">
           PORT CONFIG
-          <span v-if="canEdit" class="edit-btn" @click="openPortEditor">Edit</span>
+          <span class="edit-btn" @click="openPortEditor">Edit</span>
         </div>
         <div class="port-list">
           <div v-for="(port, idx) in displayPorts" :key="idx" class="port-item">
-            <span class="port-index">[{{ idx }}]</span>
+            <span class="port-index">Port {{ idx }}</span>
             <span class="port-type" :class="port.type.toLowerCase()">{{ port.type }}</span>
             <span class="port-name">{{ port.name || `Port${idx}` }}</span>
             <span class="port-baud">{{ port.baud || '-' }}</span>
@@ -144,14 +153,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
 import { NSelect } from 'naive-ui'
 import { useRuntimeStore, useFilesStore } from '@/stores'
 import { storeToRefs } from 'pinia'
 import { getLogicList, type LogicInfo } from '@/api/device'
-import type { PortConfig, PortDescriptor } from '@/types'
+import type { PortConfig, PortDescriptor, RuntimeStats } from '@/types'
 import PortConfigEdit from './PortConfigEdit.vue'
+import PortStatsView from './PortStatsView.vue'
+import { getNodeStats } from '@/api/runtime'
 
 // Props from vue-flow
 const props = defineProps<{
@@ -196,6 +207,13 @@ const showPortEdit = ref(false)
 
 // Logic 列表
 const logicList = ref<LogicInfo[]>([])
+
+// 统计数据
+const nodeStats = ref<RuntimeStats | null>(null)
+let statsPollingTimer: ReturnType<typeof setInterval> | null = null
+// 前端只读取后端缓存的统计数据，后端由 DIVERSession 刷新
+// 前端 500ms 轮询，读取缓存不触发串口通信
+const STATS_POLLING_INTERVAL = 500
 
 // ============================================
 // 计算属性
@@ -286,6 +304,15 @@ const lowerIOVariables = computed((): LowerIOVariable[] => {
   return []
 })
 
+// IO 数量（从 layout 获取）
+const digitalInputCount = computed(() => {
+  return nodeStats.value?.digitalInputCount ?? 0
+})
+
+const digitalOutputCount = computed(() => {
+  return nodeStats.value?.digitalOutputCount ?? 0
+})
+
 // ============================================
 // 方法
 // ============================================
@@ -371,12 +398,71 @@ async function loadLogicList() {
   }
 }
 
+// 获取节点统计数据
+async function fetchNodeStats() {
+  if (!props.data.isConnected || !isRunning.value) {
+    nodeStats.value = null
+    return
+  }
+  
+  try {
+    const result = await getNodeStats(props.id)
+    if (result.ok) {
+      nodeStats.value = {
+        nodeId: result.nodeId || props.id,
+        uptimeMs: result.uptimeMs || 0,
+        digitalInputs: result.digitalInputs || 0,
+        digitalOutputs: result.digitalOutputs || 0,
+        digitalInputCount: result.digitalInputCount || 0,
+        digitalOutputCount: result.digitalOutputCount || 0,
+        portCount: result.portCount || 0,
+        ports: result.ports || []
+      }
+    } else {
+      // 静默处理，避免刷屏
+      nodeStats.value = null
+    }
+  } catch (error) {
+    // 静默处理，避免刷屏
+    nodeStats.value = null
+  }
+}
+
+// 启动统计轮询（只在运行状态时轮询，避免与状态轮询竞争串口）
+function startStatsPolling() {
+  if (statsPollingTimer) return
+  if (!isRunning.value) return // 只在运行状态时轮询
+  
+  // 立即获取一次
+  fetchNodeStats()
+  
+  // 启动定时轮询
+  statsPollingTimer = setInterval(() => {
+    if (props.data.isConnected && !isCollapsed.value && isRunning.value) {
+      fetchNodeStats()
+    }
+  }, STATS_POLLING_INTERVAL)
+}
+
+// 停止统计轮询
+function stopStatsPolling() {
+  if (statsPollingTimer) {
+    clearInterval(statsPollingTimer)
+    statsPollingTimer = null
+  }
+}
+
 // ============================================
 // 生命周期
 // ============================================
 
 onMounted(() => {
   loadLogicList()
+  // 统计轮询只在运行状态时启动（由 watch isRunning 控制）
+})
+
+onUnmounted(() => {
+  stopStatsPolling()
 })
 
 // 同步 props 到本地状态
@@ -388,6 +474,36 @@ watch(() => props.data.ports, (v) => { localPortConfigs.value = v || [] })
 watch(buildVersion, () => {
   console.log('[CoralNode] Build version changed, reloading logic list')
   loadLogicList()
+})
+
+// 监听运行状态变化，控制统计轮询
+watch(isRunning, (running) => {
+  if (running && props.data.isConnected) {
+    startStatsPolling()
+  } else {
+    stopStatsPolling()
+    if (!running) {
+      nodeStats.value = null // 停止运行时清除统计
+    }
+  }
+})
+
+// 监听连接状态变化
+watch(() => props.data.isConnected, (connected) => {
+  if (!connected) {
+    stopStatsPolling()
+    nodeStats.value = null
+  } else if (isRunning.value) {
+    // 重新连接后，如果正在运行，启动统计轮询
+    startStatsPolling()
+  }
+})
+
+// 监听折叠状态，展开时立即获取统计（仅运行状态）
+watch(isCollapsed, (collapsed) => {
+  if (!collapsed && props.data.isConnected && isRunning.value) {
+    fetchNodeStats()
+  }
 })
 </script>
 
@@ -695,29 +811,34 @@ watch(buildVersion, () => {
 .port-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .port-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px;
+  padding: 8px;
   font-size: 11px;
   background: rgba(0, 0, 0, 0.2);
-  border-radius: 3px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .port-index {
+  font-weight: 600;
   font-family: var(--font-mono);
-  color: #64748b;
+  color: #e2e8f0;
+  font-size: 11px;
+  min-width: 42px;
 }
 
 .port-type {
-  padding: 1px 4px;
-  border-radius: 2px;
-  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 9px;
   font-weight: 500;
+  text-transform: uppercase;
 }
 
 .port-type.serial {
@@ -731,19 +852,26 @@ watch(buildVersion, () => {
 }
 
 .port-name {
-  color: #94a3b8;
-  font-size: 10px;
+  color: #64748b;
+  font-size: 11px;
   flex: 1;
 }
 
 .port-baud {
   font-family: var(--font-mono);
-  color: #e2e8f0;
+  color: #94a3b8;
+  font-size: 11px;
+  min-width: 56px;
+  text-align: right;
 }
 
 .port-extra {
+  font-family: var(--font-mono);
   font-size: 10px;
-  color: #64748b;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(100, 116, 139, 0.15);
+  color: #94a3b8;
 }
 
 /* 变量列表 */

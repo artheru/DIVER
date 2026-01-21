@@ -12,6 +12,10 @@ static GPIOHandle bsp_inputs[BSP_DIGITAL_IO_INPUT_NUM];
 
 static GPIOHandle bsp_outputs[BSP_DIGITAL_IO_OUTPUT_NUM];
 
+// 当前 IO 状态（供外部读取）
+volatile uint32_t g_bsp_digital_inputs = 0;
+volatile uint32_t g_bsp_digital_outputs = 0;
+
 void bsp_init_digital_io()
 {
     const GPIOConfig bsp_input_configs[BSP_DIGITAL_IO_INPUT_NUM] = {
@@ -67,6 +71,7 @@ void bsp_init_digital_io()
 
 void bsp_set_outputs(uint32_t outputs)
 {
+    g_bsp_digital_outputs = outputs;  // 保存输出状态
     for (uint32_t i = 0; i < BSP_DIGITAL_IO_OUTPUT_NUM; ++i) {
         hal_gpio_set(bsp_outputs[i], outputs & 0x01);
         outputs = outputs >> 1;
@@ -80,6 +85,7 @@ uint32_t bsp_get_inputs()
         input = input << 1;
         input |= hal_gpio_get(bsp_inputs[i]);
     }
+    g_bsp_digital_inputs = input;  // 保存输入状态
     return input;
 }
 

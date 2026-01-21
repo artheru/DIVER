@@ -207,13 +207,6 @@ async function pollAllNodeStates() {
 // ============================================
 
 /**
- * 生成唯一节点 ID
- */
-function generateNodeId(): string {
-  return `node-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-}
-
-/**
  * 生成下一个节点名称
  */
 function getNextNodeName(): string {
@@ -385,8 +378,13 @@ function scheduleAutoSave() {
   }, 500)
 }
 
+// 是否正在保存到 store（防止 save → watch → load 循环）
+let isSavingToStore = false
+
 function saveToStore() {
   if (isLoadingFromStore) return
+  
+  isSavingToStore = true
   
   // 转换为存储格式 - 只保存静态配置，不保存运行时状态
   const graphData = {
@@ -426,6 +424,9 @@ function saveToStore() {
   
   projectStore.setNodeMap(graphData as any)
   
+  // 重置保存标志（延迟一帧，确保 watch 已触发）
+  setTimeout(() => { isSavingToStore = false }, 0)
+  
   // 同步日志标签
   syncLogTabs()
 }
@@ -446,9 +447,25 @@ function loadFromStore() {
       // 迁移旧格式
       migrateFromLiteGraph(data)
     } else if (data.nodes && Array.isArray(data.nodes)) {
-      // 新格式 - 加载静态配置，运行时状态使用默认值
+      // 新格式 - 加载静态配置，保留现有节点的运行时状态
+      // 构建现有节点的运行时状态映射
+      const existingRuntimeState = new Map<string, any>()
+      for (const node of nodes.value) {
+        if (node.type === 'coral-node') {
+          existingRuntimeState.set(node.id, {
+            runState: node.data?.runState,
+            isConnected: node.data?.isConnected,
+            isConfigured: node.data?.isConfigured,
+            isProgrammed: node.data?.isProgrammed,
+            layout: node.data?.layout
+          })
+        }
+      }
+      
       nodes.value = data.nodes.map((n: any) => {
         if (n.type === 'coral-node') {
+          // 尝试保留现有节点的运行时状态
+          const existingState = existingRuntimeState.get(n.id)
           return {
             id: n.id,
             type: n.type,
@@ -459,12 +476,12 @@ function loadFromStore() {
               mcuUri: n.data?.mcuUri || '',
               logicName: n.data?.logicName || '',
               ports: n.data?.ports || [],
-              // 运行时状态使用默认值（后续由 runtimeStore 同步更新）
-              runState: 'Offline',
-              isConnected: false,
-              isConfigured: false,
-              isProgrammed: false,
-              layout: null
+              // 运行时状态：优先保留现有状态，否则使用默认值
+              runState: existingState?.runState || 'Offline',
+              isConnected: existingState?.isConnected || false,
+              isConfigured: existingState?.isConfigured || false,
+              isProgrammed: existingState?.isProgrammed || false,
+              layout: existingState?.layout || null
             },
             deletable: true
           }
@@ -627,12 +644,14 @@ watch(runtimeNodes, (newNodes) => {
         ...currentNode,
         data: {
           ...(currentNode.data || {}),
+          // 只更新运行时状态，不覆盖用户配置的 ports
           runState: snapshot.runState || 'Offline',
           isConnected: snapshot.isConnected,
           isConfigured: snapshot.isConfigured,
           isProgrammed: snapshot.isProgrammed,
-          layout: snapshot.layout || currentNode.data?.layout,
-          ports: snapshot.ports || currentNode.data?.ports
+          // layout 只在没有时才从 snapshot 获取（硬件信息）
+          layout: currentNode.data?.layout || snapshot.layout
+          // ports 是用户配置，不从 runtime snapshot 更新，保留用户的编辑
         }
       }
       needsUpdate = true
@@ -663,9 +682,9 @@ onUnmounted(() => {
   stopNodeStatePolling()
 })
 
-// 监听 nodeMap 变化
+// 监听 nodeMap 变化（仅在外部变化时重新加载，忽略自己保存触发的变化）
 watch(nodeMap, (newValue) => {
-  if (newValue && !isLoadingFromStore) {
+  if (newValue && !isLoadingFromStore && !isSavingToStore) {
     loadFromStore()
   }
 }, { deep: true })

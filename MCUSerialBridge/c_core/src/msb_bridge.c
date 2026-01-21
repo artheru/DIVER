@@ -702,6 +702,39 @@ MCUSerialBridgeError msb_register_console_writeline_callback(
 }
 
 // --------------------
+// 获取运行时统计数据
+// --------------------
+DLL_EXPORT MCUSerialBridgeError msb_get_stats(
+        msb_handle* handle,
+        RuntimeStatsC* stats,
+        uint32_t timeout_ms)
+{
+    DBG_PRINT("GetStats called");
+
+    if (!handle)
+        return MSB_Error_Win_HandleNotFound;
+    if (!stats)
+        return MSB_Error_Win_InvalidParam;
+
+    MCUSerialBridgeError ret = mcu_send_packet_and_wait(
+            handle,
+            CommandGetStats,
+            NULL,
+            0,
+            (uint8_t*)stats,
+            sizeof(RuntimeStatsC),
+            timeout_ms);
+
+    DBG_PRINT(
+            "GetStats result[0x%08X], uptime=%ums, ports=%d",
+            ret,
+            stats->uptime_ms,
+            stats->port_count);
+
+    return ret;
+}
+
+// --------------------
 // 获取 API 函数指针
 // --------------------
 void mcu_serial_bridge_get_api(MCUSerialBridgeAPI* api)
@@ -726,4 +759,5 @@ void mcu_serial_bridge_get_api(MCUSerialBridgeAPI* api)
     api->msb_memory_upper_io = msb_memory_upper_io;
     api->msb_register_memory_lower_io_callback = msb_register_memory_lower_io_callback;
     api->msb_register_console_writeline_callback = msb_register_console_writeline_callback;
+    api->msb_get_stats = msb_get_stats;
 }

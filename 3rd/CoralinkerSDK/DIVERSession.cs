@@ -431,10 +431,19 @@ public sealed class DIVERSession : IDisposable
             foreach (var node in _nodes.Values)
             {
                 if (node.IsConnected)
+                {
                     node.RefreshState();
+                    
+                    // 只在运行状态时刷新统计数据（避免非运行时的串口负载）
+                    if (node.IsRunning)
+                    {
+                        node.RefreshStats();
+                    }
+                }
             }
 
-            token.WaitHandle.WaitOne(1200);
+            // 500ms 刷新一次状态和统计
+            token.WaitHandle.WaitOne(500);
         }
     }
 

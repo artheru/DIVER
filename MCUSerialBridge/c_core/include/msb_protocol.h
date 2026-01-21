@@ -187,6 +187,14 @@ typedef enum {
     CommandUploadConsoleWriteLine = 0x71,
 
     /**
+     * @brief 获取运行时统计数据 (PC → MCU)
+     *
+     * 查询 MCU 的运行时统计：IO 状态、端口收发统计。
+     * 响应命令：0xF8（同 seq，携带 RuntimeStatsC 数据）。
+     */
+    CommandGetStats = 0x78,
+
+    /**
      * @brief 致命错误上报命令 (MCU → PC 或 PC → MCU)
      *
      * 任意一方检测到致命错误时上报。sequence 固定为 0，通常携带错误码。
@@ -456,6 +464,42 @@ typedef struct {
 STATIC_ASSERT(
         sizeof(MemoryExchangePacket) == 2,
         "MemoryExchangePacket size must be 2 (packed)");
+
+/* ===============================
+ * Runtime Statistics (CommandGetStats)
+ * =============================== */
+
+/**
+ * @brief 单个端口的统计数据
+ */
+typedef struct {
+    u32 tx_frames;      /**< 发送帧数 */
+    u32 rx_frames;      /**< 接收帧数 */
+    u32 tx_bytes;       /**< 发送字节数 */
+    u32 rx_bytes;       /**< 接收字节数 */
+} PortStatsC;
+
+STATIC_ASSERT(sizeof(PortStatsC) == 16, "PortStatsC size must be 16 bytes");
+
+/**
+ * @brief 运行时统计数据结构
+ *
+ * 用于 CommandGetStats 响应，包含：
+ * - 数字 IO 状态
+ * - 每个端口的收发统计
+ * - 运行时间
+ */
+typedef struct {
+    u32 uptime_ms;       /**< MCU 运行时间（毫秒） */
+    u32 digital_inputs;  /**< 数字输入状态（位图） */
+    u32 digital_outputs; /**< 数字输出状态（位图） */
+    u8 port_count;       /**< 有效端口数量 */
+    u8 reserved[3];      /**< 保留字节（对齐） */
+    PortStatsC ports[PACKET_MAX_PORTS_NUM]; /**< 各端口统计数据 */
+} RuntimeStatsC;
+
+STATIC_ASSERT(sizeof(RuntimeStatsC) == 16 + 16 * PACKET_MAX_PORTS_NUM, 
+              "RuntimeStatsC size error");
 
 #pragma pack(pop)
 

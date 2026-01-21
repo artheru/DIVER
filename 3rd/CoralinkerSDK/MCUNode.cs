@@ -35,6 +35,9 @@ public class MCUNode : IDisposable
     /// <summary>MCU 状态</summary>
     public MCUState? State { get; private set; }
     
+    /// <summary>MCU 运行时统计数据（由 DIVERSession 定期刷新）</summary>
+    public RuntimeStats? Stats { get; private set; }
+    
     /// <summary>最后一次错误信息</summary>
     public string? LastError { get; private set; }
     
@@ -152,6 +155,7 @@ public class MCUNode : IDisposable
             _bridge = null;
         }
         State = null;
+        Stats = null;
         Version = null;
         Layout = null;
     }
@@ -368,6 +372,29 @@ public class MCUNode : IDisposable
             // Timeout or communication error - mark as offline
             State = null;
             LastError = $"GetState failed: {err.ToDescription()}";
+        }
+    }
+
+    /// <summary>
+    /// 刷新 MCU 运行时统计数据（由 DIVERSession 调用）
+    /// </summary>
+    internal void RefreshStats()
+    {
+        if (_bridge == null || !_bridge.IsOpen)
+        {
+            Stats = null;
+            return;
+        }
+        
+        var err = _bridge.GetStats(out var stats, DefaultTimeout);
+        if (err == MCUSerialBridgeError.OK)
+        {
+            Stats = stats;
+        }
+        else
+        {
+            // 统计获取失败不影响连接状态，只清除缓存
+            Stats = null;
         }
     }
 

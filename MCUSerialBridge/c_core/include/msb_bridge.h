@@ -373,6 +373,21 @@ DLL_EXPORT MCUSerialBridgeError msb_register_console_writeline_callback(
         msb_on_console_writeline_callback_function_t callback,
         void* user_ctx);
 
+/**
+ * @brief 获取 MCU 运行时统计数据
+ *
+ * 查询 MCU 的运行时统计数据，包括 IO 状态和端口收发统计。
+ *
+ * @param handle MCU 句柄
+ * @param stats 返回统计数据结构指针
+ * @param timeout_ms 超时时间（毫秒）
+ * @return MCUSerialBridgeError 错误码
+ */
+DLL_EXPORT MCUSerialBridgeError msb_get_stats(
+        msb_handle* handle,
+        RuntimeStatsC* stats,
+        uint32_t timeout_ms);
+
 /*
  * @brief 生成函数指针结构体
  * 导出所有 API
@@ -436,6 +451,10 @@ typedef struct MCUSerialBridgeAPI {
             msb_handle*,
             msb_on_console_writeline_callback_function_t,
             void*);
+    MCUSerialBridgeError (*msb_get_stats)(
+            msb_handle*,
+            RuntimeStatsC*,
+            uint32_t);
 } MCUSerialBridgeAPI;
 
 DLL_EXPORT void mcu_serial_bridge_get_api(MCUSerialBridgeAPI* api);

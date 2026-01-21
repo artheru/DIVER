@@ -156,10 +156,11 @@ function getBaudOptions(type: 'Serial' | 'CAN' | 'Unknown') {
 }
 
 // 波特率过滤函数 - 支持数字前缀匹配
-function baudFilter(pattern: string, option: { label: string; value: number }) {
+function baudFilter(pattern: string, option: { label?: string | unknown; value?: number | string }) {
   // 只允许数字输入
   if (!/^\d*$/.test(pattern)) return false
-  return option.label.startsWith(pattern)
+  const label = typeof option.label === 'string' ? option.label : ''
+  return label.startsWith(pattern)
 }
 
 // 解析波特率值 - 确保返回数字

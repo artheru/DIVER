@@ -39,6 +39,9 @@ void upload_serial_packet(
 {
     console_printf_do(
             "RECEIVED PACKET FROM SERIAL %u, len %u\n", port_index, length);
+    
+    // 累加 RX 统计
+    control_stats_add_rx(port_index, length);
 
 #if defined(HAS_DIVER_RUNTIME) && HAS_DIVER_RUNTIME == 1
     // DIVER 模式下，将串口数据传递给 DIVER 运行时处理
@@ -80,6 +83,10 @@ void upload_can_packet(
         uint32_t port_index)
 {
     console_printf_do("RECEIVED PACKET FROM CAN %d\n", port_index);
+    
+    // 累加 RX 统计（CAN 帧大小 = header(2) + payload(dlc)）
+    uint8_t dlc = id_info.dlc > 8 ? 8 : id_info.dlc;
+    control_stats_add_rx(port_index, 2 + dlc);
 
 #if defined(HAS_DIVER_RUNTIME) && HAS_DIVER_RUNTIME == 1
     // DIVER 模式下，将 CAN 数据传递给 DIVER 运行时处理

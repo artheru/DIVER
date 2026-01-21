@@ -3,10 +3,14 @@
 #include "common.h"
 #include "msb_protocol.h"
 
-extern volatile uint32_t g_inputs;
-extern volatile uint32_t g_outputs;
-
 extern volatile MCUStateC g_mcu_state;
+
+/* ===============================
+ * 端口统计数据
+ * =============================== */
+
+/** @brief 各端口的统计数据（TX/RX 帧数和字节数） */
+extern volatile PortStatsC g_port_stats[PACKET_MAX_PORTS_NUM];
 
 /** @brief Wire Tap 模式标志，启用后即使在 DIVER 模式下也会上报端口数据 */
 extern volatile bool g_wire_tap_enabled;
@@ -139,3 +143,27 @@ void control_upload_memory_lower_io(const uint8_t* data, uint32_t data_length);
  * @return true 如果有新数据，false 如果没有新数据
  */
 bool control_vm_get_upper_io(const uint8_t** data_ptr, uint32_t* data_len);
+
+/* ===============================
+ * 统计数据
+ * =============================== */
+
+/**
+ * @brief 累加端口发送统计
+ * @param port_index 端口索引
+ * @param bytes 发送的字节数
+ */
+void control_stats_add_tx(uint32_t port_index, uint32_t bytes);
+
+/**
+ * @brief 累加端口接收统计
+ * @param port_index 端口索引
+ * @param bytes 接收的字节数
+ */
+void control_stats_add_rx(uint32_t port_index, uint32_t bytes);
+
+/**
+ * @brief 获取运行时统计数据
+ * @param[out] stats 输出统计数据结构指针
+ */
+void control_get_runtime_stats(RuntimeStatsC* stats);

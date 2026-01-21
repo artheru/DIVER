@@ -152,6 +152,31 @@ export interface NodeStateInfo {
 }
 
 /**
+ * 端口统计数据
+ */
+export interface PortStats {
+  index: number
+  txFrames: number
+  rxFrames: number
+  txBytes: number
+  rxBytes: number
+}
+
+/**
+ * MCU 运行时统计数据
+ */
+export interface RuntimeStats {
+  nodeId: string
+  uptimeMs: number
+  digitalInputs: number
+  digitalOutputs: number
+  digitalInputCount: number
+  digitalOutputCount: number
+  portCount: number
+  ports: PortStats[]
+}
+
+/**
  * 运行时整体快照
  */
 export interface RuntimeSnapshot {

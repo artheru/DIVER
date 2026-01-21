@@ -6,6 +6,7 @@
 #include "bsp/digital_io.h"
 #include "bsp/ports.h"
 #include "hal/nvic.h"
+#include "hal/systick.h"
 #include "msb_error_c.h"
 #include "msb_protocol.h"
 #include "util/console.h"
@@ -60,11 +61,11 @@ typedef struct {
 } Handles;
 Handles g_handles[PACKET_MAX_PORTS_NUM];
 
-volatile uint32_t g_inputs;
-volatile uint32_t g_outputs;
-
 volatile MCUStateC g_mcu_state = {.raw = 0};  // Bridge, Idle, not configured
 volatile bool g_wire_tap_enabled = false;
+
+// 端口统计数据
+volatile PortStatsC g_port_stats[PACKET_MAX_PORTS_NUM] = {0};
 
 // DIVER 程序缓冲区 (PROGRAM_BUFFER_MAX_SIZE defined in control.h)
 static uint8_t program_buffer_storage[PROGRAM_BUFFER_MAX_SIZE];
@@ -298,6 +299,8 @@ MCUSerialBridgeError control_on_write_port(
                     (AsyncCallback)control_on_serial_complete,
                     1,
                     port_index);
+            // 累加 TX 统计
+            control_stats_add_tx(port_index, pkt->data_len);
         } else {
             return MSB_Error_Serial_WriteFail;
         }
@@ -339,6 +342,8 @@ MCUSerialBridgeError control_on_write_port(
                 sequence);
 
         if (send_enqueue_ok) {
+            // 累加 TX 统计（CAN 帧大小 = header(2) + payload(dlc)）
+            control_stats_add_tx(port_index, 2 + info.dlc);
             *async = 1;
             return MSB_Error_OK;
         } else {
@@ -510,6 +515,9 @@ MCUSerialBridgeError control_vm_write_port(
                 (snapshot_tail + 1) % DIVER_SERIAL_SEND_BUFFER_SEGMENT_COUNT,
                 (uint32_t)buf->sending);
 
+        // 累加 TX 统计
+        control_stats_add_tx(port_index, data_length);
+
         return MSB_Error_OK;
     }
 
@@ -545,6 +553,9 @@ MCUSerialBridgeError control_vm_write_port(
         if (!enqueued) {
             return MSB_Error_CAN_BufferFull;
         }
+
+        // 累加 TX 统计（CAN 帧大小 = header(2) + payload(dlc)）
+        control_stats_add_tx(port_index, 2 + id_info.dlc);
 
         return MSB_Error_OK;
     }
@@ -1031,4 +1042,60 @@ bool control_vm_get_upper_io(const uint8_t** data_ptr, uint32_t* data_len)
     *data_len = len;
 
     return true;
+}
+
+/* ===============================
+ * 统计数据函数实现
+ * =============================== */
+
+void control_stats_add_tx(uint32_t port_index, uint32_t bytes)
+{
+    if (port_index >= PACKET_MAX_PORTS_NUM) {
+        return;
+    }
+    // 原子递增（在单核 MCU 上，volatile 访问即可保证原子性）
+    g_port_stats[port_index].tx_frames++;
+    g_port_stats[port_index].tx_bytes += bytes;
+}
+
+void control_stats_add_rx(uint32_t port_index, uint32_t bytes)
+{
+    if (port_index >= PACKET_MAX_PORTS_NUM) {
+        return;
+    }
+    g_port_stats[port_index].rx_frames++;
+    g_port_stats[port_index].rx_bytes += bytes;
+}
+
+void control_get_runtime_stats(RuntimeStatsC* stats)
+{
+    if (!stats) {
+        return;
+    }
+
+    // 获取当前时间戳（需要 HAL 提供）
+    stats->uptime_ms = g_hal_timestamp_us / 1000;
+
+    // 获取 IO 状态（从 bsp 层读取最新值）
+    bsp_get_inputs();  // 更新 g_bsp_digital_inputs
+    stats->digital_inputs = g_bsp_digital_inputs;
+    stats->digital_outputs = g_bsp_digital_outputs;
+
+    // 统计有效端口数量
+    stats->port_count = 0;
+    for (uint32_t i = 0; i < PACKET_MAX_PORTS_NUM; i++) {
+        if (g_handles[i].valid) {
+            stats->port_count++;
+        }
+    }
+
+    // 保留字节清零
+    stats->reserved[0] = 0;
+    stats->reserved[1] = 0;
+    stats->reserved[2] = 0;
+
+    // 复制端口统计数据
+    memcpy((void*)stats->ports,
+           (const void*)g_port_stats,
+           sizeof(g_port_stats));
 }
