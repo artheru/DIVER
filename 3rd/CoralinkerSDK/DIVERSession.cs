@@ -80,6 +80,46 @@ public sealed class DIVERSession : IDisposable
     }
 
     /// <summary>
+    /// 添加并连接节点（用于 Probe 后保持连接）
+    /// </summary>
+    /// <param name="nodeId">节点唯一标识</param>
+    /// <param name="mcuUri">MCU 串口 URI</param>
+    /// <returns>创建并连接的节点，如果连接失败返回 null</returns>
+    public MCUNode? AddAndConnectNode(string nodeId, string mcuUri)
+    {
+        // 如果已存在相同 mcuUri 的节点，先移除
+        var existingNode = _nodes.Values.FirstOrDefault(n => 
+            string.Equals(n.McuUri, mcuUri, StringComparison.OrdinalIgnoreCase));
+        if (existingNode != null)
+        {
+            RemoveNode(existingNode.NodeId);
+        }
+        
+        var node = AddNode(nodeId, mcuUri);
+        if (node.Connect())
+        {
+            // 启动状态轮询（如果还没启动）
+            StartStatePolling();
+            return node;
+        }
+        else
+        {
+            // 连接失败，移除节点
+            RemoveNode(nodeId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 通过 mcuUri 获取节点
+    /// </summary>
+    public MCUNode? GetNodeByUri(string mcuUri)
+    {
+        return _nodes.Values.FirstOrDefault(n => 
+            string.Equals(n.McuUri, mcuUri, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
     /// 移除节点
     /// </summary>
     /// <param name="nodeId">节点唯一标识</param>
@@ -121,7 +161,7 @@ public sealed class DIVERSession : IDisposable
     #region Session Lifecycle
 
     /// <summary>
-    /// 配置会话（设置 Cart 和节点）
+    /// 配置会话（设置 Cart 和节点）- 传统模式，会清空现有节点
     /// </summary>
     /// <param name="config">配置</param>
     public void Configure(SessionConfiguration config)
@@ -164,6 +204,73 @@ public sealed class DIVERSession : IDisposable
                         HostRuntime.BindCartFields(_cartTarget, node.CartFields);
                     }
                 }
+            }
+
+            // 使用第一个节点的 CartFields 作为会话级别的字段（用于简单场景）
+            if (_nodes.Count > 0)
+            {
+                _cartFields = _nodes.Values.First().CartFields;
+            }
+
+            SetState(DIVERSessionState.Configured);
+        }
+    }
+
+    /// <summary>
+    /// 配置已连接节点的程序（不清空节点，用于 Probe 后保持连接的场景）
+    /// </summary>
+    /// <param name="config">配置</param>
+    public void ConfigureConnectedNodes(SessionConfiguration config)
+    {
+        lock (_stateLock)
+        {
+            // 允许在 Idle 或 Configured 状态下配置
+            if (State == DIVERSessionState.Running)
+                throw new InvalidOperationException($"Cannot configure in state: {State}");
+
+            // 创建 Cart 对象（可选，如果提供了 AssemblyPath）
+            if (!string.IsNullOrEmpty(config.AssemblyPath))
+            {
+                _cartTarget = HostRuntime.CreateCartTarget(config.AssemblyPath);
+            }
+
+            // 清空变量存储
+            HostRuntime.ClearAllVariables();
+
+            // 更新已连接节点的程序配置
+            foreach (var nodeConfig in config.Nodes)
+            {
+                // 通过 mcuUri 查找已连接的节点
+                var node = GetNodeByUri(nodeConfig.McuUri);
+                if (node == null)
+                {
+                    Console.WriteLine($"[DIVERSession] Warning: Node with mcuUri '{nodeConfig.McuUri}' not found in session, skipping");
+                    continue;
+                }
+
+                // 更新程序配置
+                node.ProgramBytes = nodeConfig.ProgramBytes;
+                if (nodeConfig.PortConfigs != null && nodeConfig.PortConfigs.Length > 0)
+                {
+                    node.PortConfigs = nodeConfig.PortConfigs;
+                }
+                
+                // 解析该节点的 MetaJson
+                if (!string.IsNullOrEmpty(nodeConfig.MetaJson))
+                {
+                    node.CartFields = HostRuntime.ParseMetaJson(nodeConfig.MetaJson);
+                    
+                    // 初始化变量存储
+                    HostRuntime.InitializeNodeVariables(node.NodeId, node.CartFields);
+                    
+                    // 如果有 Cart 对象，绑定反射信息
+                    if (_cartTarget != null)
+                    {
+                        HostRuntime.BindCartFields(_cartTarget, node.CartFields);
+                    }
+                }
+                
+                Console.WriteLine($"[DIVERSession] Configured node '{node.NodeId}' with {node.ProgramBytes.Length} bytes program");
             }
 
             // 使用第一个节点的 CartFields 作为会话级别的字段（用于简单场景）

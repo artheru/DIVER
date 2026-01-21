@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace CoralinkerHost.Services;
 
@@ -51,8 +52,40 @@ public sealed class ProjectStore
         try
         {
             var json = File.ReadAllText(ProjectFile);
-            var state = JsonSerializer.Deserialize<ProjectState>(json, ProjectJson.Options);
-            if (state != null) Set(state);
+            
+            // 尝试检测旧格式（nodeMap 是字符串）并迁移
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            
+            if (root.TryGetProperty("nodeMap", out var nodeMapEl) && 
+                nodeMapEl.ValueKind == JsonValueKind.String)
+            {
+                // 旧格式：nodeMap 是字符串，需要迁移
+                var nodeMapStr = nodeMapEl.GetString();
+                JsonNode? nodeMapObj = null;
+                
+                if (!string.IsNullOrWhiteSpace(nodeMapStr))
+                {
+                    nodeMapObj = JsonNode.Parse(nodeMapStr);
+                }
+                
+                var state = new ProjectState(
+                    nodeMapObj,
+                    root.TryGetProperty("selectedAsset", out var sa) && sa.ValueKind == JsonValueKind.String ? sa.GetString() : null,
+                    root.TryGetProperty("selectedFile", out var sf) && sf.ValueKind == JsonValueKind.String ? sf.GetString() : null,
+                    root.TryGetProperty("lastBuildId", out var lb) && lb.ValueKind == JsonValueKind.String ? lb.GetString() : null
+                );
+                
+                Set(state);
+                
+                // 自动迁移：以新格式保存
+                SaveToDisk();
+                return;
+            }
+            
+            // 新格式：直接反序列化
+            var newState = JsonSerializer.Deserialize<ProjectState>(json, ProjectJson.Options);
+            if (newState != null) Set(newState);
         }
         catch
         {
@@ -130,39 +163,60 @@ public sealed class ProjectStore
 
 public sealed record AssetInfo(string Name, long SizeBytes, DateTime LastWriteUtc);
 
-public sealed record ProjectState(List<NodeState> Nodes, List<LinkState> Links, string? SelectedAsset, string? SelectedFile, string? LastBuildId)
+/// <summary>
+/// Project state - matches frontend ProjectState interface.
+/// nodeMap stores the raw LiteGraph serialized JSON object (not string).
+/// </summary>
+public sealed record ProjectState(
+    JsonNode? NodeMap,         // LiteGraph 序列化的 JSON 对象 (直接存储，非字符串)
+    string? SelectedAsset,     // 当前选中的 .cs 资源文件名
+    string? SelectedFile,      // 当前在编辑器中打开的文件路径
+    string? LastBuildId        // 最后一次构建的 ID
+)
 {
     public static ProjectState CreateDefault()
     {
-        var root = new NodeState(
-            Id: "root",
-            Title: "root",
-            Kind: "root",
-            X: 80,
-            Y: 80,
-            W: null,
-            H: null,
-            Properties: new Dictionary<string, string>
+        // 创建默认的 LiteGraph 图数据，包含一个 Root 节点
+        var defaultGraph = new JsonObject
+        {
+            ["last_node_id"] = 1,
+            ["last_link_id"] = 0,
+            ["nodes"] = new JsonArray
             {
-                ["mcuUri"] = "PC",
-                ["logicName"] = "Root"
-            });
-
-        return new ProjectState(new List<NodeState> { root }, new List<LinkState>(), null, null, null);
+                new JsonObject
+                {
+                    ["id"] = 1,
+                    ["type"] = "coral/root",
+                    ["pos"] = new JsonArray { 50, 50 },
+                    ["size"] = new JsonArray { 200, 90 },
+                    ["flags"] = new JsonObject(),
+                    ["order"] = 0,
+                    ["mode"] = 0,
+                    ["outputs"] = new JsonArray
+                    {
+                        new JsonObject
+                        {
+                            ["name"] = "out",
+                            ["type"] = "flow",
+                            ["links"] = null
+                        }
+                    },
+                    ["properties"] = new JsonObject
+                    {
+                        ["name"] = "PC"
+                    }
+                }
+            },
+            ["links"] = new JsonArray(),
+            ["groups"] = new JsonArray(),
+            ["config"] = new JsonObject(),
+            ["extra"] = new JsonObject(),
+            ["version"] = 0.4
+        };
+        
+        return new ProjectState(defaultGraph, null, null, null);
     }
 }
-
-public sealed record NodeState(
-    string Id,
-    string Title,
-    string Kind,
-    double X,
-    double Y,
-    double? W,
-    double? H,
-    Dictionary<string, string> Properties);
-
-public sealed record LinkState(string Id, string FromNodeId, int? FromSlot, string ToNodeId, int? ToSlot);
 
 internal static class ProjectJson
 {

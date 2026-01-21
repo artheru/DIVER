@@ -1,0 +1,784 @@
+<!--
+  @file components/graph/CoralNodeView.vue
+  @description Coral MCU 节点组件 - 使用 vue-flow
+  
+  布局结构：
+  - 标题栏：折叠按钮 + 节点名 + 状态指示器
+  - Harness: in/out 连接点
+  - Base Config: URI + Logic
+  - Port Config: 端口配置列表
+  - LowerIO: 只读变量显示
+-->
+
+<template>
+  <div 
+    class="coral-node" 
+    :class="{ 
+      collapsed: isCollapsed, 
+      readonly: !canEdit,
+      selected: selected
+    }"
+  >
+    <!-- Handle 连接点 - 始终存在，位置固定在节点边缘 -->
+    <Handle 
+      type="target" 
+      :position="Position.Left" 
+      id="in" 
+      class="node-handle handle-in handle-visible"
+    />
+    <Handle 
+      type="source" 
+      :position="Position.Right" 
+      id="out" 
+      class="node-handle handle-out handle-visible"
+    />
+
+    <!-- 标题栏 -->
+    <div class="node-header" @click="toggleCollapse">
+      <span class="collapse-btn">{{ isCollapsed ? '▶' : '▼' }}</span>
+      <input
+        v-if="!isCollapsed && canEdit"
+        class="node-name-input"
+        v-model="localNodeName"
+        @click.stop
+        @blur="updateNodeName"
+        @keyup.enter="($event.target as HTMLInputElement)?.blur()"
+      />
+      <span v-else class="node-name">{{ data.nodeName }}</span>
+    </div>
+
+    <!-- 状态行：单独一行显示状态 -->
+    <div class="node-status-row">
+      <span class="status-badge" :class="runStateBadgeClass">
+        {{ runStateText }}
+      </span>
+      <span class="status-badge config" :class="{ active: data.isConfigured }">
+        {{ data.isConfigured ? 'Configured' : 'Not Config' }}
+      </span>
+      <span class="status-badge program" :class="{ active: data.isProgrammed }">
+        {{ data.isProgrammed ? 'Programmed' : 'Not Program' }}
+      </span>
+    </div>
+
+    <!-- 展开内容 -->
+    <div v-show="!isCollapsed" class="node-content">
+
+      <!-- Base Config -->
+      <div class="section">
+        <div class="section-title">BASE CONFIG</div>
+        
+        <!-- URI (只读，添加时确定，不可修改) -->
+        <div class="config-row readonly">
+          <span class="config-label">URI</span>
+          <div class="config-value uri-display">
+            <template v-if="parsedUri.mode === 'name'">
+              <span class="uri-port">{{ parsedUri.port }}</span>
+              <span class="uri-baud">{{ parsedUri.baudrate }}</span>
+            </template>
+            <template v-else-if="parsedUri.mode === 'vidpid'">
+              <span class="uri-vid">V{{ parsedUri.vid }}</span>
+              <span class="uri-pid">P{{ parsedUri.pid }}</span>
+              <span v-if="parsedUri.serial" class="uri-serial">S{{ parsedUri.serial }}</span>
+            </template>
+            <span v-else class="uri-unknown">Not Set</span>
+          </div>
+          <span class="lock-icon" title="URI cannot be changed after node creation">🔒</span>
+        </div>
+
+        <!-- Logic -->
+        <div class="config-row">
+          <span class="config-label">Logic</span>
+          <n-select
+            v-if="canEdit"
+            v-model:value="localLogicName"
+            :options="logicOptions"
+            size="small"
+            placeholder="Select Logic"
+            class="logic-select"
+            @update:value="updateLogicName"
+          />
+          <span v-else class="config-value">{{ data.logicName || 'Not Set' }}</span>
+        </div>
+      </div>
+
+      <!-- Port Config -->
+      <div class="section" v-if="hasPortsToShow">
+        <div class="section-title">
+          PORT CONFIG
+          <span v-if="canEdit" class="edit-btn" @click="openPortEditor">Edit</span>
+        </div>
+        <div class="port-list">
+          <div v-for="(port, idx) in displayPorts" :key="idx" class="port-item">
+            <span class="port-index">[{{ idx }}]</span>
+            <span class="port-type" :class="port.type.toLowerCase()">{{ port.type }}</span>
+            <span class="port-name">{{ port.name || `Port${idx}` }}</span>
+            <span class="port-baud">{{ port.baud || '-' }}</span>
+            <span class="port-extra" v-if="port.baud">
+              {{ port.type === 'Serial' ? `FrameMs=${port.receiveFrameMs || 0}` : `RetryMs=${port.retryTimeMs || 10}` }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- LowerIO Variables -->
+      <div class="section" v-if="lowerIOVariables.length > 0">
+        <div class="section-title">LOWER I/O</div>
+        <div class="variable-list">
+          <div v-for="variable in lowerIOVariables" :key="variable.name" class="variable-item">
+            <span class="var-type">{{ formatType(variable.type) }}</span>
+            <span class="var-name">{{ variable.name }}</span>
+            <span class="var-value">{{ formatValue(variable.value) }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Port 配置编辑器 -->
+    <PortConfigEdit
+      v-model="localPortConfigs"
+      v-model:show="showPortEdit"
+      :ports="portDescriptors"
+      @update:model-value="updatePortConfigs"
+    />
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed, watch, onMounted } from 'vue'
+import { Handle, Position } from '@vue-flow/core'
+import { NSelect } from 'naive-ui'
+import { useRuntimeStore, useFilesStore } from '@/stores'
+import { storeToRefs } from 'pinia'
+import { getLogicList, type LogicInfo } from '@/api/device'
+import type { PortConfig, PortDescriptor } from '@/types'
+import PortConfigEdit from './PortConfigEdit.vue'
+
+// Props from vue-flow
+const props = defineProps<{
+  id: string
+  data: {
+    nodeName: string
+    mcuUri: string
+    logicName: string
+    runState: string
+    isConnected: boolean
+    isConfigured: boolean
+    isProgrammed: boolean
+    ports: PortConfig[]
+    layout: { ports: PortDescriptor[] } | null
+  }
+  selected: boolean
+}>()
+
+// vue-flow hook
+import { useVueFlow } from '@vue-flow/core'
+const { updateNodeData } = useVueFlow()
+
+// Runtime store
+const runtimeStore = useRuntimeStore()
+const { isRunning } = storeToRefs(runtimeStore)
+
+// Files store (用于监听 buildVersion)
+const filesStore = useFilesStore()
+const { buildVersion } = storeToRefs(filesStore)
+
+// ============================================
+// 本地状态
+// ============================================
+
+const isCollapsed = ref(false)
+const localNodeName = ref(props.data.nodeName)
+const localLogicName = ref(props.data.logicName)
+const localPortConfigs = ref<PortConfig[]>(props.data.ports || [])
+
+// 编辑器状态
+const showPortEdit = ref(false)
+
+// Logic 列表
+const logicList = ref<LogicInfo[]>([])
+
+// ============================================
+// 计算属性
+// ============================================
+
+// 是否可编辑（非运行状态）
+const canEdit = computed(() => !isRunning.value)
+
+// 运行状态 Badge 样式
+const runStateBadgeClass = computed(() => {
+  const state = props.data.runState?.toLowerCase() || 'offline'
+  return state
+})
+
+const runStateText = computed(() => props.data.runState || 'Offline')
+
+// 解析 URI 显示
+const parsedUri = computed(() => {
+  const uri = props.data.mcuUri || ''
+  
+  // serial://name=COM18&baudrate=1000000
+  const nameMatch = uri.match(/name=([^&]+)/)
+  const baudMatch = uri.match(/baudrate=(\d+)/)
+  
+  if (nameMatch) {
+    return {
+      mode: 'name',
+      port: nameMatch[1],
+      baudrate: baudMatch?.[1] || '1000000'
+    }
+  }
+  
+  // serial://vid=XXXX&pid=YYYY&serial=ZZZZ
+  const vidMatch = uri.match(/vid=([^&]+)/)
+  const pidMatch = uri.match(/pid=([^&]+)/)
+  const serialMatch = uri.match(/serial=([^&]+)/)
+  
+  if (vidMatch && pidMatch) {
+    return {
+      mode: 'vidpid',
+      vid: vidMatch[1],
+      pid: pidMatch[1],
+      serial: serialMatch?.[1] || '',
+      baudrate: baudMatch?.[1] || '1000000'
+    }
+  }
+  
+  return { mode: 'unknown' }
+})
+
+// 端口配置
+const portConfigs = computed(() => props.data.ports || [])
+const portDescriptors = computed(() => props.data.layout?.ports || [])
+
+// 是否有端口可显示（优先显示配置，否则显示 layout 中的描述）
+const hasPortsToShow = computed(() => portConfigs.value.length > 0 || portDescriptors.value.length > 0)
+
+// 用于显示的端口列表（合并配置和 layout 信息）
+const displayPorts = computed(() => {
+  if (portConfigs.value.length > 0) {
+    return portConfigs.value
+  }
+  // 如果没有配置但有 layout，显示 layout 中的端口（无配置参数）
+  return portDescriptors.value.map(p => ({
+    type: p.type,
+    name: p.name,
+    baud: 0,  // 未配置
+    receiveFrameMs: 0,
+    retryTimeMs: 0
+  }))
+})
+
+// Logic 下拉选项
+const logicOptions = computed(() => 
+  logicList.value.map(l => ({ label: l.name, value: l.name }))
+)
+
+// 获取该节点的 LowerIO 变量
+interface LowerIOVariable {
+  name: string
+  type: string
+  value: unknown
+}
+
+const lowerIOVariables = computed((): LowerIOVariable[] => {
+  // TODO: 根据节点 ID 过滤变量
+  // 暂时返回空数组，等后端支持按节点分组
+  return []
+})
+
+// ============================================
+// 方法
+// ============================================
+
+function toggleCollapse() {
+  isCollapsed.value = !isCollapsed.value
+}
+
+function updateNodeName() {
+  if (localNodeName.value !== props.data.nodeName) {
+    updateNodeData(props.id, { nodeName: localNodeName.value })
+  }
+}
+
+function updateLogicName(newLogic: string) {
+  updateNodeData(props.id, { logicName: newLogic })
+}
+
+function openPortEditor() {
+  if (!canEdit.value) return
+  
+  // 如果有现有配置，使用它
+  if (props.data.ports && props.data.ports.length > 0) {
+    localPortConfigs.value = [...props.data.ports]
+  } else if (portDescriptors.value.length > 0) {
+    // 否则从 layout 生成默认配置
+    localPortConfigs.value = portDescriptors.value.map(p => {
+      const isSerial = p.type.toLowerCase() === 'serial'
+      return {
+        type: p.type,
+        name: p.name,
+        baud: isSerial ? 115200 : 1000000,
+        receiveFrameMs: isSerial ? 0 : undefined,
+        retryTimeMs: isSerial ? undefined : 10
+      }
+    })
+  } else {
+    localPortConfigs.value = []
+  }
+  
+  showPortEdit.value = true
+}
+
+function updatePortConfigs(newConfigs: PortConfig[]) {
+  updateNodeData(props.id, { ports: newConfigs })
+}
+
+// 格式化类型名
+function formatType(type: string): string {
+  const typeMap: Record<string, string> = {
+    'Int32': 'i32',
+    'UInt32': 'u32',
+    'Int16': 'i16',
+    'UInt16': 'u16',
+    'Single': 'f32',
+    'Double': 'f64',
+    'Byte': 'u8',
+    'SByte': 'i8',
+    'Boolean': 'bool',
+    'String': 'str'
+  }
+  return typeMap[type] || type?.toLowerCase() || '?'
+}
+
+// 格式化值显示
+function formatValue(value: unknown): string {
+  if (value === null || value === undefined) return '-'
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? String(value) : value.toFixed(2)
+  }
+  return String(value)
+}
+
+// 加载 Logic 列表
+async function loadLogicList() {
+  try {
+    const result = await getLogicList()
+    if (result.ok) {
+      logicList.value = result.logics
+    }
+  } catch (error) {
+    console.error('[CoralNode] Failed to load logic list:', error)
+  }
+}
+
+// ============================================
+// 生命周期
+// ============================================
+
+onMounted(() => {
+  loadLogicList()
+})
+
+// 同步 props 到本地状态
+watch(() => props.data.nodeName, (v) => { localNodeName.value = v })
+watch(() => props.data.logicName, (v) => { localLogicName.value = v })
+watch(() => props.data.ports, (v) => { localPortConfigs.value = v || [] })
+
+// 监听 buildVersion 变化，重新加载 Logic 列表
+watch(buildVersion, () => {
+  console.log('[CoralNode] Build version changed, reloading logic list')
+  loadLogicList()
+})
+</script>
+
+<style scoped>
+.coral-node {
+  background: linear-gradient(180deg, #1e293b, #0f172a);
+  border: 2px solid #334155;
+  border-radius: 8px;
+  min-width: 280px;
+  font-family: var(--font-family);
+  font-size: 12px;
+  color: #e2e8f0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.coral-node.selected {
+  border-color: #4f8cff;
+  box-shadow: 0 0 0 2px rgba(79, 140, 255, 0.3), 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.coral-node.readonly {
+  opacity: 0.85;
+}
+
+.coral-node.collapsed {
+  min-width: 200px;
+}
+
+/* 标题栏 */
+.node-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.collapse-btn {
+  font-size: 10px;
+  color: #a0aec0;
+  width: 12px;
+}
+
+.node-name {
+  flex: 1;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.node-name-input {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid #4a5568;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #f1f5f9;
+  outline: none;
+}
+
+.node-name-input:focus {
+  border-color: #4f8cff;
+}
+
+/* 状态行 */
+.node-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.status-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  background: rgba(100, 116, 139, 0.3);
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.status-badge.active {
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+}
+
+/* 运行状态样式 */
+.status-badge.offline {
+  background: rgba(113, 128, 150, 0.3);
+  color: #a0aec0;
+}
+
+.status-badge.idle {
+  background: rgba(245, 158, 11, 0.2);
+  color: #f59e0b;
+}
+
+.status-badge.running {
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+  animation: badge-pulse 1.5s infinite;
+}
+
+.status-badge.error {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+/* 配置/编程状态样式 */
+.status-badge.config:not(.active) {
+  background: rgba(168, 85, 247, 0.1);
+  color: #a78bfa;
+}
+
+.status-badge.config.active {
+  background: rgba(168, 85, 247, 0.25);
+  color: #c4b5fd;
+}
+
+.status-badge.program:not(.active) {
+  background: rgba(59, 130, 246, 0.1);
+  color: #93c5fd;
+}
+
+.status-badge.program.active {
+  background: rgba(59, 130, 246, 0.25);
+  color: #bfdbfe;
+}
+
+@keyframes badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* 内容区 */
+.node-content {
+  padding: 8px 0;
+}
+
+/* Harness 区域 */
+.harness-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  margin: 0 8px 8px 8px;
+  border-radius: 4px;
+}
+
+.harness-in, .harness-out {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.handle-label {
+  font-size: 11px;
+  color: #a0aec0;
+}
+
+/* vue-flow Handle 样式 - 固定位置在节点边缘 */
+.node-handle {
+  width: 12px !important;
+  height: 12px !important;
+  background: transparent !important;
+  border: 2px solid transparent !important;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+/* 收缩状态时显示 Handle */
+.node-handle.handle-visible {
+  background: #4f8cff !important;
+  border-color: #1e293b !important;
+}
+
+:deep(.handle-in) {
+  left: -6px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+}
+
+:deep(.handle-out) {
+  right: -6px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+}
+
+/* 连接时高亮 */
+:deep(.vue-flow__handle.connecting),
+:deep(.vue-flow__handle.valid) {
+  background: #22c55e !important;
+  border-color: #1e293b !important;
+}
+
+/* Section 通用样式 */
+.section {
+  margin: 0 8px 8px 8px;
+}
+
+.section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 6px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  margin-bottom: 6px;
+}
+
+.edit-btn {
+  font-size: 10px;
+  color: #4f8cff;
+  cursor: pointer;
+  text-transform: none;
+}
+
+.edit-btn:hover {
+  text-decoration: underline;
+}
+
+/* 配置行 */
+.config-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.config-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.config-row.readonly {
+  cursor: default;
+}
+
+.config-row.readonly:hover {
+  background: transparent;
+}
+
+.config-label {
+  width: 50px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.config-value {
+  flex: 1;
+  color: #e2e8f0;
+}
+
+.uri-display {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.uri-port, .uri-vid {
+  font-weight: 600;
+  color: #22c55e;
+}
+
+.uri-baud, .uri-pid, .uri-serial {
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.uri-unknown {
+  color: #64748b;
+  font-style: italic;
+}
+
+.edit-icon {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.lock-icon {
+  font-size: 10px;
+  opacity: 0.5;
+}
+
+.logic-select {
+  flex: 1;
+  max-width: 180px;
+}
+
+/* 端口列表 */
+.port-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.port-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+}
+
+.port-index {
+  font-family: var(--font-mono);
+  color: #64748b;
+}
+
+.port-type {
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.port-type.serial {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+
+.port-type.can {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
+.port-name {
+  color: #94a3b8;
+  font-size: 10px;
+  flex: 1;
+}
+
+.port-baud {
+  font-family: var(--font-mono);
+  color: #e2e8f0;
+}
+
+.port-extra {
+  font-size: 10px;
+  color: #64748b;
+}
+
+/* 变量列表 */
+.variable-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.variable-item {
+  display: grid;
+  grid-template-columns: 32px 1fr 60px;
+  gap: 6px;
+  padding: 3px 4px;
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 2px;
+}
+
+.var-type {
+  font-family: var(--font-mono);
+  color: #64748b;
+  font-size: 10px;
+}
+
+.var-name {
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.var-value {
+  font-family: var(--font-mono);
+  color: #22c55e;
+  text-align: right;
+}
+</style>

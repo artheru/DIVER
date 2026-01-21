@@ -12,7 +12,8 @@ import type {
   SetVariableRequest,
   NodeLogInfo,
   LogChunkResponse,
-  PortConfig
+  PortConfig,
+  NodeStateInfo
 } from '@/types'
 
 // ============================================
@@ -48,6 +49,42 @@ export async function stop(): Promise<void> {
  */
 export async function getRuntimeSnapshot(): Promise<RuntimeSnapshot> {
   return get<RuntimeSnapshot>('/api/runtime')
+}
+
+/**
+ * 获取所有节点状态（用于轮询）
+ */
+export async function getNodeStates(): Promise<{ ok: boolean; nodes: NodeStateInfo[] }> {
+  return get('/api/nodes/state')
+}
+
+/**
+ * 会话恢复响应中的节点信息
+ */
+export interface RestoreNodeInfo {
+  nodeId: string
+  mcuUri: string
+  success: boolean
+  message: string
+}
+
+/**
+ * 会话恢复响应
+ */
+export interface RestoreSessionResponse {
+  ok: boolean
+  total: number
+  connected: number
+  nodes: RestoreNodeInfo[]
+  error?: string
+}
+
+/**
+ * 恢复会话 - 将项目中的节点重新连接到 DIVERSession
+ * 在项目加载后调用，用于恢复节点连接
+ */
+export async function restoreSession(): Promise<RestoreSessionResponse> {
+  return post<RestoreSessionResponse>('/api/session/restore')
 }
 
 // ============================================

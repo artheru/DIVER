@@ -14,7 +14,8 @@ public sealed class TerminalBroadcaster
 
     public Task LineAsync(string line, CancellationToken ct = default)
     {
-        return _hub.Clients.All.SendAsync("terminalLine", line, ct);
+        var timestamp = DateTime.Now.ToString("MM-dd HH:mm:ss.fff");
+        return _hub.Clients.All.SendAsync("terminalLine", $"[SA][{timestamp}] {line}", ct);
     }
 
     public Task VarsSnapshotAsync(object snapshot, CancellationToken ct = default)

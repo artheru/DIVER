@@ -52,6 +52,9 @@ export const useFilesStore = defineStore('files', () => {
   /** 文件树加载状态 */
   const loading = ref(false)
   
+  /** 构建版本号（每次 Build 后递增，用于触发组件更新） */
+  const buildVersion = ref(0)
+  
   // ============================================
   // 计算属性
   // ============================================
@@ -241,12 +244,21 @@ export const useFilesStore = defineStore('files', () => {
     return result
   }
   
+  /**
+   * 通知构建完成（递增 buildVersion 触发依赖组件更新）
+   */
+  function notifyBuildComplete() {
+    buildVersion.value++
+    console.log(`[Files] Build version: ${buildVersion.value}`)
+  }
+  
   return {
     // 状态
     fileTree,
     tabs,
     activeTabId,
     loading,
+    buildVersion,
     
     // 计算属性
     activeTab,
@@ -261,6 +273,7 @@ export const useFilesStore = defineStore('files', () => {
     saveCurrentTab,
     createNewInput,
     deleteFile,
-    uploadAsset
+    uploadAsset,
+    notifyBuildComplete
   }
 })

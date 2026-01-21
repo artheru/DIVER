@@ -12,15 +12,15 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as projectApi from '@/api/project'
-import type { ProjectState, BuildResult } from '@/types'
+import type { ProjectState, BuildResult, LiteGraphData } from '@/types'
 
 export const useProjectStore = defineStore('project', () => {
   // ============================================
   // 状态定义
   // ============================================
   
-  /** LiteGraph 序列化的节点图数据 */
-  const nodeMap = ref<string | null>(null)
+  /** LiteGraph 序列化的节点图数据 (直接存储对象，非字符串) */
+  const nodeMap = ref<LiteGraphData | null>(null)
   
   /** 当前选中的 .cs 资源文件名 */
   const selectedAsset = ref<string | null>(null)
@@ -128,7 +128,7 @@ export const useProjectStore = defineStore('project', () => {
    * 更新节点图数据
    * 会标记为 dirty 并触发自动保存
    */
-  function setNodeMap(data: string | null) {
+  function setNodeMap(data: LiteGraphData | null) {
     nodeMap.value = data
     dirty.value = true
   }

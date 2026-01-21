@@ -55,7 +55,21 @@ export const useLogStore = defineStore('logs', () => {
   // ============================================
   
   /**
-   * 添加终端日志行
+   * 生成时间戳字符串
+   */
+  function getTimestamp(): string {
+    const now = new Date()
+    const MM = String(now.getMonth() + 1).padStart(2, '0')
+    const DD = String(now.getDate()).padStart(2, '0')
+    const HH = String(now.getHours()).padStart(2, '0')
+    const mm = String(now.getMinutes()).padStart(2, '0')
+    const ss = String(now.getSeconds()).padStart(2, '0')
+    const sss = String(now.getMilliseconds()).padStart(3, '0')
+    return `${MM}-${DD} ${HH}:${mm}:${ss}.${sss}`
+  }
+
+  /**
+   * 添加终端日志行 (原始，不加时间戳，用于接收后端日志)
    * @param line 日志内容
    */
   function appendTerminal(line: string) {
@@ -65,6 +79,14 @@ export const useLogStore = defineStore('logs', () => {
     if (terminalLines.value.length > MAX_LOG_LINES) {
       terminalLines.value.splice(0, terminalLines.value.length - MAX_LOG_LINES)
     }
+  }
+
+  /**
+   * 添加前端本地日志行 (带 [UI] 前缀和时间戳)
+   * @param line 日志内容
+   */
+  function logUI(line: string) {
+    appendTerminal(`[UI][${getTimestamp()}] ${line}`)
   }
   
   /**
@@ -216,6 +238,7 @@ export const useLogStore = defineStore('logs', () => {
     
     // 方法
     appendTerminal,
+    logUI,
     appendNodeLog,
     ensureNodeTab,
     removeNodeTab,

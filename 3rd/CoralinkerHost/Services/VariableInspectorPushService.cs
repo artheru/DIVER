@@ -137,17 +137,6 @@ public sealed class VariableInspectorPushService : BackgroundService
             var layout = node.Layout;
             var layoutPorts = layout?.GetValidPorts() ?? Array.Empty<PortDescriptor>();
 
-            // Debug logging for layout ports
-            if (layoutPorts.Length > 0)
-            {
-                Console.WriteLine($"[VariableInspector] Node {node.NodeId}: Layout has {layoutPorts.Length} ports");
-                for (int idx = 0; idx < layoutPorts.Length; idx++)
-                {
-                    var p = layoutPorts[idx];
-                    Console.WriteLine($"[VariableInspector]   Port[{idx}]: Type={(int)p.Type}({p.Type}), Name='{p.Name}'");
-                }
-            }
-
             return new
             {
                 nodeId = node.NodeId,

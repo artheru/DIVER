@@ -9,12 +9,53 @@ import { get, post, del, upload } from './index'
 import type { FileNode, FileReadResponse, FileWriteRequest } from '@/types'
 
 /**
+ * 后端返回的原始文件节点结构
+ */
+interface RawFileNode {
+  name: string
+  path: string
+  isDir: boolean
+  sizeBytes: number | null
+  children: RawFileNode[] | null
+}
+
+/**
+ * 将后端返回的文件节点转换为前端 FileNode 格式
+ * - isDir -> kind
+ * - 递归转换 children
+ */
+function convertFileNode(raw: RawFileNode): FileNode {
+  return {
+    name: raw.name,
+    path: raw.path,
+    kind: raw.isDir ? 'folder' : 'file',
+    children: raw.children?.map(convertFileNode)
+  }
+}
+
+/**
  * 获取资源文件树
  * 返回 assets 目录下的文件结构
+ * 
+ * 注意：后端直接返回根节点对象 { name: "assets", isDir: true, children: [...] }
+ * 我们需要提取其 children 并转换为前端格式（isDir -> kind）
  */
 export async function getFileTree(): Promise<FileNode[]> {
-  const response = await get<{ tree: FileNode[] }>('/api/files/tree')
-  return response.tree || []
+  const response = await get<RawFileNode>('/api/files/tree')
+  
+  if (!response) {
+    return []
+  }
+  
+  // 兼容两种格式：直接返回根节点 或 { tree: rootNode }
+  const rootNode = (response as any).tree || response
+  
+  // 提取并转换 children
+  if (rootNode?.children && rootNode.children.length > 0) {
+    return rootNode.children.map(convertFileNode)
+  }
+  
+  return []
 }
 
 /**

@@ -73,16 +73,19 @@ export function useSignalR() {
       // 注册连接状态回调
       connection.value.onreconnecting(() => {
         state.value = 'reconnecting'
+        runtimeStore.setBackendAvailable(false)
         console.log('[SignalR] Reconnecting...')
       })
       
       connection.value.onreconnected(() => {
         state.value = 'connected'
+        runtimeStore.setBackendAvailable(true)
         console.log('[SignalR] Reconnected')
       })
       
       connection.value.onclose((err) => {
         state.value = 'disconnected'
+        runtimeStore.setBackendAvailable(false)
         if (err) {
           error.value = err.message
           console.error('[SignalR] Connection closed with error:', err)
@@ -95,6 +98,7 @@ export function useSignalR() {
       await connection.value.start()
       
       state.value = 'connected'
+      runtimeStore.setBackendAvailable(true)
       console.log('[SignalR] Connected to /hubs/terminal')
       
     } catch (err) {
@@ -119,20 +123,20 @@ export function useSignalR() {
     })
     
     // 节点日志事件
-    // 格式: nodeLogLine(nodeId: string, line: string)
-    connection.value.on('nodeLogLine', (nodeId: string, line: string) => {
-      logStore.appendNodeLog(nodeId, line)
+    // 格式: nodeLogLine({ nodeId: string, line: string })
+    connection.value.on('nodeLogLine', (data: { nodeId: string; line: string }) => {
+      logStore.appendNodeLog(data.nodeId, data.line)
     })
     
-    // 变量更新事件
-    // 格式: variables(snapshot: Record<string, unknown>)
-    connection.value.on('variables', (snapshot: Record<string, unknown>) => {
+    // 变量快照更新事件 (后端发送 varsSnapshot)
+    // 格式: varsSnapshot(snapshot: Record<string, unknown>)
+    connection.value.on('varsSnapshot', (snapshot: Record<string, unknown>) => {
       runtimeStore.updateVariables(snapshot)
     })
     
-    // 运行时状态更新事件
-    // 格式: runtimeUpdate(snapshot: RuntimeSnapshot)
-    connection.value.on('runtimeUpdate', (snapshot: { nodes: Array<{ nodeId: string }> }) => {
+    // 节点状态快照更新事件 (后端发送 nodeSnapshot)
+    // 格式: nodeSnapshot(snapshot: { nodes: Array<NodeSnapshot> })
+    connection.value.on('nodeSnapshot', (snapshot: { nodes: Array<{ nodeId: string }> }) => {
       for (const node of snapshot.nodes || []) {
         runtimeStore.updateNodeSnapshot(node as any)
       }

@@ -11,12 +11,27 @@
 // ============================================
 
 /**
+ * LiteGraph 序列化数据结构
+ * 直接存储为 JSON 对象，避免双重序列化
+ */
+export interface LiteGraphData {
+  last_node_id: number
+  last_link_id: number
+  nodes: any[]
+  links: any[]
+  groups?: any[]
+  config?: Record<string, any>
+  extra?: Record<string, any>
+  version?: number
+}
+
+/**
  * 项目状态 - 对应后端 ProjectState
  * 包含节点图序列化数据和当前选中的资源信息
  */
 export interface ProjectState {
-  /** LiteGraph 序列化的 JSON 字符串 */
-  nodeMap: string | null
+  /** LiteGraph 序列化的 JSON 对象 (直接存储，非字符串) */
+  nodeMap: LiteGraphData | null
   /** 当前选中的 .cs 资源文件名 */
   selectedAsset: string | null
   /** 当前在编辑器中打开的文件路径 */
@@ -103,6 +118,7 @@ export interface PortDescriptor {
  */
 export interface PortConfig {
   type: string
+  name?: string   // 端口名称（来自 MCU Layout）
   baud: number
   receiveFrameMs?: number
   retryTimeMs?: number
@@ -114,12 +130,25 @@ export interface PortConfig {
 export interface NodeSnapshot {
   nodeId: string
   runState: string
+  isConnected: boolean
   isConfigured: boolean
   isProgrammed: boolean
   mode: string
   version?: VersionInfo
   layout?: LayoutInfo
   ports?: PortConfig[]
+}
+
+/**
+ * 节点状态信息（用于轮询）
+ */
+export interface NodeStateInfo {
+  nodeId: string
+  isConnected: boolean
+  runState: string
+  isConfigured: boolean
+  isProgrammed: boolean
+  mode: string
 }
 
 /**

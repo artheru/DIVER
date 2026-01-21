@@ -299,10 +299,28 @@ public static class ApiRoutes
             }
         });
 
-        app.MapPost("/api/start", async (RuntimeSessionService runtime, CancellationToken ct) =>
+        app.MapPost("/api/start", async (ProjectStore store, RuntimeSessionService runtime, CancellationToken ct) =>
         {
-            await runtime.StartAsync(ct);
-            return Results.Ok(new { ok = true });
+            try
+            {
+                // 获取项目状态，确保有 asset 选择
+                var state = store.Get();
+                if (string.IsNullOrWhiteSpace(state.SelectedAsset))
+                {
+                    var first = store.ListAssets().FirstOrDefault();
+                    if (first == null) return Results.BadRequest(new { ok = false, error = "No assets uploaded." });
+                    state = state with { SelectedAsset = first.Name };
+                    store.Set(state);
+                }
+                
+                // 完整流程：Connect → Configure → Program → Start
+                await runtime.StartFullAsync(state, ct);
+                return Results.Ok(new { ok = true });
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { ok = false, error = ex.Message });
+            }
         });
 
         app.MapPost("/api/stop", async (RuntimeSessionService runtime, CancellationToken ct) =>
@@ -329,6 +347,16 @@ public static class ApiRoutes
         });
 
         app.MapGet("/api/runtime", (RuntimeSessionService runtime) => Results.Json(runtime.GetSnapshot()));
+
+        // ============================================
+        // Node State API - Get all node states for polling
+        // ============================================
+
+        app.MapGet("/api/nodes/state", (RuntimeSessionService runtime) =>
+        {
+            var states = runtime.GetAllNodeStates();
+            return Results.Json(new { ok = true, nodes = states });
+        });
 
         // Node logs API - list nodes with logs
         app.MapGet("/api/logs/nodes", (RuntimeSessionService runtime) =>
@@ -532,6 +560,320 @@ public static class ApiRoutes
                 return Results.Problem(detail: ex.Message, statusCode: 500);
             }
         });
+
+        app.MapPost("/api/project/import", async (ProjectStore store, HttpRequest req) =>
+        {
+            try
+            {
+                // Read the uploaded file
+                var form = await req.ReadFormAsync();
+                var file = form.Files.GetFile("file");
+                
+                if (file == null || file.Length == 0)
+                {
+                    return Results.BadRequest(new { error = "No file uploaded" });
+                }
+
+                // Save to temp file
+                var tempZipPath = Path.Combine(Path.GetTempPath(), $"coralinker-import-{Guid.NewGuid()}.zip");
+                
+                try
+                {
+                    using (var stream = File.Create(tempZipPath))
+                    {
+                        await file.CopyToAsync(stream);
+                    }
+
+                    // Clear existing data
+                    if (Directory.Exists(store.InputsDir))
+                    {
+                        Directory.Delete(store.InputsDir, recursive: true);
+                    }
+                    if (Directory.Exists(store.GeneratedDir))
+                    {
+                        Directory.Delete(store.GeneratedDir, recursive: true);
+                    }
+
+                    // Ensure directories exist
+                    Directory.CreateDirectory(store.InputsDir);
+                    Directory.CreateDirectory(store.GeneratedDir);
+
+                    // Extract ZIP
+                    using (var zip = ZipFile.OpenRead(tempZipPath))
+                    {
+                        foreach (var entry in zip.Entries)
+                        {
+                            if (string.IsNullOrEmpty(entry.Name)) continue; // Skip directories
+
+                            var destPath = Path.Combine(store.DataDir, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
+                            var destDir = Path.GetDirectoryName(destPath);
+                            
+                            if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
+                            {
+                                Directory.CreateDirectory(destDir);
+                            }
+
+                            entry.ExtractToFile(destPath, overwrite: true);
+                        }
+                    }
+
+                    // Reload project state from imported project.json
+                    store.LoadFromDiskIfExists();
+
+                    return Results.Ok(new { ok = true });
+                }
+                finally
+                {
+                    // Clean up temp file
+                    if (File.Exists(tempZipPath))
+                    {
+                        File.Delete(tempZipPath);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        }).DisableAntiforgery();
+
+        // ============================================
+        // Serial Port Discovery API
+        // ============================================
+
+        app.MapGet("/api/ports", () =>
+        {
+            try
+            {
+                var ports = CoralinkerSDK.SerialPortResolver.ListAllPorts();
+                return Results.Json(new { ok = true, ports });
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, error = ex.Message, ports = Array.Empty<string>() });
+            }
+        });
+
+        // ============================================
+        // Node State Polling API - Get state from DIVERSession managed nodes
+        // NOTE: Cannot directly open serial port here - it's managed by DIVERSession
+        // ============================================
+
+        app.MapPost("/api/node/poll-state", async (HttpRequest req, RuntimeSessionService runtime, CancellationToken ct) =>
+        {
+            try
+            {
+                var payload = await req.ReadFromJsonAsync<NodeProbeRequest>(cancellationToken: ct);
+                if (payload == null || string.IsNullOrWhiteSpace(payload.McuUri))
+                    return Results.BadRequest(new { ok = false, error = "Missing mcuUri" });
+
+                // Try to find node in DIVERSession by mcuUri
+                var nodeState = runtime.GetNodeStateByUri(payload.McuUri);
+                
+                if (nodeState != null)
+                {
+                    // Node is in session, return its current state
+                    return Results.Json(new
+                    {
+                        ok = true,
+                        mcuUri = payload.McuUri,
+                        runState = nodeState.RunState,
+                        isConfigured = nodeState.IsConfigured,
+                        isProgrammed = nodeState.IsProgrammed,
+                        mode = nodeState.Mode
+                    });
+                }
+                else
+                {
+                    // Node not in session (not connected yet), return Offline
+                    return Results.Json(new
+                    {
+                        ok = true,
+                        mcuUri = payload.McuUri,
+                        runState = "Offline",
+                        isConfigured = false,
+                        isProgrammed = false,
+                        mode = "Unknown"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, error = ex.Message });
+            }
+        });
+
+        // ============================================
+        // Session Restore API - Restore nodes from project to DIVERSession
+        // Called after loading a project to reconnect nodes
+        // ============================================
+
+        app.MapPost("/api/session/restore", async (RuntimeSessionService runtime, CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await runtime.RestoreNodesFromProjectAsync(ct);
+                return Results.Json(new
+                {
+                    ok = true,
+                    total = result.Total,
+                    connected = result.Connected,
+                    nodes = result.Nodes.Select(n => new
+                    {
+                        nodeId = n.NodeId,
+                        mcuUri = n.McuUri,
+                        success = n.Success,
+                        message = n.Message
+                    })
+                });
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, error = ex.Message });
+            }
+        });
+
+        // ============================================
+        // Node Probe API - Validate MCU connection and add to DIVERSession
+        // After successful probe, the node stays connected in the session
+        // ============================================
+
+        app.MapPost("/api/node/probe", async (HttpRequest req, RuntimeSessionService runtime, TerminalBroadcaster term, CancellationToken ct) =>
+        {
+            try
+            {
+                var payload = await req.ReadFromJsonAsync<NodeProbeRequest>(cancellationToken: ct);
+                if (payload == null || string.IsNullOrWhiteSpace(payload.McuUri))
+                    return Results.BadRequest(new { ok = false, error = "Missing mcuUri" });
+
+                await term.LineAsync($"[probe] Probing MCU at {payload.McuUri}...", ct);
+
+                // 生成节点 ID
+                var nodeId = $"node-{Guid.NewGuid():N}";
+                
+                // 添加节点到 DIVERSession 并连接（保持连接）
+                var node = await runtime.AddAndConnectNodeAsync(nodeId, payload.McuUri, ct);
+                
+                if (node == null)
+                {
+                    await term.LineAsync($"[probe] ✗ Failed to connect to MCU", ct);
+                    return Results.Json(new { 
+                        ok = false, 
+                        error = "Failed to connect to MCU"
+                    });
+                }
+
+                // Successfully connected - gather info
+                var version = node.Version;
+                var state = node.State;
+                var layout = node.Layout;
+
+                await term.LineAsync($"[probe] ✓ Connected: {version?.ProductionName ?? "Unknown"} {version?.GitTag ?? ""}", ct);
+
+                // Build response with MCU info
+                // 节点保持连接在 DIVERSession 中，可以通过 poll-state 获取状态
+                var result = new
+                {
+                    ok = true,
+                    nodeId = nodeId,
+                    mcuUri = payload.McuUri,
+                    version = version == null ? null : new
+                    {
+                        productionName = version.Value.ProductionName ?? "",
+                        gitTag = version.Value.GitTag ?? "",
+                        gitCommit = version.Value.GitCommit ?? "",
+                        buildTime = version.Value.BuildTime ?? ""
+                    },
+                    state = state == null ? null : new
+                    {
+                        runningState = state.Value.RunningState.ToString(),
+                        isConfigured = state.Value.IsConfigured != 0,
+                        isProgrammed = state.Value.IsProgrammed != 0,
+                        mode = state.Value.Mode.ToString()
+                    },
+                    layout = layout == null ? null : new
+                    {
+                        ports = layout.Value.GetValidPorts().Select(p => new
+                        {
+                            type = p.Type.ToString(),
+                            name = p.Name
+                        }).ToArray()
+                    }
+                };
+
+                return Results.Json(result);
+            }
+            catch (Exception ex)
+            {
+                await term.LineAsync($"[probe] ✗ Exception: {ex.Message}", ct);
+                return Results.Json(new { ok = false, error = ex.Message });
+            }
+        });
+
+        // ============================================
+        // Node Remove API - Remove node from DIVERSession
+        // ============================================
+
+        app.MapPost("/api/node/remove", async (HttpRequest req, RuntimeSessionService runtime, TerminalBroadcaster term, CancellationToken ct) =>
+        {
+            try
+            {
+                var payload = await req.ReadFromJsonAsync<NodeProbeRequest>(cancellationToken: ct);
+                if (payload == null || string.IsNullOrWhiteSpace(payload.McuUri))
+                    return Results.BadRequest(new { ok = false, error = "Missing mcuUri" });
+
+                var removed = await runtime.RemoveNodeAsync(payload.McuUri, ct);
+                
+                return Results.Json(new { ok = removed });
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, error = ex.Message });
+            }
+        });
+
+        // ============================================
+        // Logic List API - Get compiled logic files
+        // ============================================
+
+        app.MapGet("/api/logic/list", (ProjectStore store) =>
+        {
+            try
+            {
+                var logics = new List<object>();
+                
+                if (Directory.Exists(store.GeneratedDir))
+                {
+                    // Find all .bin files that have a corresponding .bin.json
+                    var binFiles = Directory.GetFiles(store.GeneratedDir, "*.bin");
+                    foreach (var binPath in binFiles)
+                    {
+                        var jsonPath = binPath + ".json";
+                        if (File.Exists(jsonPath))
+                        {
+                            var name = Path.GetFileNameWithoutExtension(binPath);
+                            var binSize = new FileInfo(binPath).Length;
+                            var jsonSize = new FileInfo(jsonPath).Length;
+                            
+                            logics.Add(new
+                            {
+                                name,
+                                binPath = Path.GetFileName(binPath),
+                                jsonPath = Path.GetFileName(jsonPath),
+                                binSize,
+                                jsonSize
+                            });
+                        }
+                    }
+                }
+                
+                return Results.Json(new { ok = true, logics });
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, error = ex.Message, logics = Array.Empty<object>() });
+            }
+        });
     }
 }
 
@@ -548,6 +890,8 @@ public sealed record PortConfigRequest(PortConfigItem[] Ports);
 public sealed record PortConfigItem(string Type, uint Baud, uint? ReceiveFrameMs, uint? RetryTimeMs);
 
 public sealed record SetVariableRequest(string Name, object? Value, string? TypeHint);
+
+public sealed record NodeProbeRequest(string McuUri);
 
 internal static class ValueParser
 {

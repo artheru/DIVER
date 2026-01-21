@@ -10,38 +10,12 @@
 
 <template>
   <div class="variable-panel">
-    <!-- 连接状态栏 -->
-    <div class="status-bar">
-      <span class="status-dot" :class="connectionClass"></span>
-      <span>{{ connectionStatus }}</span>
-      
-      <div class="status-spacer"></div>
-      
-      <button 
-        v-if="!isConnected" 
-        class="action-btn"
-        @click="handleConnect"
-        :disabled="connecting"
-      >
-        {{ connecting ? 'Connecting...' : 'Connect' }}
-      </button>
-      
-      <template v-else>
-        <button 
-          v-if="!isRunning" 
-          class="action-btn start"
-          @click="handleStart"
-        >
-          Start
-        </button>
-        <button 
-          v-else 
-          class="action-btn stop"
-          @click="handleStop"
-        >
-          Stop
-        </button>
-      </template>
+    <!-- 变量列表头 -->
+    <div class="variable-header">
+      <div class="col-type">Type</div>
+      <div class="col-name">Name</div>
+      <div class="col-value">Value</div>
+      <div class="col-action"></div>
     </div>
     
     <!-- 变量列表 -->
@@ -51,19 +25,18 @@
         :key="variable.name"
         class="variable-row"
       >
-        <!-- 变量名 -->
-        <div class="var-name" :title="variable.name">
+        <!-- 类型 -->
+        <div class="col-type" :title="variable.type">
+          {{ formatType(variable.type) }}
+        </div>
+        
+        <!-- 名称 -->
+        <div class="col-name" :title="variable.name">
           {{ variable.name }}
         </div>
         
-        <!-- 变量类型 -->
-        <div class="var-type">
-          {{ variable.type }}
-        </div>
-        
-        <!-- 变量值 -->
-        <div class="var-value">
-          <!-- 可编辑模式 -->
+        <!-- 值 -->
+        <div class="col-value">
           <template v-if="editingVar === variable.name">
             <input 
               ref="editInputRef"
@@ -74,34 +47,41 @@
               @keyup.escape="cancelEdit"
             />
           </template>
-          
-          <!-- 显示模式 -->
           <template v-else>
             <span class="value-text">{{ formatValue(variable.value) }}</span>
-            
-            <!-- 可控变量显示编辑按钮 -->
-            <button 
-              v-if="isControllable(variable.name)"
-              class="edit-btn"
-              @click="startEdit(variable)"
-              title="Edit"
-            >
-              ✏️
-            </button>
           </template>
+        </div>
+        
+        <!-- 操作按钮 -->
+        <div class="col-action">
+          <button 
+            v-if="isControllable(variable.name)"
+            class="action-icon edit"
+            @click="startEdit(variable)"
+            title="Edit variable"
+          >
+            ✏️
+          </button>
+          <span 
+            v-else 
+            class="action-icon locked"
+            title="Read-only variable"
+          >
+            🔒
+          </span>
         </div>
       </div>
       
       <!-- 空状态 -->
       <div v-if="variableList.length === 0" class="empty-state">
-        {{ isConnected ? 'No variables' : 'Not connected' }}
+        No variables
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue'
+import { ref, nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRuntimeStore, useUiStore } from '@/stores'
 import type { VariableValue } from '@/types'
@@ -112,32 +92,15 @@ import type { VariableValue } from '@/types'
 
 const runtimeStore = useRuntimeStore()
 const uiStore = useUiStore()
-const { isConnected, isRunning, variableList, controllableVarNames } = storeToRefs(runtimeStore)
+const { variableList, controllableVarNames } = storeToRefs(runtimeStore)
 
 // ============================================
 // 本地状态
 // ============================================
 
-const connecting = ref(false)
 const editingVar = ref<string | null>(null)
 const editValue = ref('')
 const editInputRef = ref<HTMLInputElement[]>([])
-
-// ============================================
-// 计算属性
-// ============================================
-
-const connectionClass = computed(() => {
-  if (isRunning.value) return 'running'
-  if (isConnected.value) return 'connected'
-  return 'disconnected'
-})
-
-const connectionStatus = computed(() => {
-  if (isRunning.value) return 'Running'
-  if (isConnected.value) return 'Connected'
-  return 'Disconnected'
-})
 
 // ============================================
 // 方法
@@ -148,6 +111,28 @@ const connectionStatus = computed(() => {
  */
 function isControllable(name: string): boolean {
   return controllableVarNames.value.has(name)
+}
+
+/**
+ * 格式化类型显示 (简化长类型名)
+ */
+function formatType(type: string): string {
+  // 简化常见类型名
+  const typeMap: Record<string, string> = {
+    'Int32': 'i32',
+    'Int16': 'i16',
+    'Int64': 'i64',
+    'UInt32': 'u32',
+    'UInt16': 'u16',
+    'UInt64': 'u64',
+    'Single': 'f32',
+    'Double': 'f64',
+    'Boolean': 'bool',
+    'Byte': 'u8',
+    'SByte': 'i8',
+    'String': 'str'
+  }
+  return typeMap[type] || type
 }
 
 /**
@@ -241,44 +226,6 @@ async function confirmEdit(variable: VariableValue) {
   }
 }
 
-/**
- * 连接
- */
-async function handleConnect() {
-  connecting.value = true
-  try {
-    await runtimeStore.connect()
-    uiStore.success('Connected', 'Connected to nodes')
-  } catch (error) {
-    uiStore.error('Connection Failed', String(error))
-  } finally {
-    connecting.value = false
-  }
-}
-
-/**
- * 启动
- */
-async function handleStart() {
-  try {
-    await runtimeStore.start()
-    uiStore.success('Started', 'Execution started')
-  } catch (error) {
-    uiStore.error('Start Failed', String(error))
-  }
-}
-
-/**
- * 停止
- */
-async function handleStop() {
-  try {
-    await runtimeStore.stop()
-    uiStore.info('Stopped', 'Execution stopped')
-  } catch (error) {
-    uiStore.error('Stop Failed', String(error))
-  }
-}
 </script>
 
 <style scoped>
@@ -286,85 +233,54 @@ async function handleStop() {
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow: hidden;
 }
 
-/* 状态栏 */
-.status-bar {
-  display: flex;
-  align-items: center;
+/* 列表头 */
+.variable-header {
+  display: grid;
+  grid-template-columns: 40px 1fr 80px 28px;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--border-color);
-  font-size: 12px;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-muted);
-}
-
-.status-dot.connected {
-  background: var(--warning);
-}
-
-.status-dot.running {
-  background: var(--success);
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-.status-spacer {
-  flex: 1;
-}
-
-.action-btn {
-  padding: 4px 12px;
-  background: var(--primary);
-  border-radius: var(--radius-sm);
-  color: white;
-  font-size: 12px;
-}
-
-.action-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.action-btn.start {
-  background: var(--success);
-}
-
-.action-btn.stop {
-  background: var(--danger);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 /* 变量列表 */
 .variable-list {
   flex: 1;
   overflow-y: auto;
-  padding: 8px;
+  overflow-x: hidden;
 }
 
 .variable-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 40px 1fr 80px 28px;
   gap: 8px;
-  padding: 6px 8px;
-  border-radius: var(--radius-sm);
+  padding: 5px 8px;
   font-size: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
 }
 
 .variable-row:hover {
   background: rgba(255, 255, 255, 0.03);
 }
 
-.var-name {
+/* 列样式 */
+.col-type {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.col-name {
   font-weight: 500;
   color: var(--text-color);
   overflow: hidden;
@@ -372,46 +288,62 @@ async function handleStop() {
   white-space: nowrap;
 }
 
-.var-type {
-  color: var(--text-muted);
+.col-value {
   font-family: var(--font-mono);
+  text-align: right;
+  color: var(--primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.var-value {
+.col-action {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-family: var(--font-mono);
+  justify-content: center;
 }
 
 .value-text {
-  color: var(--primary);
+  display: block;
+  width: 100%;
+  text-align: right;
 }
 
-.edit-btn {
+/* 操作图标 */
+.action-icon {
   width: 20px;
   height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  font-size: 11px;
   border-radius: var(--radius-sm);
-  font-size: 12px;
-  opacity: 0;
-  transition: opacity var(--transition-fast);
 }
 
-.variable-row:hover .edit-btn {
-  opacity: 0.5;
+.action-icon.edit {
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.4;
+  transition: opacity var(--transition-fast), background var(--transition-fast);
 }
 
-.edit-btn:hover {
-  opacity: 1 !important;
+.variable-row:hover .action-icon.edit {
+  opacity: 0.7;
+}
+
+.action-icon.edit:hover {
+  opacity: 1;
   background: rgba(255, 255, 255, 0.1);
 }
 
+.action-icon.locked {
+  opacity: 0.25;
+  font-size: 10px;
+}
+
+/* 编辑输入框 */
 .edit-input {
-  width: 80px;
+  width: 100%;
   padding: 2px 6px;
   background: var(--body-color);
   border: 1px solid var(--primary);
@@ -419,8 +351,10 @@ async function handleStop() {
   color: var(--text-color);
   font-family: var(--font-mono);
   font-size: 12px;
+  text-align: right;
 }
 
+/* 空状态 */
 .empty-state {
   display: flex;
   align-items: center;

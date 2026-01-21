@@ -1,253 +1,156 @@
-# Coralinker DIVER Host - Implementation Summary
+# Coralinker DIVER Host - 实现总结
 
-## Last Updated: 2026-01-20
-
----
-
-## Summary of Completed Work
-
-### **Core Functionality**
-✅ Offline web application (no CDN dependencies)
-✅ Windows Explorer-style asset tree with expand/collapse
-✅ Tabbed interface (Graph + file editors)
-✅ Build system integration (C# → MCU binaries)
-✅ VS Code-style variables panel with edit/lock icons
-✅ Node graph editor with add/delete/resize
-✅ Project save/load/export (ZIP format)
-✅ Real-time terminal via SignalR
-✅ Per-node log panels with tabs
-✅ Dedicated control panel page with widgets
-✅ Variable control system with inline editing
+**更新日期**: 2026-01-21
 
 ---
 
-## Feature Details
+## 核心功能
 
-### 1. **Variable Control System** (2026-01-20)
-
-#### Inline Editing
-- Click ✎ button on controllable variables
-- Inline `<input>` appears for editing
-- Enter to confirm, Escape to cancel
-- Blur commits changes automatically
-
-#### Controllable Detection
-- Variable is controllable if NOT declared as `LowerIO` by any node
-- Backend checks all nodes' CartFields before allowing edit
-- `__iteration` always excluded (node-specific LowerIO)
-
-#### Type Handling
-- Integer types (int, byte, short, etc.): Rounded to nearest integer
-- Float types: Full precision
-- String: Direct text input
-- byte[]: Hex string input (e.g., "00 FF A5")
-
-#### DOM Stability
-- Variable table built once at Connect phase
-- Only values update via `updateVarsValues()`
-- Currently edited cell skipped during updates
-
-### 2. **Dedicated Control Panel** (2026-01-20)
-
-#### Page: `/controlPanel`
-- Standalone page accessible from main UI
-- Clean interface for remote control operations
-
-#### Widget Types
-| Widget | Features |
-|--------|----------|
-| **Slider** | Horizontal/Vertical, Auto-return/Hold, Unidirectional/Bidirectional, Linear/Logarithmic, Min/Max configurable |
-| **Joystick** | 2D cross slider, X/Y variable binding, Auto-return/Hold |
-| **Switch** | 2-state (0/1) or 3-state (-1/0/1) |
-
-#### Persistence
-- Layout saved to localStorage
-- Widget positions, sizes, bindings preserved
-- Main page can trigger save
-
-#### Bug Fixes
-- Logarithmic mode: Handles min=0 without NaN
-- Integer rounding: Values rounded before sending
-
-### 3. **Per-Node Log Panels** (2026-01-20)
-
-#### Tab Structure
-```
-[Terminal] [Node1] [Node2] ...
-```
-
-#### Features
-- Each connected node gets dedicated tab
-- Auto-created when node connects
-- Tab title syncs with nodeName
-- Removed when node disconnects
-
-#### Log Management
-- Backend: RingBuffer per node (2000 lines max)
-- History: Load latest 1000 on tab open
-- Real-time: SignalR pushes new lines
-- Clear: Per-tab clear button
-
-#### Scrolling Fix
-- Unified `.logPane` class for all panes
-- Proper flex layout with `overflow-y: auto`
-- Container uses `min-height: 0` for flex children
-
-### 4. **Node Naming** (2026-01-20)
-
-#### Auto-increment
-- New nodes get "Node1", "Node2", etc.
-- Checks existing nodes to find next available
-
-#### Editable
-- `nodeName` widget on each node
-- Changes sync to log tab titles
-- Internal UUID unchanged
-
-### 5. **UI/UX Improvements** (2026-01-20)
-
-| Improvement | Details |
-|-------------|---------|
-| **Wider Variables Panel** | 600px (was 320px) |
-| **Clear Button** | Moved next to "Synced" indicator |
-| **Node UI Fix** | propsCount=3 for 3 widgets |
-| **UTF-8 Terminal** | dotnet build output displays correctly |
-| **Detailed Logs** | File counts, artifact sizes in build output |
-
-### 6. **Backend Improvements** (2026-01-20)
-
-#### GetState Timeout
-- Sets `State = null` on timeout
-- Sets `LastError` with failure reason
-- Frontend shows "Offline" status
-
-#### mcuUri Loading
-- Fixed project load to restore saved values
-- No longer defaults to COM3
-
-#### Build Encoding
-- `StandardOutputEncoding = Encoding.UTF8`
-- `DOTNET_CLI_UI_LANGUAGE=en` environment variable
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| 离线 Web 应用 | ✅ | 无 CDN 依赖 |
+| 节点图编辑器 | ✅ | Vue-flow 实现 |
+| 文件管理 | ✅ | 资源树 + 代码编辑器 |
+| 编译系统 | ✅ | C# → MCU 字节码 |
+| 变量控制 | ✅ | 实时编辑可控变量 |
+| 日志系统 | ✅ | 终端 + 节点日志 |
+| 项目管理 | ✅ | 保存/加载/导出 ZIP |
+| SignalR 实时通信 | ✅ | 日志推送、变量更新 |
 
 ---
 
-## API Endpoints Added
+## 最新重构 (2026-01-21)
 
-### Variable Control
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/variable/set` | POST | Set controllable variable |
-| `/api/variables/controllable` | GET | List controllable variables |
+### 节点状态管理
 
-### Node Logs
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/logs/nodes` | GET | List nodes with IDs/names |
-| `/api/logs/node/{nodeId}` | GET | Paginated log history |
+**问题**：节点添加后显示 Offline，Start 前无法获取真实状态
 
----
+**解决方案**：
 
-## Files Modified (2026-01-20 Session)
+1. **Probe 后保持连接**：调用 `AddAndConnectNode()` 将节点加入 DIVERSession
+2. **状态轮询**：DIVERSession 后台线程每 1.2 秒刷新节点状态
+3. **Start 时复用连接**：使用 `ConfigureConnectedNodes()` 配置程序，不断开现有连接
+4. **Stop 后保持连接**：停止执行但不断开，继续显示状态
 
-### Frontend
-- `wwwroot/app.js` - Variable editing, log tabs, node naming
-- `wwwroot/app.css` - Log pane styles, wider variables panel
-- `wwwroot/index.html` - Log pane container restructure
-- `wwwroot/controlPanel.html` - New dedicated control panel page
-- `wwwroot/controlPanel.js` - New control panel logic
-
-### Backend
-- `Web/ApiRoutes.cs` - Variable set/get APIs, log APIs
-- `Services/RuntimeSessionService.cs` - Node log caching
-- `Services/TerminalBroadcaster.cs` - NodeLogLineAsync method
-- `Services/DiverBuildService.cs` - UTF-8 encoding, detailed logs
-- `CoralinkerSDK/MCUNode.cs` - GetState timeout handling
-
----
-
-## Known Limitations / TODO
-
-### Critical
-1. **Native browser dialogs** - Delete confirmation uses `confirm()`
-2. **Connect/Start separation** - Connect does too much
-
-### Important
-3. **logicName dropdown** - Manual text entry, should be dropdown
-4. **mcuUri dropdown** - Manual entry, should use SerialPortResolver
-5. **Multi-node testing** - LowerIO check needs validation
-
-### Nice to Have
-6. **Digital I/O snapshots** - LED visualization
-7. **Hex editor improvements** - Data inspector, insert/delete
-
----
-
-## Testing Completed
-
-### Variable Control
-✅ Inline editing with Enter/Escape/Blur
-✅ Controllable vs non-controllable detection
-✅ Integer rounding
-✅ Edit protection during SignalR updates
-
-### Control Panel
-✅ Widget creation and configuration
-✅ Variable binding
-✅ Layout persistence
-✅ Logarithmic slider (no NaN)
-
-### Node Logs
-✅ Per-node tabs
-✅ Real-time updates
-✅ History loading
-✅ Scrollbar functionality
-
----
-
-## Deployment Notes
-
-For customer deployment:
-1. Build in Release mode
-2. Copy `bin/Release/net8.0/` folder
-3. Ensure `data/` folder is writable
-4. Run `CoralinkerHost.exe`
-5. Access at `http://localhost:4499`
-6. Control Panel at `http://localhost:4499/controlPanel`
-
-No internet connection required - fully offline application.
-
----
-
-## Architecture Diagram
+### 新流程
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Frontend (Browser)                        │
-├─────────────┬─────────────┬─────────────┬───────────────────┤
-│  Graph Tab  │  File Tabs  │  Variables  │   Log Tabs        │
-│  (LiteGraph)│  (CodeMirror)│  (Table)   │  (Terminal+Nodes) │
-├─────────────┴─────────────┴─────────────┴───────────────────┤
-│                    Control Panel (/controlPanel)             │
-│                 Sliders, Joysticks, Switches                 │
-└─────────────────────────┬───────────────────────────────────┘
-                          │ REST API + SignalR
-┌─────────────────────────┴───────────────────────────────────┐
-│                    Backend (ASP.NET Core)                    │
-├─────────────┬─────────────┬─────────────┬───────────────────┤
-│ ProjectStore│ BuildService│RuntimeSession│TerminalBroadcaster│
-│  (project)  │  (compile)  │  (nodes)    │   (SignalR)       │
-├─────────────┴─────────────┴─────────────┴───────────────────┤
-│                    MCU Nodes (Serial)                        │
-│              Node1 (COM3)    Node2 (COM18)                   │
-└─────────────────────────────────────────────────────────────┘
+Probe 节点 ─────────────────────────────────────────────────────
+    │  调用 /api/node/probe                                      
+    ▼                                                            
+节点加入 DIVERSession 并保持连接                                  
+    │  AddAndConnectNode()                                       
+    ▼                                                            
+状态轮询获取真实状态（Idle/Running）                              
+    │  DIVERSession.StateLoop 每 1.2 秒刷新                      
+    ▼                                                            
+Start ─────────────────────────────────────────────────────────  
+    │  ConfigureConnectedNodes (配置程序)                        
+    │  ConfigureAndProgramAll (配置端口 + 下载)                  
+    │  StartAll (启动执行)                                       
+    ▼                                                            
+Stop ──────────────────────────────────────────────────────────  
+    │  StopAll (停止执行，保持连接)                               
+    ▼                                                            
+节点回到 Idle 状态（可继续轮询）                                  
+```
+
+### 后端修改
+
+| 文件 | 修改 |
+|------|------|
+| `DIVERSession.cs` | 添加 `AddAndConnectNode`, `GetNodeByUri`, `ConfigureConnectedNodes` |
+| `RuntimeSessionService.cs` | 添加 `AddAndConnectNodeAsync`, `RemoveNodeAsync`, 修改 `StartFullAsync` |
+| `ApiRoutes.cs` | 修改 `/api/node/probe` 保持连接, 添加 `/api/node/remove` |
+
+### 前端修改
+
+| 文件 | 修改 |
+|------|------|
+| `GraphCanvas.vue` | 节点状态轮询（Start 前） |
+| `CoralNodeView.vue` | 状态 Badge 显示（Idle/Running/Configured/Programmed） |
+| `TerminalPanel.vue` | 移除 Connect 按钮，Start 处理完整流程 |
+| `runtime.ts` | 简化 `start()` 方法 |
+| `files.ts` | 添加 `buildVersion` 触发 Logic 列表刷新 |
+
+---
+
+## API 端点
+
+### 节点管理
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/node/probe` | POST | Probe 并保持连接 |
+| `/api/node/remove` | POST | 从 Session 移除节点 |
+| `/api/node/poll-state` | POST | 获取节点状态 |
+| `/api/nodes/state` | GET | 获取所有节点状态 |
+
+### 运行控制
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/start` | POST | 完整启动流程 |
+| `/api/stop` | POST | 停止执行（保持连接） |
+| `/api/build` | POST | 编译逻辑 |
+
+### 项目管理
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/project` | GET/POST | 项目状态 |
+| `/api/project/export` | GET | 导出 ZIP |
+| `/api/project/import` | POST | 导入 ZIP |
+
+---
+
+## 目录结构
+
+```
+3rd/CoralinkerHost/
+├── ClientApp/               # Vue 3 前端
+│   ├── src/
+│   │   ├── api/             # HTTP API
+│   │   ├── stores/          # Pinia 状态管理
+│   │   ├── components/      # Vue 组件
+│   │   │   ├── graph/       # 节点图编辑器
+│   │   │   ├── logs/        # 日志面板
+│   │   │   └── variables/   # 变量面板
+│   │   └── views/           # 页面视图
+│   └── vite.config.ts
+├── Services/                # 后端服务
+│   ├── RuntimeSessionService.cs  # 运行时管理
+│   ├── ProjectStore.cs           # 项目存储
+│   └── DiverBuildService.cs      # 编译服务
+├── Web/
+│   └── ApiRoutes.cs         # REST API
+└── wwwroot/                 # 前端构建产物
 ```
 
 ---
 
-## Status: Production Ready
+## 运行方式
 
-All core features implemented and tested. Variable control, control panel, and per-node logging complete.
+```powershell
+# 开发模式（前端热重载）
+cd ClientApp
+npm run dev
 
-**Server**: http://localhost:4499
-**Control Panel**: http://localhost:4499/controlPanel
-**Codebase**: D:\Documents\Coral\DIVER\3rd\CoralinkerHost
+# 生产构建
+npm run build
+
+# 启动后端
+cd ..
+dotnet run
+```
+
+**访问地址**: http://localhost:4499 (生产) 或 http://localhost:5173 (开发)
+
+---
+
+## 状态: 可用于测试
+
+- ✅ 节点 Probe 后保持连接
+- ✅ 实时状态显示（Idle/Running）
+- ✅ Start/Stop 正常工作
+- ✅ Build 后 Logic 列表自动刷新

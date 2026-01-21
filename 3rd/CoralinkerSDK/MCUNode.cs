@@ -371,7 +371,7 @@ public class MCUNode : IDisposable
         }
     }
 
-    private static (string portName, uint baudRate) ParseUri(string uri)
+    public static (string portName, uint baudRate) ParseUri(string uri)
     {
         // 简单端口名称
         if (!uri.StartsWith("serial://", StringComparison.OrdinalIgnoreCase))

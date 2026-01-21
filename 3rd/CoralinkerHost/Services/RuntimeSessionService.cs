@@ -78,6 +78,161 @@ public sealed class RuntimeSessionService
         }
     }
 
+    /// <summary>Get all node states for frontend polling</summary>
+    public IReadOnlyList<NodeStateInfo> GetAllNodeStates()
+    {
+        return _session.Nodes.Values
+            .Select(node => new NodeStateInfo(
+                node.NodeId,
+                node.IsConnected,
+                GetRunStateString(node),
+                node.State?.IsConfigured != 0,
+                node.State?.IsProgrammed != 0,
+                node.State?.Mode.ToString() ?? "Unknown"
+            ))
+            .ToList();
+    }
+
+    /// <summary>Get node state by mcuUri</summary>
+    public NodeStateInfo? GetNodeStateByUri(string mcuUri)
+    {
+        var node = _session.GetNodeByUri(mcuUri);
+        
+        if (node == null)
+            return null;
+        
+        return new NodeStateInfo(
+            node.NodeId,
+            node.IsConnected,
+            GetRunStateString(node),
+            node.State?.IsConfigured != 0,
+            node.State?.IsProgrammed != 0,
+            node.State?.Mode.ToString() ?? "Unknown"
+        );
+    }
+    
+    /// <summary>Get standardized run state string (lowercase)</summary>
+    private static string GetRunStateString(MCUNode node)
+    {
+        if (!node.IsConnected)
+            return "offline";
+            
+        return node.State?.RunningState switch
+        {
+            MCUSerialBridgeCLR.MCURunState.Running => "running",
+            MCUSerialBridgeCLR.MCURunState.Error => "error",
+            _ => "idle"
+        };
+    }
+
+    /// <summary>
+    /// 添加节点到 DIVERSession 并连接（Probe 成功后调用）
+    /// </summary>
+    public async Task<MCUNode?> AddAndConnectNodeAsync(string nodeId, string mcuUri, CancellationToken ct)
+    {
+        await _terminal.LineAsync($"[session] Adding node {nodeId} to session...", ct);
+        await EnsureBridgeDllAsync(ct);
+        
+        var node = _session.AddAndConnectNode(nodeId, mcuUri);
+        
+        if (node != null)
+        {
+            await _terminal.LineAsync($"[session] ✓ Node {nodeId} added and connected", ct);
+        }
+        else
+        {
+            await _terminal.LineAsync($"[session] ✗ Failed to add node {nodeId}", ct);
+        }
+        
+        return node;
+    }
+
+    /// <summary>
+    /// 从 DIVERSession 移除节点
+    /// </summary>
+    public async Task<bool> RemoveNodeAsync(string mcuUri, CancellationToken ct)
+    {
+        var node = _session.GetNodeByUri(mcuUri);
+        if (node == null)
+        {
+            await _terminal.LineAsync($"[session] Node with mcuUri {mcuUri} not found", ct);
+            return false;
+        }
+        
+        var nodeId = node.NodeId;
+        var removed = _session.RemoveNode(nodeId);
+        
+        if (removed)
+        {
+            await _terminal.LineAsync($"[session] ✓ Node {nodeId} removed", ct);
+        }
+        
+        return removed;
+    }
+
+    /// <summary>
+    /// 从 ProjectStore 恢复节点到 DIVERSession（用于项目加载后恢复连接）
+    /// </summary>
+    public async Task<RestoreNodesResult> RestoreNodesFromProjectAsync(CancellationToken ct)
+    {
+        var project = _store.Get();
+        var graphNodes = ParseGraphNodes(project.NodeMap);
+        
+        // Filter MCU nodes (Vue Flow: coral-node, LiteGraph: coral/node)
+        var mcuNodes = graphNodes.Where(n => 
+            string.Equals(n.Type, "coral-node", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(n.Type, "coral/node", StringComparison.OrdinalIgnoreCase)).ToList();
+        
+        if (mcuNodes.Count == 0)
+        {
+            return new RestoreNodesResult(0, 0, new List<RestoreNodeInfo>());
+        }
+        
+        await _terminal.LineAsync($"[session] Restoring {mcuNodes.Count} node(s) from project...", ct);
+        await EnsureBridgeDllAsync(ct);
+        
+        var results = new List<RestoreNodeInfo>();
+        int connected = 0;
+        
+        foreach (var gNode in mcuNodes)
+        {
+            var mcuUri = gNode.Properties.GetValueOrDefault("mcuUri") ?? "";
+            if (string.IsNullOrWhiteSpace(mcuUri))
+            {
+                results.Add(new RestoreNodeInfo(gNode.Id, mcuUri, false, "Empty mcuUri"));
+                continue;
+            }
+            
+            // 检查节点是否已经在 session 中
+            var existingNode = _session.GetNodeByUri(mcuUri);
+            if (existingNode != null && existingNode.IsConnected)
+            {
+                results.Add(new RestoreNodeInfo(gNode.Id, mcuUri, true, "Already connected"));
+                connected++;
+                continue;
+            }
+            
+            // 添加并连接节点
+            var node = _session.AddAndConnectNode(gNode.Id, mcuUri);
+            if (node != null && node.IsConnected)
+            {
+                var ver = node.Version?.ProductionName ?? "Unknown";
+                results.Add(new RestoreNodeInfo(gNode.Id, mcuUri, true, $"Connected: {ver}"));
+                connected++;
+                await _terminal.LineAsync($"[session] ✓ {gNode.Id} restored: {ver}", ct);
+            }
+            else
+            {
+                var error = node?.LastError ?? "Connection failed";
+                results.Add(new RestoreNodeInfo(gNode.Id, mcuUri, false, error));
+                await _terminal.LineAsync($"[session] ✗ {gNode.Id} failed: {error}", ct);
+            }
+        }
+        
+        await _terminal.LineAsync($"[session] Restore complete: {connected}/{mcuNodes.Count} node(s) connected", ct);
+        return new RestoreNodesResult(mcuNodes.Count, connected, results);
+    }
+
     public void SetLastBuild(BuildResult build, string assetName)
     {
         lock (_gate)
@@ -193,9 +348,138 @@ public sealed class RuntimeSessionService
         await _terminal.LineAsync("[run] ========== Execution Running ==========", ct);
     }
 
+    /// <summary>
+    /// 完整启动流程：Configure → Program → Start
+    /// 节点应该已经通过 Probe 添加并连接到 DIVERSession
+    /// </summary>
+    public async Task StartFullAsync(ProjectState project, CancellationToken ct)
+    {
+        await _terminal.LineAsync("[start] ========== Full Start Sequence ==========", ct);
+        await EnsureBridgeDllAsync(ct);
+        
+        var config = BuildSessionConfiguration(project);
+        
+        if (config.Nodes.Length == 0)
+        {
+            throw new InvalidOperationException("No MCU nodes in graph. Add nodes first.");
+        }
+
+        // 检查是否有节点已经在 session 中（通过 Probe 添加）
+        var connectedNodesCount = _session.Nodes.Values.Count(n => n.IsConnected);
+        
+        if (connectedNodesCount > 0)
+        {
+            // 节点已经通过 Probe 连接，使用 ConfigureConnectedNodes
+            await _terminal.LineAsync($"[start] Found {connectedNodesCount} connected node(s) in session", ct);
+            await _terminal.LineAsync("[start] Step 1/4: Configuring program for connected nodes...", ct);
+            
+            await LogSessionPlanAsync(config, ct);
+            _session.ConfigureConnectedNodes(config);
+        }
+        else
+        {
+            // 没有已连接的节点，使用传统流程
+            await _terminal.LineAsync("[start] No connected nodes, using traditional connect flow...", ct);
+            await _terminal.LineAsync("[start] Step 1/4: Connecting to nodes...", ct);
+            
+            // Clear previous session if any
+            if (_session.State != DIVERSessionState.Idle)
+            {
+                await _terminal.LineAsync("[start] Clearing previous session...", ct);
+                _session.StopAll();
+                _session.DisconnectAll();
+                _session.ClearNodes();
+            }
+
+            await LogSessionPlanAsync(config, ct);
+            
+            _session.Configure(config);
+            var connected = _session.ConnectAll();
+            
+            await _terminal.LineAsync(
+                $"[start] Connection result: {connected}/{config.Nodes.Length} node(s) connected.",
+                ct);
+            
+            foreach (var node in _session.Nodes.Values)
+            {
+                if (node.IsConnected)
+                {
+                    var ver = node.Version;
+                    await _terminal.LineAsync(
+                        $"[start] ✓ {node.NodeId} connected: {ver?.ProductionName ?? "Unknown"}",
+                        ct);
+                }
+                else
+                {
+                    await _terminal.LineAsync(
+                        $"[start] ✗ {node.NodeId} failed: {node.LastError ?? "Unknown error"}",
+                        ct);
+                }
+            }
+            
+            if (connected == 0)
+                throw new InvalidOperationException(
+                    "No nodes connected. Check mcuUri and device status.");
+        }
+
+        // Step 2 & 3: Configure and Program
+        await _terminal.LineAsync("[start] Step 2/4: Configuring MCU ports...", ct);
+        await _terminal.LineAsync("[start] Step 3/4: Programming DIVER bytecode...", ct);
+        
+        var configured = _session.ConfigureAndProgramAll();
+        
+        await _terminal.LineAsync(
+            $"[start] Configure & Program result: {configured}/{_session.Nodes.Count} node(s) successful.",
+            ct);
+        
+        foreach (var node in _session.Nodes.Values)
+        {
+            if (!string.IsNullOrWhiteSpace(node.LastError))
+                await _terminal.LineAsync(
+                    $"[start] ✗ {node.NodeId}: {node.LastError}",
+                    ct);
+            else if (node.IsConnected)
+                await _terminal.LineAsync(
+                    $"[start] ✓ {node.NodeId}: Programmed ({node.ProgramBytes.Length:N0} bytes)",
+                    ct);
+        }
+        
+        if (configured == 0)
+            throw new InvalidOperationException(
+                "No nodes configured/programmed. Check MCU status.");
+
+        // Step 4: Start execution
+        await _terminal.LineAsync("[start] Step 4/4: Starting DIVER execution...", ct);
+        var started = _session.StartAll();
+        
+        await _terminal.LineAsync(
+            $"[start] Started {started}/{_session.Nodes.Count} node(s).",
+            ct);
+        
+        if (started == 0)
+            throw new InvalidOperationException(
+                "No nodes started. Check connection and MCU status.");
+        
+        await _terminal.LineAsync("[start] ========== Execution Running ==========", ct);
+    }
+
     public async Task StopAsync(CancellationToken ct)
     {
         await _terminal.LineAsync("[stop] ========== Stopping Execution ==========", ct);
+        _session.StopAll();
+        await _terminal.LineAsync("[stop] All nodes stopped (connections preserved).", ct);
+        // 不断开连接，保持节点在 session 中以便继续显示状态
+        // _session.DisconnectAll();
+        // _session.ClearNodes();
+        await _terminal.LineAsync("[stop] ========== Stopped ==========", ct);
+    }
+
+    /// <summary>
+    /// 完全停止并清空 session（断开所有连接）
+    /// </summary>
+    public async Task StopAndClearAsync(CancellationToken ct)
+    {
+        await _terminal.LineAsync("[stop] ========== Stopping and Clearing Session ==========", ct);
         _session.StopAll();
         await _terminal.LineAsync("[stop] All nodes stopped.", ct);
         _session.DisconnectAll();
@@ -208,11 +492,18 @@ public sealed class RuntimeSessionService
     private SessionConfiguration BuildSessionConfiguration(ProjectState project)
     {
         var nodes = new List<NodeConfiguration>();
-        foreach (var node in project.Nodes.Where(n =>
-                     !string.Equals(n.Kind, "root", StringComparison.OrdinalIgnoreCase)))
+        
+        // Parse nodeMap to extract node configurations (supports Vue Flow and LiteGraph formats)
+        var graphNodes = ParseGraphNodes(project.NodeMap);
+        
+        // Filter MCU nodes (Vue Flow: coral-node, LiteGraph: coral/node)
+        foreach (var node in graphNodes.Where(n => 
+                     string.Equals(n.Type, "coral-node", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(n.Type, "coral/node", StringComparison.OrdinalIgnoreCase)))
         {
-            var mcuUri = node.Properties.TryGetValue("mcuUri", out var u) ? u : "";
-            var logicName = node.Properties.TryGetValue("logicName", out var ln) ? ln : "";
+            var mcuUri = node.Properties.GetValueOrDefault("mcuUri") ?? "";
+            var logicName = node.Properties.GetValueOrDefault("logicName") ?? "";
+            
             if (string.IsNullOrWhiteSpace(mcuUri))
                 throw new InvalidOperationException($"Node {node.Id} has empty mcuUri.");
             if (string.IsNullOrWhiteSpace(logicName))
@@ -244,6 +535,88 @@ public sealed class RuntimeSessionService
             AssemblyPath = ResolveAssemblyPath(),
             Nodes = nodes.ToArray()
         };
+    }
+    
+    /// <summary>
+    /// Parse graph nodes from JSON - supports both Vue Flow format and legacy LiteGraph format
+    /// </summary>
+    private List<GraphNode> ParseGraphNodes(System.Text.Json.Nodes.JsonNode? nodeMap)
+    {
+        if (nodeMap == null)
+            return new List<GraphNode>();
+            
+        try
+        {
+            var nodes = new List<GraphNode>();
+            
+            var nodesArray = nodeMap["nodes"]?.AsArray();
+            if (nodesArray != null)
+            {
+                foreach (var nodeEl in nodesArray)
+                {
+                    if (nodeEl == null) continue;
+                    
+                    var type = nodeEl["type"]?.GetValue<string>();
+                    
+                    // 尝试获取 ID（Vue Flow 使用字符串，LiteGraph 使用数字）
+                    string nodeId;
+                    var idNode = nodeEl["id"];
+                    if (idNode != null)
+                    {
+                        nodeId = idNode.ToString();
+                    }
+                    else
+                    {
+                        continue; // 跳过没有 ID 的节点
+                    }
+                    
+                    var node = new GraphNode
+                    {
+                        Id = nodeId,
+                        Type = type,
+                        Properties = new Dictionary<string, string>()
+                    };
+                    
+                    // Vue Flow 格式：属性在 data 中
+                    var dataEl = nodeEl["data"];
+                    if (dataEl != null)
+                    {
+                        foreach (var prop in dataEl.AsObject())
+                        {
+                            node.Properties[prop.Key] = prop.Value?.ToString() ?? "";
+                        }
+                    }
+                    
+                    // Legacy LiteGraph 格式：属性在 properties 中
+                    var propsEl = nodeEl["properties"];
+                    if (propsEl != null)
+                    {
+                        foreach (var prop in propsEl.AsObject())
+                        {
+                            // 不覆盖已有的属性
+                            if (!node.Properties.ContainsKey(prop.Key))
+                                node.Properties[prop.Key] = prop.Value?.ToString() ?? "";
+                        }
+                    }
+                    
+                    nodes.Add(node);
+                }
+            }
+            
+            return nodes;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[RuntimeSession] Error parsing graph nodes: {ex.Message}");
+            return new List<GraphNode>();
+        }
+    }
+    
+    private class GraphNode
+    {
+        public string Id { get; set; } = "";
+        public string? Type { get; set; }
+        public Dictionary<string, string> Properties { get; set; } = new();
     }
 
     private string? ResolveAssemblyPath()
@@ -376,6 +749,17 @@ public sealed record PortConfigDto(
     }
 }
 
+public sealed record RestoreNodesResult(
+    int Total,
+    int Connected,
+    List<RestoreNodeInfo> Nodes);
+
+public sealed record RestoreNodeInfo(
+    string NodeId,
+    string McuUri,
+    bool Success,
+    string Message);
+
 /// <summary>Ring buffer for node log lines</summary>
 internal sealed class NodeLogBuffer
 {
@@ -435,3 +819,12 @@ public sealed record NodeLogChunk(
     int TotalLines,
     int Offset,
     bool HasMore);
+
+/// <summary>Node state information for frontend polling</summary>
+public sealed record NodeStateInfo(
+    string NodeId,
+    bool IsConnected,
+    string RunState,
+    bool IsConfigured,
+    bool IsProgrammed,
+    string Mode);
