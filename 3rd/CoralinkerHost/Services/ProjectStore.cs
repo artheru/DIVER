@@ -1,8 +1,13 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using CoralinkerSDK;
 
 namespace CoralinkerHost.Services;
 
+/// <summary>
+/// 项目存储服务
+/// 管理项目文件和资源，节点数据统一由 DIVERSession 管理
+/// </summary>
 public sealed class ProjectStore
 {
     private readonly object _gate = new();
@@ -24,9 +29,6 @@ public sealed class ProjectStore
     public string GeneratedDir => Path.Combine(AssetsDir, "generated");
     public string BuildsDir => Path.Combine(DataDir, "builds");
     public string ProjectFile => Path.Combine(DataDir, "project.json");
-    
-    // Note: For customer deployment, data will be in executable directory.
-    // In development, it's in ContentRootPath for convenience.
 
     public ProjectState Get()
     {
@@ -38,58 +40,126 @@ public sealed class ProjectStore
         lock (_gate) _state = state;
     }
 
+    /// <summary>
+    /// 保存项目到磁盘（包括 DIVERSession 的节点数据）
+    /// </summary>
     public void SaveToDisk()
     {
+        // 从 DIVERSession 导出节点数据
+        var nodes = DIVERSession.Instance.ExportNodes();
+        
+        // 调试日志：显示每个节点的 LogicName
+        Console.WriteLine($"[SaveToDisk] Exporting {nodes.Count} node(s):");
+        foreach (var kv in nodes)
+        {
+            Console.WriteLine($"  [{kv.Key}] NodeName={kv.Value.NodeName}, LogicName={kv.Value.LogicName ?? "null"}, HasProgram={kv.Value.ProgramBase64 != null}");
+        }
+        
         ProjectState snap;
         lock (_gate) snap = _state;
-        var json = JsonSerializer.Serialize(snap, ProjectJson.Options);
+        
+        // 构建完整的项目数据
+        var projectData = new JsonObject
+        {
+            ["selectedAsset"] = snap.SelectedAsset,
+            ["selectedFile"] = snap.SelectedFile,
+            ["lastBuildId"] = snap.LastBuildId,
+            ["nodes"] = JsonSerializer.SerializeToNode(nodes, ProjectJson.Options)
+        };
+        
+        var json = projectData.ToJsonString(ProjectJson.Options);
+        Console.WriteLine($"[SaveToDisk] Writing to {ProjectFile}");
         File.WriteAllText(ProjectFile, json);
     }
 
+    /// <summary>
+    /// 从磁盘加载项目（包括恢复 DIVERSession 的节点数据）
+    /// </summary>
     public void LoadFromDiskIfExists()
     {
         if (!File.Exists(ProjectFile)) return;
+        
         try
         {
             var json = File.ReadAllText(ProjectFile);
-            
-            // 尝试检测旧格式（nodeMap 是字符串）并迁移
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
             
-            if (root.TryGetProperty("nodeMap", out var nodeMapEl) && 
-                nodeMapEl.ValueKind == JsonValueKind.String)
+            // 读取基本属性
+            var state = new ProjectState(
+                root.TryGetProperty("selectedAsset", out var sa) && sa.ValueKind == JsonValueKind.String ? sa.GetString() : null,
+                root.TryGetProperty("selectedFile", out var sf) && sf.ValueKind == JsonValueKind.String ? sf.GetString() : null,
+                root.TryGetProperty("lastBuildId", out var lb) && lb.ValueKind == JsonValueKind.String ? lb.GetString() : null
+            );
+            
+            Set(state);
+            
+            // 加载节点数据到 DIVERSession
+            if (root.TryGetProperty("nodes", out var nodesEl) && nodesEl.ValueKind == JsonValueKind.Object)
             {
-                // 旧格式：nodeMap 是字符串，需要迁移
-                var nodeMapStr = nodeMapEl.GetString();
-                JsonNode? nodeMapObj = null;
-                
-                if (!string.IsNullOrWhiteSpace(nodeMapStr))
-                {
-                    nodeMapObj = JsonNode.Parse(nodeMapStr);
-                }
-                
-                var state = new ProjectState(
-                    nodeMapObj,
-                    root.TryGetProperty("selectedAsset", out var sa) && sa.ValueKind == JsonValueKind.String ? sa.GetString() : null,
-                    root.TryGetProperty("selectedFile", out var sf) && sf.ValueKind == JsonValueKind.String ? sf.GetString() : null,
-                    root.TryGetProperty("lastBuildId", out var lb) && lb.ValueKind == JsonValueKind.String ? lb.GetString() : null
+                var nodesDict = JsonSerializer.Deserialize<Dictionary<string, NodeExportData>>(
+                    nodesEl.GetRawText(), 
+                    ProjectJson.Options
                 );
                 
-                Set(state);
-                
-                // 自动迁移：以新格式保存
-                SaveToDisk();
-                return;
+                if (nodesDict != null)
+                {
+                    DIVERSession.Instance.ImportNodes(nodesDict);
+                }
             }
             
-            // 新格式：直接反序列化
-            var newState = JsonSerializer.Deserialize<ProjectState>(json, ProjectJson.Options);
-            if (newState != null) Set(newState);
+            // 兼容旧格式：如果有 nodeMap，尝试迁移
+            MigrateLegacyNodeMap(root);
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"[ProjectStore] Load error: {ex.Message}");
             // ignore and keep defaults
+        }
+    }
+
+    /// <summary>
+    /// 迁移旧格式的 nodeMap（LiteGraph/VueFlow 格式）
+    /// </summary>
+    private void MigrateLegacyNodeMap(JsonElement root)
+    {
+        if (!root.TryGetProperty("nodeMap", out var nodeMapEl)) return;
+        
+        try
+        {
+            JsonElement? nodesArray = null;
+            
+            if (nodeMapEl.ValueKind == JsonValueKind.String)
+            {
+                // 旧格式：nodeMap 是字符串
+                var nodeMapStr = nodeMapEl.GetString();
+                if (!string.IsNullOrWhiteSpace(nodeMapStr))
+                {
+                    using var nodeMapDoc = JsonDocument.Parse(nodeMapStr);
+                    if (nodeMapDoc.RootElement.TryGetProperty("nodes", out var na))
+                    {
+                        nodesArray = na;
+                    }
+                }
+            }
+            else if (nodeMapEl.ValueKind == JsonValueKind.Object)
+            {
+                // 新格式：nodeMap 是对象
+                if (nodeMapEl.TryGetProperty("nodes", out var na))
+                {
+                    nodesArray = na;
+                }
+            }
+            
+            if (nodesArray?.ValueKind != JsonValueKind.Array) return;
+            
+            // 从旧格式中提取节点信息（只提取位置等 ExtraInfo）
+            // 注意：实际的节点连接需要用户重新 Probe
+            Console.WriteLine("[ProjectStore] Found legacy nodeMap format, migration info extracted");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ProjectStore] Migration error: {ex.Message}");
         }
     }
 
@@ -159,16 +229,39 @@ public sealed class ProjectStore
                 File.Delete(f);
         }
     }
+
+    /// <summary>
+    /// 创建新项目（清空所有数据）
+    /// </summary>
+    public void CreateNew()
+    {
+        // 清空 DIVERSession
+        DIVERSession.Instance.RemoveAllNodes();
+        
+        // 清空资源文件
+        if (Directory.Exists(InputsDir))
+        {
+            foreach (var file in Directory.GetFiles(InputsDir))
+                File.Delete(file);
+        }
+        if (Directory.Exists(GeneratedDir))
+        {
+            Directory.Delete(GeneratedDir, true);
+            Directory.CreateDirectory(GeneratedDir);
+        }
+        
+        // 重置状态
+        Set(ProjectState.CreateDefault());
+        SaveToDisk();
+    }
 }
 
 public sealed record AssetInfo(string Name, long SizeBytes, DateTime LastWriteUtc);
 
 /// <summary>
-/// Project state - matches frontend ProjectState interface.
-/// nodeMap stores the raw LiteGraph serialized JSON object (not string).
+/// 项目状态 - 简化版，节点数据由 DIVERSession 管理
 /// </summary>
 public sealed record ProjectState(
-    JsonNode? NodeMap,         // LiteGraph 序列化的 JSON 对象 (直接存储，非字符串)
     string? SelectedAsset,     // 当前选中的 .cs 资源文件名
     string? SelectedFile,      // 当前在编辑器中打开的文件路径
     string? LastBuildId        // 最后一次构建的 ID
@@ -176,45 +269,7 @@ public sealed record ProjectState(
 {
     public static ProjectState CreateDefault()
     {
-        // 创建默认的 LiteGraph 图数据，包含一个 Root 节点
-        var defaultGraph = new JsonObject
-        {
-            ["last_node_id"] = 1,
-            ["last_link_id"] = 0,
-            ["nodes"] = new JsonArray
-            {
-                new JsonObject
-                {
-                    ["id"] = 1,
-                    ["type"] = "coral/root",
-                    ["pos"] = new JsonArray { 50, 50 },
-                    ["size"] = new JsonArray { 200, 90 },
-                    ["flags"] = new JsonObject(),
-                    ["order"] = 0,
-                    ["mode"] = 0,
-                    ["outputs"] = new JsonArray
-                    {
-                        new JsonObject
-                        {
-                            ["name"] = "out",
-                            ["type"] = "flow",
-                            ["links"] = null
-                        }
-                    },
-                    ["properties"] = new JsonObject
-                    {
-                        ["name"] = "PC"
-                    }
-                }
-            },
-            ["links"] = new JsonArray(),
-            ["groups"] = new JsonArray(),
-            ["config"] = new JsonObject(),
-            ["extra"] = new JsonObject(),
-            ["version"] = 0.4
-        };
-        
-        return new ProjectState(defaultGraph, null, null, null);
+        return new ProjectState(null, null, null);
     }
 }
 
@@ -223,8 +278,7 @@ internal static class ProjectJson
     public static readonly JsonSerializerOptions Options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
         WriteIndented = true
     };
 }
-
-

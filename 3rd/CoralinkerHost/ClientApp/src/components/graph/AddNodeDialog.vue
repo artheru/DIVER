@@ -2,10 +2,10 @@
   @file components/graph/AddNodeDialog.vue
   @description 添加节点对话框
   
-  添加节点前需要：
+  添加节点流程：
   1. 选择 MCU URI（COM 端口和波特率）
-  2. 验证连接（调用后端 probe API）
-  3. 验证成功后返回节点信息
+  2. 点击 Probe 探测（只探测，不添加）
+  3. 探测成功后点击 Confirm 添加节点
 -->
 
 <template>
@@ -14,7 +14,7 @@
       <div class="add-node-form">
         <!-- URI 模式选择 -->
         <n-form-item label="Connection Mode">
-          <n-radio-group v-model:value="uriMode" :disabled="isProbing">
+          <n-radio-group v-model:value="uriMode" :disabled="isProbing || isAdding">
             <n-radio-button value="name">COM Port</n-radio-button>
             <n-radio-button value="vidpid">VID/PID</n-radio-button>
           </n-radio-group>
@@ -28,7 +28,7 @@
               :options="portOptions"
               :loading="loadingPorts"
               placeholder="Select COM port"
-              :disabled="isProbing"
+              :disabled="isProbing || isAdding"
             />
             <n-button 
               size="small" 
@@ -45,13 +45,13 @@
         <!-- VID/PID 模式 -->
         <template v-else>
           <n-form-item label="VID">
-            <n-input v-model:value="vid" placeholder="e.g. 1234" :disabled="isProbing" />
+            <n-input v-model:value="vid" placeholder="e.g. 1234" :disabled="isProbing || isAdding" />
           </n-form-item>
           <n-form-item label="PID">
-            <n-input v-model:value="pid" placeholder="e.g. 5678" :disabled="isProbing" />
+            <n-input v-model:value="pid" placeholder="e.g. 5678" :disabled="isProbing || isAdding" />
           </n-form-item>
           <n-form-item label="Serial (optional)">
-            <n-input v-model:value="serial" placeholder="Device serial number" :disabled="isProbing" />
+            <n-input v-model:value="serial" placeholder="Device serial number" :disabled="isProbing || isAdding" />
           </n-form-item>
         </template>
 
@@ -60,7 +60,7 @@
           <n-select
             v-model:value="baudrate"
             :options="baudOptions"
-            :disabled="isProbing"
+            :disabled="isProbing || isAdding"
           />
         </n-form-item>
 
@@ -72,7 +72,7 @@
         <!-- 探测结果 -->
         <div v-if="probeResult" class="probe-result" :class="{ success: probeResult.ok, error: !probeResult.ok }">
           <template v-if="probeResult.ok">
-            <div class="result-header">✓ MCU Connected</div>
+            <div class="result-header">✓ MCU Detected</div>
             <div class="result-info">
               <span class="label">Product:</span>
               <span class="value">{{ probeResult.version?.productionName || 'Unknown' }}</span>
@@ -95,7 +95,7 @@
             </div>
           </template>
           <template v-else>
-            <div class="result-header">✗ Connection Failed</div>
+            <div class="result-header">✗ Probe Failed</div>
             <div class="result-error">{{ probeResult.error }}</div>
           </template>
         </div>
@@ -103,27 +103,34 @@
         <!-- 探测进度 -->
         <div v-if="isProbing" class="probing-status">
           <n-spin size="small" />
-          <span>Connecting to MCU...</span>
+          <span>Probing MCU...</span>
+        </div>
+        
+        <!-- 添加进度 -->
+        <div v-if="isAdding" class="probing-status">
+          <n-spin size="small" />
+          <span>Adding node...</span>
         </div>
       </div>
 
       <template #footer>
         <div class="dialog-footer">
-          <n-button @click="handleCancel" :disabled="isProbing">Cancel</n-button>
+          <n-button @click="handleCancel" :disabled="isProbing || isAdding">Cancel</n-button>
           <n-button 
             type="primary" 
             @click="handleProbe" 
             :loading="isProbing"
-            :disabled="!canProbe"
+            :disabled="!canProbe || isAdding"
           >
             {{ probeResult?.ok ? 'Re-probe' : 'Probe' }}
           </n-button>
           <n-button 
             type="success" 
             @click="handleConfirm" 
-            :disabled="!probeResult?.ok"
+            :loading="isAdding"
+            :disabled="!probeResult?.ok || isProbing"
           >
-            Add Node
+            Confirm
           </n-button>
         </div>
       </template>
@@ -134,7 +141,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { NModal, NCard, NButton, NFormItem, NSelect, NRadioGroup, NRadioButton, NInput, NSpin } from 'naive-ui'
-import { getAvailablePorts, probeNode, type NodeProbeResponse, type PortLayoutInfo } from '@/api/device'
+import { getAvailablePorts, probeNode, addNode as apiAddNode } from '@/api/device'
+import type { LayoutInfo, VersionInfo, NodeProbeResult } from '@/types'
 
 // Props
 const props = defineProps<{
@@ -158,17 +166,24 @@ export interface PortConfigData {
 
 // 返回的节点数据
 export interface AddNodeResult {
-  nodeId: string  // 后端分配的节点 ID（与 DIVERSession 中的 ID 一致）
+  uuid: string    // 后端分配的 UUID
   mcuUri: string
+  nodeName: string
   version: {
     productionName: string
     gitTag: string
   }
-  layout?: {
-    ports: PortLayoutInfo[]
-  }
+  layout?: LayoutInfo
   // 根据 layout 生成的默认端口配置
   ports: PortConfigData[]
+}
+
+// 探测结果（只探测，不添加）
+interface ProbeResultData {
+  ok: boolean
+  error?: string
+  version?: VersionInfo
+  layout?: LayoutInfo
 }
 
 // 本地状态
@@ -187,7 +202,8 @@ const baudrate = ref(1000000)
 const loadingPorts = ref(false)
 const availablePorts = ref<string[]>([])
 const isProbing = ref(false)
-const probeResult = ref<NodeProbeResponse | null>(null)
+const isAdding = ref(false)
+const probeResult = ref<ProbeResultData | null>(null)
 
 // 波特率选项
 const baudOptions = [
@@ -242,7 +258,7 @@ async function refreshPorts() {
   }
 }
 
-// 探测 MCU
+// 探测 MCU（只探测，不添加）
 async function handleProbe() {
   if (!canProbe.value || isProbing.value) return
   
@@ -250,6 +266,7 @@ async function handleProbe() {
   probeResult.value = null
   
   try {
+    // 调用 probeNode API - 只探测，不添加
     const result = await probeNode(generatedUri.value)
     probeResult.value = result
   } catch (error) {
@@ -269,34 +286,57 @@ function handleCancel() {
 }
 
 // 确认添加
-function handleConfirm() {
-  if (!probeResult.value?.ok || !probeResult.value.nodeId) return
+async function handleConfirm() {
+  if (!probeResult.value?.ok || isAdding.value) return
   
-  // 根据 layout.ports 生成默认端口配置
-  const ports: PortConfigData[] = (probeResult.value.layout?.ports || []).map(p => {
-    const isSerial = p.type.toLowerCase() === 'serial'
-    return {
-      type: p.type,
-      name: p.name,
-      baud: isSerial ? 115200 : 1000000, // Serial 默认 115200, CAN 默认 1000000
-      receiveFrameMs: isSerial ? 0 : undefined,
-      retryTimeMs: isSerial ? undefined : 10
+  isAdding.value = true
+  
+  try {
+    // 调用 addNode API - 真正添加节点
+    const addResult = await apiAddNode(generatedUri.value)
+    
+    if (!addResult.ok || !addResult.uuid) {
+      probeResult.value = {
+        ok: false,
+        error: addResult.error || 'Failed to add node'
+      }
+      return
     }
-  })
-  
-  emit('confirm', {
-    nodeId: probeResult.value.nodeId,  // 使用后端分配的 ID
-    mcuUri: generatedUri.value,
-    version: {
-      productionName: probeResult.value.version?.productionName || 'Unknown',
-      gitTag: probeResult.value.version?.gitTag || ''
-    },
-    layout: probeResult.value.layout,
-    ports
-  })
-  
-  showModal.value = false
-  resetForm()
+    
+    // 根据 layout.ports 生成默认端口配置
+    const ports: PortConfigData[] = (addResult.layout?.ports || []).map(p => {
+      const isSerial = p.type.toLowerCase() === 'serial'
+      return {
+        type: p.type,
+        name: p.name,
+        baud: isSerial ? 115200 : 1000000, // Serial 默认 115200, CAN 默认 1000000
+        receiveFrameMs: isSerial ? 0 : undefined,
+        retryTimeMs: isSerial ? undefined : 10
+      }
+    })
+    
+    emit('confirm', {
+      uuid: addResult.uuid,
+      mcuUri: generatedUri.value,
+      nodeName: addResult.nodeName || `Node-${addResult.uuid.slice(0, 8)}`,
+      version: {
+        productionName: addResult.version?.productionName || 'Unknown',
+        gitTag: addResult.version?.gitTag || ''
+      },
+      layout: addResult.layout,
+      ports
+    })
+    
+    showModal.value = false
+    resetForm()
+  } catch (error) {
+    probeResult.value = {
+      ok: false,
+      error: String(error)
+    }
+  } finally {
+    isAdding.value = false
+  }
 }
 
 // 重置表单

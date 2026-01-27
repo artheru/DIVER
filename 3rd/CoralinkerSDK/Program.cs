@@ -9,8 +9,6 @@ namespace CoralinkerSDK;
 /// </summary>
 class Program
 {
-    private static int _loopCount = 0;
-
     static void Main(string[] args)
     {
         Console.WriteLine("=== CoralinkerSDK Test ===");
@@ -150,63 +148,88 @@ class Program
 
         // 注册事件
         session.OnStateChanged += state => Console.WriteLine($"[Session] State changed: {state}");
-        session.OnLowerIOReceived += (nodeId, data) =>
-        {
-            if (session.Nodes.TryGetValue(nodeId, out var node))
-            {
-                var formatted = HostRuntime.FormatLowerIO(nodeId, data, node.CartFields);
-                Console.WriteLine($"[LowerIO] {nodeId}: {formatted}");
-            }
-        };
-        session.OnConsoleOutput += (nodeId, msg) => Console.WriteLine($"[{nodeId}] {msg}");
+        session.OnNodeLog += (uuid, msg) => Console.WriteLine($"[{uuid[..8]}] {msg}");
 
         try
         {
-            // 配置会话
-            Console.WriteLine("Configuring session...");
-            session.Configure(config);
+            // 添加并配置节点
+            Console.WriteLine("Adding nodes...");
+            var nodeUuids = new List<string>();
+            
+            foreach (var nodeConfig in config.Nodes)
+            {
+                Console.WriteLine($"  Adding {nodeConfig.McuUri}...");
+                var uuid = session.AddNode(nodeConfig.McuUri);
+                
+                if (uuid != null)
+                {
+                    nodeUuids.Add(uuid);
+                    var info = session.GetNodeInfo(uuid);
+                    Console.WriteLine($"    ✓ Added: {info?.NodeName ?? uuid}");
+                    Console.WriteLine($"      Version: {info?.Version?.ProductionName ?? "Unknown"}");
+                    
+                    // 配置端口
+                    if (nodeConfig.PortConfigs != null && nodeConfig.PortConfigs.Length > 0)
+                    {
+                        session.ConfigureNode(uuid, new NodeSettings
+                        {
+                            PortConfigs = nodeConfig.PortConfigs
+                        });
+                        Console.WriteLine($"      Configured {nodeConfig.PortConfigs.Length} port(s)");
+                    }
+                    
+                    // 编程
+                    if (nodeConfig.ProgramBytes.Length > 0 && !string.IsNullOrEmpty(nodeConfig.MetaJson))
+                    {
+                        var programmed = session.ProgramNode(uuid, nodeConfig.ProgramBytes, nodeConfig.MetaJson, nodeConfig.LogicName);
+                        if (programmed)
+                        {
+                            Console.WriteLine($"      Programmed: {nodeConfig.ProgramBytes.Length} bytes, logic={nodeConfig.LogicName ?? "(none)"}");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"      ✗ Program failed");
+                        }
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"    ✗ Failed to add node");
+                }
+            }
+            
+            Console.WriteLine();
+            Console.WriteLine($"Added {nodeUuids.Count}/{config.Nodes.Length} node(s)");
             Console.WriteLine($"Session state: {session.State}");
             Console.WriteLine();
 
-            // 连接所有节点
-            Console.WriteLine("Connecting nodes...");
-            var connected = session.ConnectAll();
-            Console.WriteLine($"Connected: {connected}/{config.Nodes.Length}");
-
-            if (connected == 0)
+            if (nodeUuids.Count == 0)
             {
-                Console.WriteLine("No nodes connected. Check port configuration.");
-                PrintNodeErrors(session);
+                Console.WriteLine("No nodes added. Check port configuration.");
                 return;
             }
-            Console.WriteLine();
-
-            // 配置并编程
-            Console.WriteLine("Configuring and programming nodes...");
-            var programmed = session.ConfigureAndProgramAll();
-            Console.WriteLine($"Programmed: {programmed}/{connected}");
-
-            if (programmed == 0)
-            {
-                Console.WriteLine("No nodes programmed. Check program bytes.");
-                PrintNodeErrors(session);
-                return;
-            }
-            Console.WriteLine();
 
             // 启动
-            Console.WriteLine("Starting nodes...");
-            var started = session.StartAll();
-            Console.WriteLine($"Started: {started}/{programmed}");
+            Console.WriteLine("Starting session...");
+            var startResult = session.Start();
+            Console.WriteLine($"Started: {startResult.SuccessNodes}/{startResult.TotalNodes}");
+            
+            if (startResult.Errors.Count > 0)
+            {
+                foreach (var error in startResult.Errors)
+                {
+                    Console.WriteLine($"  ✗ {error.NodeName}: {error.Error}");
+                }
+            }
+            
             Console.WriteLine($"Session state: {session.State}");
             Console.WriteLine();
 
-            if (started > 0)
+            if (startResult.SuccessNodes > 0)
             {
-                Console.WriteLine();
-                Console.WriteLine("=== Auto UpperIO Test ===");
-                Console.WriteLine("Updating digital_output every 1s: 1,2,4,...,1<<14 (loop).");
+                Console.WriteLine("=== Running Test ===");
                 Console.WriteLine("Press Ctrl+C to stop.");
+                Console.WriteLine();
 
                 var running = true;
                 Console.CancelKeyPress += (_, e) =>
@@ -215,29 +238,43 @@ class Program
                     e.Cancel = true;
                 };
 
-                int value = 1;
+                int loopCount = 0;
                 while (running)
                 {
-                    foreach (var node in session.Nodes.Values)
+                    // 显示变量
+                    var fields = session.GetAllCartFields();
+                    if (fields.Count > 0 && loopCount % 5 == 0)  // 每 5 秒显示一次
                     {
-                        HostRuntime.SetCartVariable(node.NodeId, "digital_output", value);
+                        Console.WriteLine($"[Variables] {fields.Count} field(s):");
+                        foreach (var kv in fields.Take(10))
+                        {
+                            Console.WriteLine($"  {kv.Key} = {kv.Value.Value} ({kv.Value.Type})");
+                        }
+                        if (fields.Count > 10)
+                        {
+                            Console.WriteLine($"  ... and {fields.Count - 10} more");
+                        }
+                    }
+                    
+                    // 显示节点状态
+                    var states = session.GetNodeStates();
+                    foreach (var kv in states)
+                    {
+                        var state = kv.Value;
+                        if (state.Stats != null)
+                        {
+                            Console.WriteLine($"[{state.NodeName}] Uptime: {state.Stats.UptimeMs}ms, DI: {state.Stats.DigitalInputs}, DO: {state.Stats.DigitalOutputs}");
+                        }
                     }
 
-                    Console.WriteLine($"[UpperIO] digital_output = {value}");
-
-                    value <<= 1;
-                    if (value > (1 << 14))
-                        value = 1;
-
+                    loopCount++;
                     Thread.Sleep(1000);
                 }
 
-                Console.WriteLine("Stopping nodes...");
-                session.StopAll();
+                Console.WriteLine();
+                Console.WriteLine("Stopping session...");
+                session.Stop();
             }
-
-            Console.WriteLine("Disconnecting...");
-            session.DisconnectAll();
         }
         catch (Exception ex)
         {
@@ -248,17 +285,6 @@ class Program
         {
             Console.WriteLine();
             Console.WriteLine("Test completed.");
-        }
-    }
-
-    static void PrintNodeErrors(DIVERSession session)
-    {
-        foreach (var node in session.Nodes.Values)
-        {
-            if (!string.IsNullOrEmpty(node.LastError))
-            {
-                Console.WriteLine($"  [{node.NodeId}] Error: {node.LastError}");
-            }
         }
     }
 }

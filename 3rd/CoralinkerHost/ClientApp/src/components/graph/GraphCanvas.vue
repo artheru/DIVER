@@ -57,10 +57,9 @@ import {
 import { Background, BackgroundVariant } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
-import { useProjectStore, useLogStore, useRuntimeStore } from '@/stores'
+import { useLogStore, useRuntimeStore } from '@/stores'
 import { storeToRefs } from 'pinia'
-import { pollNodeState } from '@/api/device'
-import { restoreSession } from '@/api/runtime'
+import * as deviceApi from '@/api/device'
 import CoralNodeView from './CoralNodeView.vue'
 import RootNodeView from './RootNodeView.vue'
 
@@ -74,11 +73,9 @@ import '@vue-flow/minimap/dist/style.css'
 // Store 引用
 // ============================================
 
-const projectStore = useProjectStore()
 const logStore = useLogStore()
 const runtimeStore = useRuntimeStore()
-const { nodeMap } = storeToRefs(projectStore)
-const { nodes: runtimeNodes, isRunning } = storeToRefs(runtimeStore)
+const { nodeStates, isRunning } = storeToRefs(runtimeStore)
 
 // ============================================
 // vue-flow 配置
@@ -103,9 +100,6 @@ const defaultEdgeOptions = {
 
 const nodes = ref<Node[]>([])
 const edges = ref<Edge[]>([])
-
-// 节点计数器
-let nodeCounter = 1
 
 // 是否正在从 store 加载（防止循环）
 let isLoadingFromStore = false
@@ -149,57 +143,49 @@ function stopNodeStatePolling() {
 
 /**
  * 轮询所有节点的状态
+ * 从后端获取所有节点状态，更新本地节点数据
  */
 async function pollAllNodeStates() {
-  // 如果正在运行，不需要轮询（由 runtime store 处理）
+  // 如果正在运行，不需要轮询（由 runtime store 通过 SignalR 处理）
   if (isRunning.value) return
   
   // 获取所有 coral-node 节点
-  const coralNodes = nodes.value.filter(n => n.type === 'coral-node' && n.data?.mcuUri)
+  const coralNodes = nodes.value.filter(n => n.type === 'coral-node')
   
   if (coralNodes.length === 0) return
   
-  // 并行轮询所有节点状态
-  const pollPromises = coralNodes.map(async (node) => {
-    try {
-      const result = await pollNodeState(node.data.mcuUri)
-      
-      if (result.ok) {
-        // 更新节点状态
-        const targetNode = nodes.value.find(n => n.id === node.id)
-        if (targetNode) {
-          const needsUpdate = 
-            targetNode.data.runState !== result.runState ||
-            targetNode.data.isConfigured !== result.isConfigured ||
-            targetNode.data.isProgrammed !== result.isProgrammed
-          
-          if (needsUpdate) {
-            targetNode.data = {
-              ...targetNode.data,
-              runState: result.runState || 'Offline',
-              isConfigured: result.isConfigured || false,
-              isProgrammed: result.isProgrammed || false
-            }
-            console.log(`[Graph] Node ${node.id} state updated:`, result.runState, 'Config:', result.isConfigured, 'Program:', result.isProgrammed)
+  try {
+    // 一次性获取所有节点状态
+    const result = await deviceApi.getAllNodeStates()
+    if (!result.ok) return
+    
+    // 构建 uuid -> state 映射
+    const stateMap = new Map(result.nodes.map(s => [s.uuid, s]))
+    
+    // 更新本地节点数据
+    for (const node of coralNodes) {
+      const state = stateMap.get(node.id)
+      if (state) {
+        const needsUpdate = 
+          node.data.runState !== state.runState ||
+          node.data.isConfigured !== state.isConfigured ||
+          node.data.isProgrammed !== state.isProgrammed ||
+          node.data.isConnected !== state.isConnected
+        
+        if (needsUpdate) {
+          node.data = {
+            ...node.data,
+            runState: state.runState || 'Offline',
+            isConnected: state.isConnected,
+            isConfigured: state.isConfigured,
+            isProgrammed: state.isProgrammed
           }
         }
       }
-    } catch (error) {
-      // 轮询失败，标记为 Offline
-      const targetNode = nodes.value.find(n => n.id === node.id)
-      if (targetNode && targetNode.data.runState !== 'Offline') {
-        targetNode.data = {
-          ...targetNode.data,
-          runState: 'Offline',
-          isConfigured: false,
-          isProgrammed: false
-        }
-        console.log(`[Graph] Node ${node.id} polling failed, marked as Offline`)
-      }
     }
-  })
-  
-  await Promise.allSettled(pollPromises)
+  } catch (error) {
+    console.warn('[Graph] Failed to poll node states:', error)
+  }
 }
 
 // ============================================
@@ -207,29 +193,13 @@ async function pollAllNodeStates() {
 // ============================================
 
 /**
- * 生成下一个节点名称
- */
-function getNextNodeName(): string {
-  const existingNames = new Set(
-    nodes.value
-      .filter(n => n.type === 'coral-node')
-      .map(n => n.data?.nodeName)
-  )
-  
-  while (existingNames.has(`Node${nodeCounter}`)) {
-    nodeCounter++
-  }
-  
-  return `Node${nodeCounter++}`
-}
-
-/**
- * 添加新节点（需要提供经过验证的 MCU 数据）
- * @param nodeData 经过 probe 验证的节点数据
+ * 添加新节点（需要提供经过 addNode API 返回的数据）
+ * @param nodeData 从 addNode API 返回的节点数据
  */
 interface AddNodeData {
-  nodeId: string  // 后端分配的节点 ID（与 DIVERSession 中的 ID 一致）
+  uuid: string    // 后端分配的 UUID
   mcuUri: string
+  nodeName: string
   version?: {
     productionName: string
     gitTag: string
@@ -257,34 +227,50 @@ function addNode(nodeData?: AddNodeData) {
   }
   
   // 如果没有提供节点数据，记录警告并返回
-  // 添加节点现在需要先通过 probe 验证
-  if (!nodeData || !nodeData.nodeId) {
-    console.warn('[Graph] addNode requires validated node data from probe with nodeId')
+  if (!nodeData || !nodeData.uuid) {
+    console.warn('[Graph] addNode requires validated node data from addNode API with uuid')
     return
   }
   
+  // 计算新节点位置
+  const position = { x: 250 + Math.random() * 100, y: 100 + Math.random() * 100 }
+  
   const newNode: Node = {
-    id: nodeData.nodeId,  // 使用后端分配的 ID，确保与 DIVERSession 一致
+    id: nodeData.uuid,  // 使用后端分配的 UUID
     type: 'coral-node',
-    position: { x: 250 + Math.random() * 100, y: 100 + Math.random() * 100 },
+    position,
     data: {
-      nodeName: getNextNodeName(),
+      nodeName: nodeData.nodeName,
       mcuUri: nodeData.mcuUri,
       logicName: '',
-      runState: 'idle',  // probe 成功后节点已连接，状态为 idle
+      runState: 'idle',  // 添加成功后节点状态为 idle
       isConnected: true,
       isConfigured: false,
       isProgrammed: false,
-      // 使用 probe 返回的端口配置
       ports: nodeData.ports || [],
-      layout: nodeData.layout ? { ports: nodeData.layout.ports } : null
+      layout: nodeData.layout || null  // 传入完整的 LayoutInfo
     }
   }
   
   nodes.value = [...nodes.value, newNode]
-  scheduleAutoSave()
   
-  console.log('[Graph] Node added:', newNode.data.nodeName, 'MCU:', nodeData.version?.productionName || 'Unknown', 'Ports:', nodeData.ports?.length || 0)
+  // 保存位置到后端
+  saveNodePosition(nodeData.uuid, position.x, position.y)
+  
+  console.log('[Graph] Node added:', newNode.data.nodeName, 'UUID:', nodeData.uuid, 'MCU:', nodeData.version?.productionName || 'Unknown')
+}
+
+/**
+ * 保存节点位置到后端
+ */
+async function saveNodePosition(uuid: string, x: number, y: number) {
+  try {
+    await deviceApi.configureNode(uuid, {
+      extraInfo: { x, y }
+    })
+  } catch (error) {
+    console.warn('[Graph] Failed to save node position:', error)
+  }
 }
 
 /**
@@ -307,11 +293,23 @@ function ensureRootNode() {
 /**
  * 清空图（保留根节点）
  */
-function clearGraph() {
+async function clearGraph() {
+  if (isRunning.value) {
+    console.warn('[Graph] Cannot clear graph while running')
+    return
+  }
+  
+  try {
+    // 清空后端节点
+    await deviceApi.clearAllNodes()
+  } catch (error) {
+    console.error('[Graph] Failed to clear nodes:', error)
+  }
+  
+  // 清空本地节点
   nodes.value = nodes.value.filter(n => n.type === 'root-node')
   edges.value = []
-  nodeCounter = 1
-  scheduleAutoSave()
+  syncLogTabs()
 }
 
 // ============================================
@@ -355,8 +353,22 @@ function onConnect(connection: Connection) {
   scheduleAutoSave()
 }
 
-function onNodeDragStop() {
-  scheduleAutoSave()
+function onNodeDragStop(event: { node: Node }) {
+  const node = event.node
+  
+  // 只保存 coral-node 的位置
+  if (node.type !== 'coral-node') return
+  
+  // 防抖保存位置
+  const existing = positionSaveTimers.get(node.id)
+  if (existing) {
+    clearTimeout(existing)
+  }
+  
+  positionSaveTimers.set(node.id, setTimeout(() => {
+    positionSaveTimers.delete(node.id)
+    saveNodePosition(node.id, node.position.x, node.position.y)
+  }, 300))
 }
 
 // ============================================
@@ -378,141 +390,89 @@ function scheduleAutoSave() {
   }, 500)
 }
 
-// 是否正在保存到 store（防止 save → watch → load 循环）
-let isSavingToStore = false
+// 节点位置保存防抖定时器
+let positionSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
+/**
+ * 保存图数据（节点数据由 DIVERSession 管理，这里只保存位置）
+ */
 function saveToStore() {
   if (isLoadingFromStore) return
   
-  isSavingToStore = true
-  
-  // 转换为存储格式 - 只保存静态配置，不保存运行时状态
-  const graphData = {
-    nodes: nodes.value.map(n => {
-      if (n.type === 'coral-node') {
-        // Coral 节点只保存静态配置
-        return {
-          id: n.id,
-          type: n.type,
-          position: n.position,
-          data: {
-            nodeName: n.data?.nodeName || 'Node',
-            mcuUri: n.data?.mcuUri || '',
-            logicName: n.data?.logicName || '',
-            ports: n.data?.ports || []
-            // 不保存 runState, isConnected, isConfigured, isProgrammed, layout
-          }
-        }
-      }
-      // Root 节点
-      return {
-        id: n.id,
-        type: n.type,
-        position: n.position,
-        data: { name: n.data?.name || 'PC' }
-      }
-    }),
-    edges: edges.value.map(e => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      sourceHandle: e.sourceHandle,
-      targetHandle: e.targetHandle
-    })),
-    viewport: { x: 0, y: 0, zoom: 1 }
-  }
-  
-  projectStore.setNodeMap(graphData as any)
-  
-  // 重置保存标志（延迟一帧，确保 watch 已触发）
-  setTimeout(() => { isSavingToStore = false }, 0)
-  
-  // 同步日志标签
+  // 节点数据由 DIVERSession 管理
+  // 这里只需要同步日志标签
   syncLogTabs()
 }
 
-function loadFromStore() {
-  if (!nodeMap.value) {
-    ensureRootNode()
-    return
-  }
-  
+/**
+ * 从 DIVERSession 加载节点数据
+ */
+async function loadFromStore() {
   isLoadingFromStore = true
   
   try {
-    const data = nodeMap.value as any
+    // 从后端获取所有节点
+    const result = await deviceApi.getAllNodes()
     
-    // 检查是否是旧的 LiteGraph 格式
-    if (data.last_node_id !== undefined) {
-      // 迁移旧格式
-      migrateFromLiteGraph(data)
-    } else if (data.nodes && Array.isArray(data.nodes)) {
-      // 新格式 - 加载静态配置，保留现有节点的运行时状态
-      // 构建现有节点的运行时状态映射
-      const existingRuntimeState = new Map<string, any>()
-      for (const node of nodes.value) {
-        if (node.type === 'coral-node') {
-          existingRuntimeState.set(node.id, {
-            runState: node.data?.runState,
-            isConnected: node.data?.isConnected,
-            isConfigured: node.data?.isConfigured,
-            isProgrammed: node.data?.isProgrammed,
-            layout: node.data?.layout
-          })
-        }
-      }
-      
-      nodes.value = data.nodes.map((n: any) => {
-        if (n.type === 'coral-node') {
-          // 尝试保留现有节点的运行时状态
-          const existingState = existingRuntimeState.get(n.id)
-          return {
-            id: n.id,
-            type: n.type,
-            position: n.position || { x: 100, y: 100 },
-            data: {
-              // 静态配置从存储加载
-              nodeName: n.data?.nodeName || 'Node',
-              mcuUri: n.data?.mcuUri || '',
-              logicName: n.data?.logicName || '',
-              ports: n.data?.ports || [],
-              // 运行时状态：优先保留现有状态，否则使用默认值
-              runState: existingState?.runState || 'Offline',
-              isConnected: existingState?.isConnected || false,
-              isConfigured: existingState?.isConfigured || false,
-              isProgrammed: existingState?.isProgrammed || false,
-              layout: existingState?.layout || null
-            },
-            deletable: true
-          }
-        }
-        // Root 节点
-        return {
-          id: n.id,
-          type: n.type,
-          position: n.position || { x: 50, y: 100 },
-          data: n.data || { name: 'PC' },
-          deletable: false
-        }
-      })
-      
-      edges.value = (data.edges || []).map((e: any) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        sourceHandle: e.sourceHandle || 'out',
-        targetHandle: e.targetHandle || 'in',
-        type: 'smoothstep',
-        style: { stroke: '#4f8cff', strokeWidth: 2 }
-      }))
+    if (!result.ok || !result.nodes) {
+      console.log('[Graph] No nodes from backend')
+      ensureRootNode()
+      return
     }
+    
+    // 构建现有节点的运行时状态映射
+    const existingRuntimeState = new Map<string, any>()
+    for (const node of nodes.value) {
+      if (node.type === 'coral-node') {
+        existingRuntimeState.set(node.id, {
+          runState: node.data?.runState,
+          isConnected: node.data?.isConnected,
+          isConfigured: node.data?.isConfigured,
+          isProgrammed: node.data?.isProgrammed,
+          layout: node.data?.layout
+        })
+      }
+    }
+    
+    // 转换后端数据为 vue-flow 节点
+    const newNodes: Node[] = result.nodes.map(n => {
+      const existingState = existingRuntimeState.get(n.uuid)
+      const extraInfo = n.extraInfo || {}
+      
+      return {
+        id: n.uuid,
+        type: 'coral-node',
+        position: { 
+          x: typeof extraInfo.x === 'number' ? extraInfo.x : 200 + Math.random() * 100, 
+          y: typeof extraInfo.y === 'number' ? extraInfo.y : 100 + Math.random() * 100 
+        },
+        data: {
+          nodeName: n.nodeName || 'Node',
+          mcuUri: n.mcuUri || '',
+          logicName: n.logicName || '',
+          ports: n.portConfigs || [],
+          // 运行时状态：优先保留现有状态，否则使用默认值
+          runState: existingState?.runState || 'Offline',
+          isConnected: existingState?.isConnected || false,
+          isConfigured: existingState?.isConfigured || false,
+          isProgrammed: existingState?.isProgrammed || false,
+          layout: n.layout || existingState?.layout || null  // 使用完整的 LayoutInfo
+        },
+        deletable: true
+      }
+    })
+    
+    nodes.value = newNodes
+    
+    // 保留连线（如果有的话）
+    // TODO: 连线信息也可以存储在 extraInfo 中
     
     ensureRootNode()
     syncLogTabs()
     
-    console.log('[Graph] Loaded from store:', nodes.value.length, 'nodes,', edges.value.length, 'edges')
+    console.log('[Graph] Loaded from DIVERSession:', nodes.value.length, 'nodes')
   } catch (error) {
-    console.error('[Graph] Failed to load from store:', error)
+    console.error('[Graph] Failed to load from DIVERSession:', error)
     ensureRootNode()
   } finally {
     isLoadingFromStore = false
@@ -520,95 +480,47 @@ function loadFromStore() {
 }
 
 /**
- * 从旧的 LiteGraph 格式迁移
+ * 删除节点
  */
-function migrateFromLiteGraph(data: any) {
-  console.log('[Graph] Migrating from LiteGraph format...')
+async function removeNode(uuid: string) {
+  if (isRunning.value) {
+    console.warn('[Graph] Cannot remove node while running')
+    return false
+  }
   
-  const newNodes: Node[] = []
-  const newEdges: Edge[] = []
-  
-  // 转换节点
-  for (const oldNode of data.nodes || []) {
-    if (oldNode.type === 'coral/root') {
-      newNodes.push({
-        id: String(oldNode.id),
-        type: 'root-node',
-        position: { 
-          x: Array.isArray(oldNode.pos) ? oldNode.pos[0] : (oldNode.pos?.['0'] || 50),
-          y: Array.isArray(oldNode.pos) ? oldNode.pos[1] : (oldNode.pos?.['1'] || 50)
-        },
-        data: { name: oldNode.properties?.name || 'PC' },
-        deletable: false
-      })
-    } else if (oldNode.type === 'coral/node') {
-      newNodes.push({
-        id: String(oldNode.id),
-        type: 'coral-node',
-        position: {
-          x: Array.isArray(oldNode.pos) ? oldNode.pos[0] : (oldNode.pos?.['0'] || 200),
-          y: Array.isArray(oldNode.pos) ? oldNode.pos[1] : (oldNode.pos?.['1'] || 100)
-        },
-        data: {
-          // 静态配置从旧数据迁移
-          nodeName: oldNode.properties?.nodeName || 'Node',
-          mcuUri: oldNode.properties?.mcuUri || '',
-          logicName: oldNode.properties?.logicName || '',
-          ports: oldNode.properties?.ports || [],
-          // 运行时状态使用默认值
-          runState: 'Offline',
-          isConnected: false,
-          isConfigured: false,
-          isProgrammed: false,
-          layout: null
-        }
-      })
+  try {
+    const result = await deviceApi.removeNode(uuid)
+    if (result.ok) {
+      // 从本地移除节点
+      nodes.value = nodes.value.filter(n => n.id !== uuid)
+      // 移除相关连线
+      edges.value = edges.value.filter(e => e.source !== uuid && e.target !== uuid)
+      syncLogTabs()
+      console.log('[Graph] Node removed:', uuid)
+      return true
     }
+  } catch (error) {
+    console.error('[Graph] Failed to remove node:', error)
   }
-  
-  // 转换连线
-  for (const oldLink of data.links || []) {
-    if (!oldLink) continue
-    
-    const linkData = Array.isArray(oldLink) ? {
-      id: oldLink[0],
-      origin_id: oldLink[1],
-      target_id: oldLink[3]
-    } : oldLink
-    
-    newEdges.push({
-      id: `edge-${linkData.id}`,
-      source: String(linkData.origin_id),
-      target: String(linkData.target_id),
-      sourceHandle: 'out',
-      targetHandle: 'in',
-      type: 'smoothstep',
-      style: { stroke: '#4f8cff', strokeWidth: 2 }
-    })
-  }
-  
-  nodes.value = newNodes
-  edges.value = newEdges
-  
-  // 保存新格式
-  setTimeout(() => saveToStore(), 100)
+  return false
 }
 
 /**
  * 同步日志标签
  */
 function syncLogTabs() {
-  const nodeIds: string[] = []
-  const nodeNames = new Map<string, string>()
+  const nodes_data: Array<{ uuid: string; nodeName: string }> = []
   
   for (const node of nodes.value) {
     if (node.type === 'coral-node') {
-      nodeIds.push(node.id)
-      nodeNames.set(node.id, node.data?.nodeName || node.id)
+      nodes_data.push({
+        uuid: node.id,
+        nodeName: node.data?.nodeName || node.id
+      })
     }
   }
   
-  logStore.syncNodeTabs(nodeIds, nodeNames)
+  logStore.syncNodeTabs(nodes_data)
 }
 
 /**
@@ -630,31 +542,36 @@ function miniMapNodeColor(node: Node): string {
 // 运行时状态同步
 // ============================================
 
-watch(runtimeNodes, (newNodes) => {
-  if (!newNodes || isLoadingFromStore) return
+watch(nodeStates, (newStates) => {
+  if (!newStates || isLoadingFromStore) return
   
   let needsUpdate = false
   const updatedNodes = [...nodes.value]
   
-  for (const [nodeId, snapshot] of newNodes) {
-    const idx = updatedNodes.findIndex(n => n.id === nodeId)
+  for (const [uuid, snapshot] of newStates) {
+    const idx = updatedNodes.findIndex(n => n.id === uuid)
     if (idx !== -1 && updatedNodes[idx]?.type === 'coral-node') {
       const currentNode = updatedNodes[idx]
-      updatedNodes[idx] = {
-        ...currentNode,
-        data: {
-          ...(currentNode.data || {}),
-          // 只更新运行时状态，不覆盖用户配置的 ports
-          runState: snapshot.runState || 'Offline',
-          isConnected: snapshot.isConnected,
-          isConfigured: snapshot.isConfigured,
-          isProgrammed: snapshot.isProgrammed,
-          // layout 只在没有时才从 snapshot 获取（硬件信息）
-          layout: currentNode.data?.layout || snapshot.layout
-          // ports 是用户配置，不从 runtime snapshot 更新，保留用户的编辑
+      const currentData = currentNode.data || {}
+      
+      // 检查是否有变化
+      if (currentData.runState !== snapshot.runState ||
+          currentData.isConnected !== snapshot.isConnected ||
+          currentData.isConfigured !== snapshot.isConfigured ||
+          currentData.isProgrammed !== snapshot.isProgrammed) {
+        
+        updatedNodes[idx] = {
+          ...currentNode,
+          data: {
+            ...currentData,
+            runState: snapshot.runState || 'Offline',
+            isConnected: snapshot.isConnected,
+            isConfigured: snapshot.isConfigured,
+            isProgrammed: snapshot.isProgrammed
+          }
         }
+        needsUpdate = true
       }
-      needsUpdate = true
     }
   }
   
@@ -668,10 +585,7 @@ watch(runtimeNodes, (newNodes) => {
 // ============================================
 
 onMounted(async () => {
-  loadFromStore()
-  
-  // 恢复节点会话（如果有 MCU 节点）
-  await restoreNodes()
+  await loadFromStore()
   
   // 启动节点状态轮询
   startNodeStatePolling()
@@ -680,19 +594,18 @@ onMounted(async () => {
 onUnmounted(() => {
   // 停止节点状态轮询
   stopNodeStatePolling()
-})
-
-// 监听 nodeMap 变化（仅在外部变化时重新加载，忽略自己保存触发的变化）
-watch(nodeMap, (newValue) => {
-  if (newValue && !isLoadingFromStore && !isSavingToStore) {
-    loadFromStore()
+  
+  // 清理位置保存定时器
+  for (const timer of positionSaveTimers.values()) {
+    clearTimeout(timer)
   }
-}, { deep: true })
+  positionSaveTimers.clear()
+})
 
 // 监听运行状态变化，控制轮询
 watch(isRunning, (running) => {
   if (running) {
-    // 运行中时停止独立轮询（由 runtime store 管理）
+    // 运行中时停止独立轮询（由 runtime store 通过 SignalR 管理）
     stopNodeStatePolling()
   } else {
     // 停止运行后恢复独立轮询
@@ -701,36 +614,14 @@ watch(isRunning, (running) => {
 })
 
 // ============================================
-// 恢复节点会话
+// 刷新节点
 // ============================================
 
 /**
- * 恢复节点会话（用于导入项目后）
+ * 刷新节点数据（从 DIVERSession 重新加载）
  */
-async function restoreNodes() {
-  const mcuNodes = nodes.value.filter(n => n.type === 'coral-node' && n.data?.mcuUri)
-  if (mcuNodes.length === 0) return
-  
-  console.log('[Graph] Restoring session for', mcuNodes.length, 'MCU node(s)...')
-  try {
-    const result = await restoreSession()
-    if (result.ok) {
-      console.log(`[Graph] Session restored: ${result.connected}/${result.total} node(s) connected`)
-      // 更新节点状态
-      for (const nodeInfo of result.nodes) {
-        if (nodeInfo.success) {
-          const node = nodes.value.find(n => n.id === nodeInfo.nodeId)
-          if (node) {
-            node.data = { ...node.data, runState: 'Idle', isConnected: true }
-          }
-        }
-      }
-    } else {
-      console.warn('[Graph] Session restore failed:', result.error)
-    }
-  } catch (error) {
-    console.error('[Graph] Session restore error:', error)
-  }
+async function refreshNodes() {
+  await loadFromStore()
 }
 
 // ============================================
@@ -739,11 +630,11 @@ async function restoreNodes() {
 
 defineExpose({
   addNode,
+  removeNode,
   clearGraph,
   ensureRootNode,
   loadFromStore,
-  saveToStore,
-  restoreNodes,
+  refreshNodes,
   getNodes: () => nodes.value,
   getEdges: () => edges.value
 })

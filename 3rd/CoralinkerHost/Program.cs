@@ -1,4 +1,4 @@
-﻿using CoralinkerHost.Services;
+using CoralinkerHost.Services;
 using CoralinkerHost.Web;
 
 namespace CoralinkerHost;
@@ -10,6 +10,13 @@ internal static class Program
         var builder = WebApplication.CreateBuilder(args);
 
         builder.WebHost.UseUrls("http://0.0.0.0:4499");
+
+        // 配置全局 JSON 序列化选项（使用 JsonHelper.Options）
+        builder.Services.ConfigureHttpJsonOptions(options =>
+        {
+            options.SerializerOptions.PropertyNamingPolicy = JsonHelper.Options.PropertyNamingPolicy;
+            options.SerializerOptions.PropertyNameCaseInsensitive = JsonHelper.Options.PropertyNameCaseInsensitive;
+        });
 
         builder.Services.AddSignalR();
         builder.Services.AddSingleton<ProjectStore>();

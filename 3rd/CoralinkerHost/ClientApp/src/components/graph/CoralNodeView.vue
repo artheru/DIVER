@@ -47,16 +47,10 @@
       <span v-else class="node-name">{{ data.nodeName }}</span>
     </div>
 
-    <!-- 状态行：单独一行显示状态 -->
+    <!-- 状态行：只显示运行状态 -->
     <div class="node-status-row">
       <span class="status-badge" :class="runStateBadgeClass">
         {{ runStateText }}
-      </span>
-      <span class="status-badge config" :class="{ active: data.isConfigured }">
-        {{ data.isConfigured ? 'Configured' : 'Not Config' }}
-      </span>
-      <span class="status-badge program" :class="{ active: data.isProgrammed }">
-        {{ data.isProgrammed ? 'Programmed' : 'Not Program' }}
       </span>
     </div>
 
@@ -153,16 +147,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
 import { NSelect } from 'naive-ui'
 import { useRuntimeStore, useFilesStore } from '@/stores'
 import { storeToRefs } from 'pinia'
-import { getLogicList, type LogicInfo } from '@/api/device'
-import type { PortConfig, PortDescriptor, RuntimeStats } from '@/types'
+import { getLogicList, programNode } from '@/api/device'
+import type { PortConfig, PortDescriptor, RuntimeStats, LogicInfo, LayoutInfo } from '@/types'
 import PortConfigEdit from './PortConfigEdit.vue'
 import PortStatsView from './PortStatsView.vue'
-import { getNodeStats } from '@/api/runtime'
 
 // Props from vue-flow
 const props = defineProps<{
@@ -176,7 +169,7 @@ const props = defineProps<{
     isConfigured: boolean
     isProgrammed: boolean
     ports: PortConfig[]
-    layout: { ports: PortDescriptor[] } | null
+    layout: LayoutInfo | null
   }
   selected: boolean
 }>()
@@ -187,7 +180,7 @@ const { updateNodeData } = useVueFlow()
 
 // Runtime store
 const runtimeStore = useRuntimeStore()
-const { isRunning } = storeToRefs(runtimeStore)
+const { isRunning, nodeStates } = storeToRefs(runtimeStore)
 
 // Files store (用于监听 buildVersion)
 const filesStore = useFilesStore()
@@ -207,13 +200,6 @@ const showPortEdit = ref(false)
 
 // Logic 列表
 const logicList = ref<LogicInfo[]>([])
-
-// 统计数据
-const nodeStats = ref<RuntimeStats | null>(null)
-let statsPollingTimer: ReturnType<typeof setInterval> | null = null
-// 前端只读取后端缓存的统计数据，后端由 DIVERSession 刷新
-// 前端 500ms 轮询，读取缓存不触发串口通信
-const STATS_POLLING_INTERVAL = 500
 
 // ============================================
 // 计算属性
@@ -304,13 +290,19 @@ const lowerIOVariables = computed((): LowerIOVariable[] => {
   return []
 })
 
+// 从 runtime store 获取节点统计
+const nodeStats = computed((): RuntimeStats | null => {
+  const state = nodeStates.value.get(props.id)
+  return state?.stats || null
+})
+
 // IO 数量（从 layout 获取）
 const digitalInputCount = computed(() => {
-  return nodeStats.value?.digitalInputCount ?? 0
+  return props.data.layout?.digitalInputCount ?? 0
 })
 
 const digitalOutputCount = computed(() => {
-  return nodeStats.value?.digitalOutputCount ?? 0
+  return props.data.layout?.digitalOutputCount ?? 0
 })
 
 // ============================================
@@ -327,8 +319,30 @@ function updateNodeName() {
   }
 }
 
-function updateLogicName(newLogic: string) {
+async function updateLogicName(newLogic: string) {
+  console.log(`[CoralNode] updateLogicName called: uuid=${props.id}, logicName=${newLogic}`)
+  
+  // 先更新本地 UI
   updateNodeData(props.id, { logicName: newLogic })
+  
+  // 调用后端 API 编程节点
+  console.log(`[CoralNode] Calling programNode API: uuid=${props.id}, logicName=${newLogic}`)
+  try {
+    const result = await programNode(props.id, newLogic)
+    console.log(`[CoralNode] programNode API response:`, JSON.stringify(result))
+    if (result.ok) {
+      console.log(`[CoralNode] Programmed ${props.id} with ${newLogic}, size: ${result.programSize}`)
+      // 更新 isProgrammed 状态
+      updateNodeData(props.id, { isProgrammed: true })
+    } else {
+      console.error(`[CoralNode] Failed to program ${props.id}:`, result)
+      // 如果失败，清除 isProgrammed 状态
+      updateNodeData(props.id, { isProgrammed: false })
+    }
+  } catch (error) {
+    console.error(`[CoralNode] Error programming ${props.id}:`, error)
+    updateNodeData(props.id, { isProgrammed: false })
+  }
 }
 
 function openPortEditor() {
@@ -398,59 +412,6 @@ async function loadLogicList() {
   }
 }
 
-// 获取节点统计数据
-async function fetchNodeStats() {
-  if (!props.data.isConnected || !isRunning.value) {
-    nodeStats.value = null
-    return
-  }
-  
-  try {
-    const result = await getNodeStats(props.id)
-    if (result.ok) {
-      nodeStats.value = {
-        nodeId: result.nodeId || props.id,
-        uptimeMs: result.uptimeMs || 0,
-        digitalInputs: result.digitalInputs || 0,
-        digitalOutputs: result.digitalOutputs || 0,
-        digitalInputCount: result.digitalInputCount || 0,
-        digitalOutputCount: result.digitalOutputCount || 0,
-        portCount: result.portCount || 0,
-        ports: result.ports || []
-      }
-    } else {
-      // 静默处理，避免刷屏
-      nodeStats.value = null
-    }
-  } catch (error) {
-    // 静默处理，避免刷屏
-    nodeStats.value = null
-  }
-}
-
-// 启动统计轮询（只在运行状态时轮询，避免与状态轮询竞争串口）
-function startStatsPolling() {
-  if (statsPollingTimer) return
-  if (!isRunning.value) return // 只在运行状态时轮询
-  
-  // 立即获取一次
-  fetchNodeStats()
-  
-  // 启动定时轮询
-  statsPollingTimer = setInterval(() => {
-    if (props.data.isConnected && !isCollapsed.value && isRunning.value) {
-      fetchNodeStats()
-    }
-  }, STATS_POLLING_INTERVAL)
-}
-
-// 停止统计轮询
-function stopStatsPolling() {
-  if (statsPollingTimer) {
-    clearInterval(statsPollingTimer)
-    statsPollingTimer = null
-  }
-}
 
 // ============================================
 // 生命周期
@@ -458,11 +419,6 @@ function stopStatsPolling() {
 
 onMounted(() => {
   loadLogicList()
-  // 统计轮询只在运行状态时启动（由 watch isRunning 控制）
-})
-
-onUnmounted(() => {
-  stopStatsPolling()
 })
 
 // 同步 props 到本地状态
@@ -474,36 +430,6 @@ watch(() => props.data.ports, (v) => { localPortConfigs.value = v || [] })
 watch(buildVersion, () => {
   console.log('[CoralNode] Build version changed, reloading logic list')
   loadLogicList()
-})
-
-// 监听运行状态变化，控制统计轮询
-watch(isRunning, (running) => {
-  if (running && props.data.isConnected) {
-    startStatsPolling()
-  } else {
-    stopStatsPolling()
-    if (!running) {
-      nodeStats.value = null // 停止运行时清除统计
-    }
-  }
-})
-
-// 监听连接状态变化
-watch(() => props.data.isConnected, (connected) => {
-  if (!connected) {
-    stopStatsPolling()
-    nodeStats.value = null
-  } else if (isRunning.value) {
-    // 重新连接后，如果正在运行，启动统计轮询
-    startStatsPolling()
-  }
-})
-
-// 监听折叠状态，展开时立即获取统计（仅运行状态）
-watch(isCollapsed, (collapsed) => {
-  if (!collapsed && props.data.isConnected && isRunning.value) {
-    fetchNodeStats()
-  }
 })
 </script>
 
@@ -618,27 +544,6 @@ watch(isCollapsed, (collapsed) => {
 .status-badge.error {
   background: rgba(239, 68, 68, 0.2);
   color: #ef4444;
-}
-
-/* 配置/编程状态样式 */
-.status-badge.config:not(.active) {
-  background: rgba(168, 85, 247, 0.1);
-  color: #a78bfa;
-}
-
-.status-badge.config.active {
-  background: rgba(168, 85, 247, 0.25);
-  color: #c4b5fd;
-}
-
-.status-badge.program:not(.active) {
-  background: rgba(59, 130, 246, 0.1);
-  color: #93c5fd;
-}
-
-.status-badge.program.active {
-  background: rgba(59, 130, 246, 0.25);
-  color: #bfdbfe;
 }
 
 @keyframes badge-pulse {

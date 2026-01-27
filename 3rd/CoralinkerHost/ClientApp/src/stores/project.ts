@@ -3,24 +3,23 @@
  * @description 项目状态管理
  * 
  * 管理项目的核心状态：
- * - 节点图数据 (nodeMap)
  * - 当前选中的资源和文件
  * - 构建状态
  * - 自动保存逻辑
+ * 
+ * 注意：节点数据由 DIVERSession 管理，不在这里存储
  */
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as projectApi from '@/api/project'
-import type { ProjectState, BuildResult, LiteGraphData } from '@/types'
+import * as deviceApi from '@/api/device'
+import type { ProjectState, BuildResult, NodeExportData } from '@/types'
 
 export const useProjectStore = defineStore('project', () => {
   // ============================================
   // 状态定义
   // ============================================
-  
-  /** LiteGraph 序列化的节点图数据 (直接存储对象，非字符串) */
-  const nodeMap = ref<LiteGraphData | null>(null)
   
   /** 当前选中的 .cs 资源文件名 */
   const selectedAsset = ref<string | null>(null)
@@ -37,7 +36,7 @@ export const useProjectStore = defineStore('project', () => {
   /** 是否有未保存的更改 */
   const dirty = ref(false)
   
-  /** 同步状态: 'synced' | 'syncing' | 'error' */
+  /** 同步状态 */
   const syncState = ref<'synced' | 'syncing' | 'error'>('synced')
   
   /** 最后一次构建结果 */
@@ -59,7 +58,6 @@ export const useProjectStore = defineStore('project', () => {
   
   /**
    * 从服务器加载项目
-   * 在应用启动时调用
    */
   async function loadProject() {
     loading.value = true
@@ -67,7 +65,6 @@ export const useProjectStore = defineStore('project', () => {
       const state = await projectApi.getProject()
       
       // 更新本地状态
-      nodeMap.value = state.nodeMap
       selectedAsset.value = state.selectedAsset
       selectedFile.value = state.selectedFile
       lastBuildId.value = state.lastBuildId
@@ -87,19 +84,14 @@ export const useProjectStore = defineStore('project', () => {
   
   /**
    * 保存项目到服务器
-   * @param options.silent 是否静默保存 (不显示日志)
+   * 注意：节点数据由 DIVERSession 管理，总是需要调用后端保存
    */
   async function saveProject(options?: { silent?: boolean }) {
-    if (!dirty.value && syncState.value === 'synced') {
-      return // 没有更改，跳过保存
-    }
-    
     syncState.value = 'syncing'
     
     try {
-      // 构建要保存的状态
+      // 构建要保存的状态（UI 状态）
       const state: ProjectState = {
-        nodeMap: nodeMap.value,
         selectedAsset: selectedAsset.value,
         selectedFile: selectedFile.value,
         lastBuildId: lastBuildId.value
@@ -108,7 +100,7 @@ export const useProjectStore = defineStore('project', () => {
       // 更新项目状态
       await projectApi.updateProject(state)
       
-      // 持久化到磁盘
+      // 持久化到磁盘（包括 DIVERSession 中的节点数据）
       await projectApi.saveProject()
       
       dirty.value = false
@@ -122,15 +114,6 @@ export const useProjectStore = defineStore('project', () => {
       syncState.value = 'error'
       throw error
     }
-  }
-  
-  /**
-   * 更新节点图数据
-   * 会标记为 dirty 并触发自动保存
-   */
-  function setNodeMap(data: LiteGraphData | null) {
-    nodeMap.value = data
-    dirty.value = true
   }
   
   /**
@@ -151,7 +134,6 @@ export const useProjectStore = defineStore('project', () => {
   
   /**
    * 创建新项目
-   * 会清空所有数据
    */
   async function createNew() {
     loading.value = true
@@ -159,7 +141,6 @@ export const useProjectStore = defineStore('project', () => {
       await projectApi.createNewProject()
       
       // 重置本地状态
-      nodeMap.value = null
       selectedAsset.value = null
       selectedFile.value = null
       lastBuildId.value = null
@@ -214,9 +195,35 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
   
+  // ============================================
+  // 节点管理（委托给 DIVERSession）
+  // ============================================
+  
+  /**
+   * 获取所有节点
+   */
+  async function getNodes() {
+    const result = await deviceApi.getAllNodes()
+    return result.ok ? result.nodes : []
+  }
+  
+  /**
+   * 导出节点数据
+   */
+  async function exportNodes(): Promise<Record<string, NodeExportData>> {
+    const result = await deviceApi.exportNodes()
+    return result.ok ? result.nodes : {}
+  }
+  
+  /**
+   * 导入节点数据
+   */
+  async function importNodes(nodes: Record<string, NodeExportData>) {
+    await deviceApi.importNodes(nodes)
+  }
+  
   return {
     // 状态
-    nodeMap,
     selectedAsset,
     selectedFile,
     lastBuildId,
@@ -232,11 +239,15 @@ export const useProjectStore = defineStore('project', () => {
     // 方法
     loadProject,
     saveProject,
-    setNodeMap,
     setSelectedAsset,
     setSelectedFile,
     createNew,
     exportZip,
-    build
+    build,
+    
+    // 节点管理
+    getNodes,
+    exportNodes,
+    importNodes
   }
 })

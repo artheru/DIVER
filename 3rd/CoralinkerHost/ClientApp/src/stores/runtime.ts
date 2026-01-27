@@ -3,21 +3,21 @@
  * @description 运行时状态管理
  * 
  * 管理 MCU 节点的运行时状态：
- * - 应用状态（Offline/Idle/Connecting/Running）
- * - 节点连接状态
+ * - 应用状态（Offline/Idle/Running）
+ * - 节点状态
  * - 变量值
- * - 可控变量列表
  */
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as runtimeApi from '@/api/runtime'
-import type { NodeSnapshot, VariableInfo, VariableValue, NodeStateInfo } from '@/types'
+import * as deviceApi from '@/api/device'
+import type { NodeStateSnapshot, NodeFullInfo, CartFieldValue, VariableValue } from '@/types'
 
 /**
  * 应用状态枚举
  */
-export type AppState = 'offline' | 'idle' | 'connecting' | 'running' | 'stopping'
+export type AppState = 'offline' | 'idle' | 'starting' | 'running' | 'stopping'
 
 export const useRuntimeStore = defineStore('runtime', () => {
   // ============================================
@@ -27,42 +27,51 @@ export const useRuntimeStore = defineStore('runtime', () => {
   /** 应用状态 */
   const appState = ref<AppState>('offline')
   
-  /** 是否已连接 */
-  const isConnected = ref(false)
-  
-  /** 是否正在运行 */
-  const isRunning = ref(false)
-  
-  /** 会话类型 (如 DIVERSession) */
-  const sessionType = ref('Unknown')
-  
   /** 后端服务是否可用 */
   const isBackendAvailable = ref(false)
   
-  /** 节点快照 Map<nodeId, NodeSnapshot> */
-  const nodes = ref<Map<string, NodeSnapshot>>(new Map())
+  /** 会话类型 */
+  const sessionType = ref('DIVERSession')
   
-  /** 变量值 Map<varName, VariableValue> */
+  /** 节点状态 Map<uuid, NodeStateSnapshot> */
+  const nodeStates = ref<Map<string, NodeStateSnapshot>>(new Map())
+  
+  /** 节点完整信息 Map<uuid, NodeFullInfo> */
+  const nodeInfos = ref<Map<string, NodeFullInfo>>(new Map())
+  
+  /** 变量值 Map<name, VariableValue> */
   const variables = ref<Map<string, VariableValue>>(new Map())
   
-  /** 可控变量信息 Map<varName, VariableInfo> */
-  const variableInfos = ref<Map<string, VariableInfo>>(new Map())
+  /** 变量可控信息 Map<name, controllable> */
+  const variableControllable = ref<Map<string, boolean>>(new Map())
   
-  /** 正在编辑的变量名 (编辑时跳过 SignalR 更新) */
+  /** 正在编辑的变量名 */
   const editingVarName = ref<string | null>(null)
   
   /** 状态轮询定时器 */
   let statePollingTimer: ReturnType<typeof setInterval> | null = null
-  
-  /** 状态轮询间隔 (ms) */
   const STATE_POLLING_INTERVAL = 2000
   
   // ============================================
   // 计算属性
   // ============================================
   
+  /** 是否已连接（任意节点） */
+  const isConnected = computed(() => {
+    for (const state of nodeStates.value.values()) {
+      if (state.isConnected) return true
+    }
+    return false
+  })
+  
+  /** 是否正在运行 */
+  const isRunning = computed(() => appState.value === 'running')
+  
   /** 节点列表 */
-  const nodeList = computed(() => Array.from(nodes.value.values()))
+  const nodeList = computed(() => Array.from(nodeStates.value.values()))
+  
+  /** 节点信息列表 */
+  const nodeInfoList = computed(() => Array.from(nodeInfos.value.values()))
   
   /** 变量列表 */
   const variableList = computed(() => Array.from(variables.value.values()))
@@ -70,10 +79,8 @@ export const useRuntimeStore = defineStore('runtime', () => {
   /** 可控变量名称集合 */
   const controllableVarNames = computed(() => {
     const names = new Set<string>()
-    variableInfos.value.forEach((info, name) => {
-      if (info.controllable) {
-        names.add(name)
-      }
+    variableControllable.value.forEach((controllable, name) => {
+      if (controllable) names.add(name)
     })
     return names
   })
@@ -82,25 +89,14 @@ export const useRuntimeStore = defineStore('runtime', () => {
   // 权限计算属性
   // ============================================
   
-  /** 是否可以编辑（New/Save/Load/AddNode/节点配置） */
-  const canEdit = computed(() => {
-    return appState.value === 'idle' && isBackendAvailable.value
-  })
-  
-  /** 是否可以连接 */
-  const canConnect = computed(() => {
-    return appState.value === 'idle' && isBackendAvailable.value
-  })
+  /** 是否可以编辑节点配置 */
+  const canEdit = computed(() => appState.value === 'idle' && isBackendAvailable.value)
   
   /** 是否可以启动 */
-  const canStart = computed(() => {
-    return appState.value === 'idle' && isBackendAvailable.value
-  })
+  const canStart = computed(() => appState.value === 'idle' && isBackendAvailable.value)
   
   /** 是否可以停止 */
-  const canStop = computed(() => {
-    return appState.value === 'running'
-  })
+  const canStop = computed(() => appState.value === 'running')
   
   // ============================================
   // 操作方法
@@ -119,130 +115,157 @@ export const useRuntimeStore = defineStore('runtime', () => {
   }
   
   /**
-   * 连接所有节点（只负责 Open）
+   * 刷新所有节点信息
    */
-  async function connect() {
-    if (!canConnect.value) {
-      throw new Error('Cannot connect in current state')
-    }
-    
+  async function refreshNodes() {
     try {
-      appState.value = 'connecting'
-      const result = await runtimeApi.connect()
-      
+      const result = await deviceApi.getAllNodes()
       if (result.ok) {
-        isConnected.value = true
-        appState.value = 'idle'
-        
-        // 获取可控变量列表
-        await fetchControllableVariables()
-        
-        console.log('[Runtime] Connected to nodes')
-      } else {
-        appState.value = 'idle'
+        nodeInfos.value.clear()
+        for (const node of result.nodes) {
+          nodeInfos.value.set(node.uuid, node)
+        }
       }
-      return result
     } catch (error) {
-      appState.value = 'idle'
-      console.error('[Runtime] Connect failed:', error)
-      throw error
+      console.error('[Runtime] Failed to refresh nodes:', error)
     }
   }
   
   /**
-   * 启动执行（后端会处理完整流程：Connect → Configure → Program → Start）
+   * 刷新节点状态
+   */
+  async function refreshNodeStates() {
+    try {
+      const result = await deviceApi.getAllNodeStates()
+      if (result.ok) {
+        for (const state of result.nodes) {
+          nodeStates.value.set(state.uuid, state)
+        }
+        updateAppStateFromNodes()
+      }
+    } catch (error) {
+      console.error('[Runtime] Failed to refresh node states:', error)
+    }
+  }
+  
+  /**
+   * 根据节点状态更新应用状态
+   */
+  function updateAppStateFromNodes() {
+    let anyRunning = false
+    for (const state of nodeStates.value.values()) {
+      if (state.runState === 'running') {
+        anyRunning = true
+        break
+      }
+    }
+    
+    if (anyRunning && appState.value !== 'running') {
+      appState.value = 'running'
+    } else if (!anyRunning && appState.value === 'running') {
+      appState.value = 'idle'
+    }
+  }
+  
+  /**
+   * 启动会话
    */
   async function start(): Promise<{ ok: boolean; error?: string }> {
     if (!canStart.value) {
-      throw new Error('Cannot start in current state')
+      return { ok: false, error: 'Cannot start in current state' }
     }
     
     try {
-      appState.value = 'connecting'
-      console.log('[Runtime] Starting full sequence (Connect → Configure → Program → Start)...')
+      appState.value = 'starting'
+      console.log('[Runtime] Starting session...')
       
-      // 后端 /api/start 现在会处理完整流程
       const result = await runtimeApi.start()
       
       if (result.ok) {
-        isConnected.value = true
-        isRunning.value = true
         appState.value = 'running'
         
-        // 获取可控变量列表
-        await fetchControllableVariables()
+        // 刷新变量列表
+        await refreshVariables()
         
         // 启动状态轮询
         startStatePolling()
         
-        console.log('[Runtime] Started successfully')
+        console.log(`[Runtime] Started: ${result.successNodes}/${result.totalNodes} nodes`)
         return { ok: true }
       } else {
         appState.value = 'idle'
-        const error = (result as { error?: string }).error || 'Start failed'
+        const error = result.error || 'Start failed'
         console.error('[Runtime] Start failed:', error)
         return { ok: false, error }
       }
     } catch (error) {
       appState.value = 'idle'
-      console.error('[Runtime] Start failed:', error)
-      throw error
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[Runtime] Start failed:', message)
+      return { ok: false, error: message }
     }
   }
   
   /**
-   * 停止执行
+   * 停止会话
    */
-  async function stop() {
+  async function stop(): Promise<{ ok: boolean; error?: string }> {
     if (!canStop.value) {
-      throw new Error('Cannot stop in current state')
+      return { ok: false, error: 'Cannot stop in current state' }
     }
     
     try {
       appState.value = 'stopping'
-      await runtimeApi.stop()
+      console.log('[Runtime] Stopping session...')
       
       // 停止状态轮询
       stopStatePolling()
       
-      isRunning.value = false
-      isConnected.value = false
+      await runtimeApi.stop()
+      
       appState.value = 'idle'
+      
+      // 刷新节点状态
+      await refreshNodeStates()
+      
       console.log('[Runtime] Stopped')
+      return { ok: true }
     } catch (error) {
-      appState.value = 'running' // 恢复状态
-      console.error('[Runtime] Stop failed:', error)
-      throw error
+      appState.value = 'running' // 恢复
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[Runtime] Stop failed:', message)
+      return { ok: false, error: message }
     }
   }
   
   /**
-   * 获取可控变量列表
+   * 刷新变量列表
    */
-  async function fetchControllableVariables() {
+  async function refreshVariables() {
     try {
-      const result = await runtimeApi.getControllableVariables()
-      
-      variableInfos.value.clear()
-      for (const info of result.variables) {
-        variableInfos.value.set(info.name, info)
+      const result = await runtimeApi.getAllVariables()
+      if (result.ok) {
+        for (const v of result.variables) {
+          variables.value.set(v.name, {
+            name: v.name,
+            value: v.value,
+            type: v.type,
+            typeId: v.typeId
+          })
+          variableControllable.value.set(v.name, !v.isLowerIO)
+        }
       }
-      
-      console.log(`[Runtime] Fetched ${result.variables.length} controllable variables`)
     } catch (error) {
-      console.error('[Runtime] Failed to fetch controllable variables:', error)
+      console.error('[Runtime] Failed to refresh variables:', error)
     }
   }
   
   /**
    * 设置变量值
-   * @param name 变量名
-   * @param value 新值
-   * @param typeHint 类型提示
    */
   async function setVariable(name: string, value: unknown, typeHint?: string) {
     try {
-      // 对整数类型进行四舍五入
+      // 整数类型四舍五入
       let finalValue = value
       const intTypes = ['int', 'byte', 'sbyte', 'short', 'ushort', 'uint', 'long', 'ulong', 'int32', 'int16', 'uint32', 'uint16']
       if (typeHint && intTypes.includes(typeHint.toLowerCase()) && typeof value === 'number') {
@@ -257,7 +280,6 @@ export const useRuntimeStore = defineStore('runtime', () => {
         if (existing) {
           existing.value = result.value
         }
-        
         console.log(`[Runtime] Set ${name} = ${result.value}`)
       }
       
@@ -269,53 +291,27 @@ export const useRuntimeStore = defineStore('runtime', () => {
   }
   
   /**
-   * 更新节点快照 (由 SignalR 调用)
-   * 同时根据节点状态更新连接和运行状态
+   * 更新节点状态（由 SignalR 调用）
    */
-  function updateNodeSnapshot(snapshot: NodeSnapshot) {
-    nodes.value.set(snapshot.nodeId, snapshot)
-    
-    // 根据节点快照更新连接和运行状态
-    updateConnectionState()
+  function updateNodeState(uuid: string, state: NodeStateSnapshot) {
+    nodeStates.value.set(uuid, state)
+    updateAppStateFromNodes()
   }
   
   /**
-   * 根据节点快照更新连接和运行状态
-   * 如果有任何节点处于 running 状态，则 isRunning = true
-   * 如果有任何节点处于 connected 状态，则 isConnected = true
-   */
-  function updateConnectionState() {
-    let anyConnected = false
-    let anyRunning = false
-    
-    for (const node of nodes.value.values()) {
-      if (node.isConnected || node.runState !== 'offline') {
-        anyConnected = true
-      }
-      if (node.runState === 'running') {
-        anyRunning = true
-      }
-    }
-    
-    isConnected.value = anyConnected
-    isRunning.value = anyRunning
-  }
-  
-  /**
-   * 更新变量值 (由 SignalR 调用)
-   * 后端格式: { targetType: "DIVERSession", fields: [{name, type, value, direction, icon}, ...] }
+   * 更新变量值（由 SignalR 调用）
    */
   function updateVariables(snapshot: unknown) {
-    // 解析后端格式
-    const data = snapshot as { targetType?: string; fields?: Array<{ name: string; type: string; value: unknown; direction?: string; icon?: string }> }
+    const data = snapshot as {
+      targetType?: string
+      fields?: Array<{ name: string; type: string; value: unknown; direction?: string; icon?: string }>
+    }
     
     if (!data || !Array.isArray(data.fields)) {
-      console.warn('[Runtime] Invalid varsSnapshot format:', snapshot)
       return
     }
     
-    // 更新 targetType (会话类型)
-    sessionType.value = data.targetType || 'Unknown'
+    sessionType.value = data.targetType || 'DIVERSession'
     
     for (const field of data.fields) {
       const name = field.name
@@ -326,8 +322,6 @@ export const useRuntimeStore = defineStore('runtime', () => {
       }
       
       const existing = variables.value.get(name)
-      const info = variableInfos.value.get(name)
-      
       if (existing) {
         existing.value = field.value
         existing.type = field.type || existing.type
@@ -335,85 +329,55 @@ export const useRuntimeStore = defineStore('runtime', () => {
         variables.value.set(name, {
           name,
           value: field.value,
-          type: field.type || info?.type || 'unknown',
-          typeId: info?.typeId || 0
+          type: field.type || 'unknown',
+          typeId: 0
         })
       }
     }
   }
   
   /**
+   * 更新节点快照（由 SignalR 调用）
+   */
+  function updateNodeSnapshot(snapshot: unknown) {
+    const data = snapshot as { nodes?: NodeStateSnapshot[] }
+    if (!data?.nodes) return
+    
+    for (const node of data.nodes) {
+      // 新格式使用 uuid 而不是 nodeId
+      const uuid = (node as any).nodeId || node.uuid
+      if (uuid) {
+        nodeStates.value.set(uuid, {
+          ...node,
+          uuid
+        })
+      }
+    }
+    
+    updateAppStateFromNodes()
+  }
+  
+  /**
    * 设置正在编辑的变量
-   * 编辑时该变量不会被 SignalR 更新覆盖
    */
   function setEditingVar(name: string | null) {
     editingVarName.value = name
   }
   
   /**
-   * 刷新运行时快照
-   */
-  async function refreshSnapshot() {
-    try {
-      const snapshot = await runtimeApi.getRuntimeSnapshot()
-      
-      for (const node of snapshot.nodes) {
-        nodes.value.set(node.nodeId, node)
-      }
-    } catch (error) {
-      console.error('[Runtime] Failed to refresh snapshot:', error)
-    }
-  }
-  
-  /**
-   * 更新单个节点状态
-   */
-  function updateNodeState(nodeId: string, state: NodeStateInfo) {
-    const existing = nodes.value.get(nodeId)
-    if (existing) {
-      existing.runState = state.runState
-      existing.isConnected = state.isConnected
-      existing.isConfigured = state.isConfigured
-      existing.isProgrammed = state.isProgrammed
-      existing.mode = state.mode
-    } else {
-      nodes.value.set(nodeId, {
-        nodeId: state.nodeId,
-        runState: state.runState,
-        isConnected: state.isConnected,
-        isConfigured: state.isConfigured,
-        isProgrammed: state.isProgrammed,
-        mode: state.mode
-      })
-    }
-    
-    // 更新连接和运行状态
-    updateConnectionState()
-  }
-  
-  /**
-   * 启动节点状态轮询
+   * 启动状态轮询
    */
   function startStatePolling() {
     if (statePollingTimer) return
     
     console.log('[Runtime] Starting state polling')
     statePollingTimer = setInterval(async () => {
-      try {
-        const result = await runtimeApi.getNodeStates()
-        if (result.ok && result.nodes) {
-          for (const state of result.nodes) {
-            updateNodeState(state.nodeId, state)
-          }
-        }
-      } catch (error) {
-        console.error('[Runtime] State polling failed:', error)
-      }
+      await refreshNodeStates()
     }, STATE_POLLING_INTERVAL)
   }
   
   /**
-   * 停止节点状态轮询
+   * 停止状态轮询
    */
   function stopStatePolling() {
     if (statePollingTimer) {
@@ -429,12 +393,10 @@ export const useRuntimeStore = defineStore('runtime', () => {
   function reset() {
     stopStatePolling()
     appState.value = isBackendAvailable.value ? 'idle' : 'offline'
-    isConnected.value = false
-    isRunning.value = false
-    sessionType.value = 'Unknown'
-    nodes.value.clear()
+    nodeStates.value.clear()
+    nodeInfos.value.clear()
     variables.value.clear()
-    variableInfos.value.clear()
+    variableControllable.value.clear()
     editingVarName.value = null
   }
   
@@ -442,35 +404,36 @@ export const useRuntimeStore = defineStore('runtime', () => {
     // 状态
     appState,
     isBackendAvailable,
-    isConnected,
-    isRunning,
     sessionType,
-    nodes,
+    nodeStates,
+    nodeInfos,
     variables,
-    variableInfos,
+    variableControllable,
     editingVarName,
     
     // 计算属性
+    isConnected,
+    isRunning,
     nodeList,
+    nodeInfoList,
     variableList,
     controllableVarNames,
     canEdit,
-    canConnect,
     canStart,
     canStop,
     
     // 方法
     setBackendAvailable,
-    connect,
+    refreshNodes,
+    refreshNodeStates,
     start,
     stop,
-    fetchControllableVariables,
+    refreshVariables,
     setVariable,
-    updateNodeSnapshot,
     updateNodeState,
     updateVariables,
+    updateNodeSnapshot,
     setEditingVar,
-    refreshSnapshot,
     startStatePolling,
     stopStatePolling,
     reset

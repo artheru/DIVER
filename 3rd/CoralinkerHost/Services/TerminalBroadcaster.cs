@@ -28,9 +28,9 @@ public sealed class TerminalBroadcaster
         return _hub.Clients.All.SendAsync("nodeSnapshot", snapshot, ct);
     }
     
-    public Task NodeLogLineAsync(string nodeId, string line, CancellationToken ct = default)
+    public Task NodeLogLineAsync(string uuid, string message, CancellationToken ct = default)
     {
-        var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
-        return _hub.Clients.All.SendAsync("nodeLogLine", new { nodeId, line = $"[{timestamp}] {line}" }, ct);
+        // 发送两个参数：uuid 和 message（message 已经带时间戳）
+        return _hub.Clients.All.SendAsync("nodeLogLine", uuid, message, ct);
     }
 }

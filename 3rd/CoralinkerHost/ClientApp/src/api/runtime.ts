@@ -2,65 +2,240 @@
  * @file api/runtime.ts
  * @description 运行时控制 API
  * 
- * 处理 MCU 连接、启动、停止等运行时操作
+ * 处理会话控制、变量管理、日志获取
  */
 
 import { get, post } from './index'
-import type { 
-  RuntimeSnapshot, 
-  VariableInfo, 
+import type {
+  StartResult,
+  SessionState,
+  CartFieldValue,
   SetVariableRequest,
-  NodeLogInfo,
-  LogChunkResponse,
-  PortConfig,
-  NodeStateInfo,
-  RuntimeStats
+  LogQueryResult,
+  NodeStateSnapshot
 } from '@/types'
 
 // ============================================
-// 运行控制
+// 会话控制
 // ============================================
 
 /**
- * 连接所有节点
- * 打开串口并获取 MCU 版本和布局信息
+ * 启动会话（所有节点）
  */
-export async function connect(): Promise<{ ok: boolean; nodes: unknown[] }> {
-  return post('/api/connect')
-}
-
-/**
- * 启动执行
- * 配置 MCU 并开始运行逻辑
- */
-export async function start(): Promise<{ ok: boolean }> {
+export async function start(): Promise<{
+  ok: boolean
+  totalNodes?: number
+  successNodes?: number
+  errors?: Array<{ uuid: string; nodeName: string; error: string }>
+  error?: string
+}> {
   return post('/api/start')
 }
 
 /**
- * 停止执行
+ * 停止会话
  */
-export async function stop(): Promise<void> {
-  await post('/api/stop')
+export async function stop(): Promise<{ ok: boolean }> {
+  return post('/api/stop')
 }
 
 /**
- * 获取运行时快照
- * 包含所有节点的当前状态
+ * 获取会话状态
  */
-export async function getRuntimeSnapshot(): Promise<RuntimeSnapshot> {
-  return get<RuntimeSnapshot>('/api/runtime')
+export async function getSessionState(): Promise<{
+  ok: boolean
+  state?: string
+  isRunning?: boolean
+  nodeCount?: number
+}> {
+  return get('/api/session/state')
 }
+
+// ============================================
+// 变量管理
+// ============================================
+
+/**
+ * 获取所有 Cart 变量
+ */
+export async function getAllVariables(): Promise<{ ok: boolean; variables: CartFieldValue[] }> {
+  return get('/api/variables')
+}
+
+/**
+ * 设置变量值
+ * @param name 变量名
+ * @param value 新值
+ * @param typeHint 类型提示
+ */
+export async function setVariable(
+  name: string,
+  value: unknown,
+  typeHint?: string
+): Promise<{ ok: boolean; name?: string; value?: unknown; error?: string }> {
+  const request: SetVariableRequest = { name, value, typeHint }
+  return post('/api/variable/set', request)
+}
+
+/**
+ * 获取单个变量值
+ * @param name 变量名
+ */
+export async function getVariable(name: string): Promise<{ ok: boolean; name?: string; value?: unknown; error?: string }> {
+  return get(`/api/variable/${name}`)
+}
+
+// ============================================
+// 日志管理
+// ============================================
+
+/**
+ * 获取有日志的节点列表
+ */
+export async function getLoggedNodes(): Promise<{ ok: boolean; nodes: string[] }> {
+  return get('/api/logs/nodes')
+}
+
+/**
+ * 获取节点日志
+ * @param uuid 节点 UUID
+ * @param afterSeq 获取 seq 大于此值的日志（可选）
+ * @param maxCount 最大返回条数（默认 200）
+ */
+export async function getNodeLogs(
+  uuid: string,
+  afterSeq?: number,
+  maxCount = 200
+): Promise<{
+  ok: boolean
+  uuid?: string
+  latestSeq?: number
+  entries?: Array<{ seq: number; timestamp: string; message: string }>
+  hasMore?: boolean
+  error?: string
+}> {
+  const params = new URLSearchParams()
+  if (afterSeq !== undefined) {
+    params.append('afterSeq', afterSeq.toString())
+  }
+  params.append('maxCount', maxCount.toString())
+  
+  const queryString = params.toString()
+  const url = queryString ? `/api/logs/node/${uuid}?${queryString}` : `/api/logs/node/${uuid}`
+  
+  return get(url)
+}
+
+/**
+ * 清空节点日志
+ * @param uuid 节点 UUID
+ */
+export async function clearNodeLogs(uuid: string): Promise<{ ok: boolean }> {
+  return post(`/api/logs/node/${uuid}/clear`)
+}
+
+/**
+ * 清空所有日志
+ */
+export async function clearAllLogs(): Promise<{ ok: boolean }> {
+  return post('/api/logs/clear')
+}
+
+// ============================================
+// 节点状态轮询
+// ============================================
 
 /**
  * 获取所有节点状态（用于轮询）
  */
-export async function getNodeStates(): Promise<{ ok: boolean; nodes: NodeStateInfo[] }> {
+export async function getNodeStates(): Promise<{ ok: boolean; nodes: NodeStateSnapshot[] }> {
   return get('/api/nodes/state')
 }
 
+// ============================================
+// 兼容旧接口（逐步废弃）
+// ============================================
+
 /**
- * 会话恢复响应中的节点信息
+ * @deprecated 使用 start()
+ */
+export async function connect(): Promise<{ ok: boolean; nodes: unknown[] }> {
+  // 旧的 connect 只是打开连接，新接口 start 会做完整流程
+  // 这里返回空结果，前端应该改用 start()
+  console.warn('[API] connect() is deprecated, use start() instead')
+  return { ok: true, nodes: [] }
+}
+
+/**
+ * @deprecated 使用 getAllVariables()
+ */
+export async function getControllableVariables(): Promise<{ variables: Array<{
+  name: string
+  type: string
+  typeId: number
+  controllable: boolean
+  isLowerIO: boolean
+  isUpperIO: boolean
+  isMutual: boolean
+}> }> {
+  const result = await getAllVariables()
+  return {
+    variables: result.variables.map(v => ({
+      name: v.name,
+      type: v.type,
+      typeId: v.typeId,
+      controllable: !v.isLowerIO,
+      isLowerIO: v.isLowerIO,
+      isUpperIO: v.isUpperIO,
+      isMutual: v.isMutual
+    }))
+  }
+}
+
+/**
+ * @deprecated 使用 getSessionState()
+ */
+export async function getRuntimeSnapshot(): Promise<{
+  isRunning: boolean
+  assetName: string | null
+  buildRoot: string | null
+}> {
+  const result = await getSessionState()
+  return {
+    isRunning: result.isRunning ?? false,
+    assetName: null,
+    buildRoot: null
+  }
+}
+
+/**
+ * @deprecated 不再需要，节点统计在 NodeStateSnapshot.stats 中
+ */
+export async function getNodeStats(nodeId: string): Promise<{ ok: boolean; error?: string }> {
+  console.warn('[API] getNodeStats() is deprecated, stats are included in node state')
+  return { ok: true }
+}
+
+/**
+ * @deprecated 使用 configureNode
+ */
+export async function configureNodePorts(
+  nodeId: string,
+  ports: Array<{ type: string; baud: number; receiveFrameMs?: number; retryTimeMs?: number }>
+): Promise<{ ok: boolean }> {
+  const { configureNode } = await import('./device')
+  return configureNode(nodeId, { portConfigs: ports })
+}
+
+/**
+ * @deprecated
+ */
+export async function sendCommand(command: string): Promise<{ ok: boolean }> {
+  return post('/api/command', { command })
+}
+
+/**
+ * @deprecated 使用 importNodes
  */
 export interface RestoreNodeInfo {
   nodeId: string
@@ -70,7 +245,7 @@ export interface RestoreNodeInfo {
 }
 
 /**
- * 会话恢复响应
+ * @deprecated
  */
 export interface RestoreSessionResponse {
   ok: boolean
@@ -81,120 +256,9 @@ export interface RestoreSessionResponse {
 }
 
 /**
- * 恢复会话 - 将项目中的节点重新连接到 DIVERSession
- * 在项目加载后调用，用于恢复节点连接
+ * @deprecated 使用 importNodes
  */
 export async function restoreSession(): Promise<RestoreSessionResponse> {
-  return post<RestoreSessionResponse>('/api/session/restore')
-}
-
-// ============================================
-// 变量控制
-// ============================================
-
-/**
- * 获取可控变量列表
- * 返回所有变量及其可控性信息
- */
-export async function getControllableVariables(): Promise<{ variables: VariableInfo[] }> {
-  return get('/api/variables/controllable')
-}
-
-/**
- * 设置变量值
- * 只能设置非 LowerIO 的可控变量
- * 
- * @param name 变量名
- * @param value 新值
- * @param typeHint 类型提示 (如 'int', 'float', 'byte[]')
- */
-export async function setVariable(
-  name: string, 
-  value: unknown, 
-  typeHint?: string
-): Promise<{ ok: boolean; name: string; value: unknown }> {
-  const request: SetVariableRequest = { name, value, typeHint }
-  return post('/api/variable/set', request)
-}
-
-// ============================================
-// 节点配置
-// ============================================
-
-/**
- * 配置节点端口
- * @param nodeId 节点 ID
- * @param ports 端口配置数组
- */
-export async function configureNodePorts(
-  nodeId: string, 
-  ports: PortConfig[]
-): Promise<{ ok: boolean }> {
-  return post(`/api/node/${nodeId}/ports`, { ports })
-}
-
-// ============================================
-// 日志
-// ============================================
-
-/**
- * 获取有日志的节点列表
- */
-export async function getLoggedNodes(): Promise<{ nodes: NodeLogInfo[] }> {
-  return get('/api/logs/nodes')
-}
-
-/**
- * 获取节点日志
- * @param nodeId 节点 ID
- * @param offset 起始偏移
- * @param limit 获取条数
- */
-export async function getNodeLogs(
-  nodeId: string, 
-  offset = 0, 
-  limit = 200
-): Promise<LogChunkResponse> {
-  return get(`/api/logs/node/${nodeId}`, {
-    params: { offset, limit }
-  })
-}
-
-/**
- * 清空节点日志
- * @param nodeId 节点 ID
- */
-export async function clearNodeLogs(nodeId: string): Promise<void> {
-  await post(`/api/logs/node/${nodeId}/clear`)
-}
-
-/**
- * 清空所有日志
- */
-export async function clearAllLogs(): Promise<void> {
-  await post('/api/logs/clear')
-}
-
-// ============================================
-// 命令
-// ============================================
-
-/**
- * 发送命令到后端
- * @param command 命令字符串
- */
-export async function sendCommand(command: string): Promise<{ ok: boolean }> {
-  return post('/api/command', { command })
-}
-
-// ============================================
-// 节点统计
-// ============================================
-
-/**
- * 获取节点运行时统计数据
- * @param nodeId 节点 ID
- */
-export async function getNodeStats(nodeId: string): Promise<{ ok: boolean } & Partial<RuntimeStats> & { error?: string }> {
-  return get(`/api/node/${nodeId}/stats`)
+  console.warn('[API] restoreSession() is deprecated, nodes are auto-loaded from project')
+  return { ok: true, total: 0, connected: 0, nodes: [] }
 }

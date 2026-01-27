@@ -123,23 +123,21 @@ export function useSignalR() {
     })
     
     // 节点日志事件
-    // 格式: nodeLogLine({ nodeId: string, line: string })
-    connection.value.on('nodeLogLine', (data: { nodeId: string; line: string }) => {
-      logStore.appendNodeLog(data.nodeId, data.line)
+    // 格式: nodeLogLine(uuid: string, message: string)
+    connection.value.on('nodeLogLine', (uuid: string, message: string) => {
+      logStore.appendNodeLog(uuid, message)
     })
     
     // 变量快照更新事件 (后端发送 varsSnapshot)
-    // 格式: varsSnapshot(snapshot: Record<string, unknown>)
+    // 格式: varsSnapshot(snapshot: { targetType, fields })
     connection.value.on('varsSnapshot', (snapshot: Record<string, unknown>) => {
       runtimeStore.updateVariables(snapshot)
     })
     
     // 节点状态快照更新事件 (后端发送 nodeSnapshot)
-    // 格式: nodeSnapshot(snapshot: { nodes: Array<NodeSnapshot> })
-    connection.value.on('nodeSnapshot', (snapshot: { nodes: Array<{ nodeId: string }> }) => {
-      for (const node of snapshot.nodes || []) {
-        runtimeStore.updateNodeSnapshot(node as any)
-      }
+    // 格式: nodeSnapshot(snapshot: { nodes: Array<NodeStateSnapshot> })
+    connection.value.on('nodeSnapshot', (snapshot: unknown) => {
+      runtimeStore.updateNodeSnapshot(snapshot)
     })
   }
   

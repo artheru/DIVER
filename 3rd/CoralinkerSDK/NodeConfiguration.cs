@@ -3,6 +3,18 @@ using MCUSerialBridgeCLR;
 namespace CoralinkerSDK;
 
 /// <summary>
+/// 会话配置（用于从 JSON 加载）
+/// </summary>
+public class SessionConfiguration
+{
+    /// <summary>程序集路径（可选）</summary>
+    public string? AssemblyPath { get; set; }
+    
+    /// <summary>节点配置列表</summary>
+    public NodeConfiguration[] Nodes { get; set; } = Array.Empty<NodeConfiguration>();
+}
+
+/// <summary>
 /// MCU 节点配置
 /// </summary>
 public class NodeConfiguration

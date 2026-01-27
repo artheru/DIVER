@@ -11,14 +11,15 @@
 
 <template>
   <div class="slider-widget" :class="[orientation]">
-    <div class="slider-label">{{ config.variable || 'Unbound' }}</div>
+    <div class="slider-header">
+      <div class="slider-label" :title="config.variable || 'Unbound'">{{ config.variable || 'Unbound' }}</div>
+      <div class="slider-value">{{ displayValue }}</div>
+    </div>
     
     <div class="slider-track" ref="trackRef" @mousedown="startDrag">
       <div class="slider-fill" :style="fillStyle"></div>
       <div class="slider-thumb" :style="thumbStyle"></div>
     </div>
-    
-    <div class="slider-value">{{ displayValue }}</div>
   </div>
 </template>
 
@@ -161,36 +162,63 @@ onUnmounted(() => {
 <style scoped>
 .slider-widget {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
   user-select: none;
+  height: 100%;
+  box-sizing: border-box;
 }
 
 .slider-widget.vertical {
-  flex-direction: column;
-  height: 100%;
+  flex-direction: row;
+}
+
+.slider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px;
 }
 
 .slider-label {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--text-muted);
-  min-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.slider-value {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--primary);
+  flex-shrink: 0;
 }
 
 .slider-track {
   position: relative;
   flex: 1;
+  min-height: 8px;
   height: 8px;
   background: var(--body-color);
   border-radius: 4px;
   cursor: pointer;
 }
 
+.slider-widget.vertical .slider-header {
+  flex-direction: column;
+  align-items: flex-start;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
 .slider-widget.vertical .slider-track {
   width: 8px;
-  height: 100%;
-  min-height: 100px;
+  height: auto;
+  flex: 1;
+  min-height: 40px;
 }
 
 .slider-fill {
@@ -207,13 +235,14 @@ onUnmounted(() => {
   top: auto;
   bottom: 0;
   width: 100%;
+  height: auto;
 }
 
 .slider-thumb {
   position: absolute;
   top: 50%;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   background: white;
   border: 2px solid var(--primary);
   border-radius: 50%;
@@ -225,12 +254,5 @@ onUnmounted(() => {
   left: 50%;
   top: auto;
   transform: translate(-50%, 50%);
-}
-
-.slider-value {
-  font-family: var(--font-mono);
-  font-size: 14px;
-  min-width: 60px;
-  text-align: right;
 }
 </style>

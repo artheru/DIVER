@@ -2,8 +2,7 @@
  * @file types/index.ts
  * @description 全局 TypeScript 类型定义
  * 
- * 这里定义了与后端 API 交互的所有数据结构，
- * 确保前后端类型一致性。
+ * 与后端 DIVERSession API 对齐的类型定义
  */
 
 // ============================================
@@ -11,27 +10,10 @@
 // ============================================
 
 /**
- * LiteGraph 序列化数据结构
- * 直接存储为 JSON 对象，避免双重序列化
- */
-export interface LiteGraphData {
-  last_node_id: number
-  last_link_id: number
-  nodes: any[]
-  links: any[]
-  groups?: any[]
-  config?: Record<string, any>
-  extra?: Record<string, any>
-  version?: number
-}
-
-/**
  * 项目状态 - 对应后端 ProjectState
- * 包含节点图序列化数据和当前选中的资源信息
+ * 节点数据由 DIVERSession 管理，不在这里存储
  */
 export interface ProjectState {
-  /** LiteGraph 序列化的 JSON 对象 (直接存储，非字符串) */
-  nodeMap: LiteGraphData | null
   /** 当前选中的 .cs 资源文件名 */
   selectedAsset: string | null
   /** 当前在编辑器中打开的文件路径 */
@@ -41,21 +23,248 @@ export interface ProjectState {
 }
 
 // ============================================
+// 节点相关类型（对齐 DIVERSession）
+// ============================================
+
+/**
+ * 版本信息快照
+ */
+export interface VersionInfo {
+  productionName: string
+  gitTag: string
+  gitCommit: string
+  buildTime: string
+}
+
+/**
+ * 硬件布局快照
+ */
+export interface LayoutInfo {
+  digitalInputCount: number
+  digitalOutputCount: number
+  portCount: number
+  ports: PortDescriptor[]
+}
+
+/**
+ * 端口描述符
+ */
+export interface PortDescriptor {
+  type: string
+  name: string
+}
+
+/**
+ * 端口配置快照
+ */
+export interface PortConfig {
+  type: string
+  baud: number
+  receiveFrameMs?: number
+  retryTimeMs?: number
+}
+
+/**
+ * 端口统计快照
+ */
+export interface PortStats {
+  index: number
+  txFrames: number
+  rxFrames: number
+  txBytes: number
+  rxBytes: number
+}
+
+/**
+ * 运行时统计快照
+ */
+export interface RuntimeStats {
+  uptimeMs: number
+  digitalInputs: number
+  digitalOutputs: number
+  ports: PortStats[]
+}
+
+/**
+ * Cart 字段快照
+ */
+export interface CartFieldInfo {
+  name: string
+  type: string
+  typeId: number
+  isLowerIO: boolean
+  isUpperIO: boolean
+  isMutual: boolean
+}
+
+/**
+ * 节点状态快照 - 对应 NodeStateSnapshot
+ */
+export interface NodeStateSnapshot {
+  uuid: string
+  mcuUri: string
+  nodeName: string
+  isConnected: boolean
+  runState: string  // "idle" | "running" | "error" | "offline"
+  isConfigured: boolean
+  isProgrammed: boolean
+  stats?: RuntimeStats
+}
+
+/**
+ * 节点完整信息 - 对应 NodeFullInfo
+ */
+export interface NodeFullInfo {
+  uuid: string
+  mcuUri: string
+  nodeName: string
+  version?: VersionInfo
+  layout?: LayoutInfo
+  portConfigs: PortConfig[]
+  hasProgram: boolean
+  programSize: number
+  logicName?: string
+  cartFields: CartFieldInfo[]
+  extraInfo?: Record<string, unknown>
+}
+
+/**
+ * 节点设置请求
+ */
+export interface NodeSettingsRequest {
+  nodeName?: string
+  portConfigs?: PortConfig[]
+  extraInfo?: Record<string, unknown>
+}
+
+/**
+ * 节点导出数据 - 对应 NodeExportData
+ */
+export interface NodeExportData {
+  mcuUri: string
+  nodeName: string
+  portConfigs?: PortConfig[]
+  programBase64?: string
+  metaJson?: string
+  logicName?: string
+  extraInfo?: Record<string, unknown>
+}
+
+// ============================================
+// 会话相关类型
+// ============================================
+
+/**
+ * 启动结果 - 对应 StartResult
+ */
+export interface StartResult {
+  success: boolean
+  totalNodes: number
+  successNodes: number
+  errors: NodeStartError[]
+}
+
+/**
+ * 节点启动错误
+ */
+export interface NodeStartError {
+  uuid: string
+  nodeName: string
+  error: string
+}
+
+/**
+ * 会话状态
+ */
+export interface SessionState {
+  state: string  // "Idle" | "Running"
+  isRunning: boolean
+  nodeCount: number
+}
+
+// ============================================
+// 变量相关类型
+// ============================================
+
+/**
+ * Cart 字段值 - 对应 CartFieldValue
+ */
+export interface CartFieldValue {
+  name: string
+  type: string
+  typeId: number
+  value: unknown
+  isLowerIO: boolean
+  isUpperIO: boolean
+  isMutual: boolean
+}
+
+/**
+ * 变量信息（用于 UI 显示）
+ */
+export interface VariableInfo {
+  name: string
+  type: string
+  typeId: number
+  controllable: boolean  // !isLowerIO
+  isLowerIO: boolean
+  isUpperIO: boolean
+  isMutual: boolean
+}
+
+/**
+ * 变量值（用于 store）
+ */
+export interface VariableValue {
+  name: string
+  value: unknown
+  type: string
+  typeId: number
+}
+
+/**
+ * 设置变量请求
+ */
+export interface SetVariableRequest {
+  name: string
+  value: unknown
+  typeHint?: string
+}
+
+// ============================================
+// 日志相关类型
+// ============================================
+
+/**
+ * 日志条目 - 对应 LogEntry
+ */
+export interface LogEntry {
+  seq: number
+  timestamp: string
+  message: string
+}
+
+/**
+ * 日志查询结果 - 对应 LogQueryResult
+ */
+export interface LogQueryResult {
+  uuid: string
+  latestSeq: number
+  entries: LogEntry[]
+  hasMore: boolean
+}
+
+// ============================================
 // 文件系统相关类型
 // ============================================
 
 /**
- * 文件树节点 - 对应后端 FileNode
- * 用于资源管理器的树形结构
+ * 文件树节点
  */
 export interface FileNode {
-  /** 文件/文件夹名称 */
   name: string
-  /** 相对路径 (相对于 data 目录) */
   path: string
-  /** 节点类型 */
   kind: 'folder' | 'file'
-  /** 子节点 (仅文件夹有) */
   children?: FileNode[]
 }
 
@@ -81,174 +290,6 @@ export interface FileWriteRequest {
 }
 
 // ============================================
-// 运行时相关类型
-// ============================================
-
-/**
- * MCU 节点版本信息
- */
-export interface VersionInfo {
-  productionName: string
-  gitTag: string
-  gitCommit: string
-  buildTime: string
-}
-
-/**
- * MCU 节点布局信息 - 描述硬件 I/O 配置
- */
-export interface LayoutInfo {
-  digitalInputCount: number
-  digitalOutputCount: number
-  portCount: number
-  ports: PortDescriptor[]
-}
-
-/**
- * 端口描述符
- */
-export interface PortDescriptor {
-  index: number
-  type: 'Serial' | 'CAN' | 'Unknown'
-  name: string
-}
-
-/**
- * 端口配置
- */
-export interface PortConfig {
-  type: string
-  name?: string   // 端口名称（来自 MCU Layout）
-  baud: number
-  receiveFrameMs?: number
-  retryTimeMs?: number
-}
-
-/**
- * 节点运行时快照
- */
-export interface NodeSnapshot {
-  nodeId: string
-  runState: string
-  isConnected: boolean
-  isConfigured: boolean
-  isProgrammed: boolean
-  mode: string
-  version?: VersionInfo
-  layout?: LayoutInfo
-  ports?: PortConfig[]
-}
-
-/**
- * 节点状态信息（用于轮询）
- */
-export interface NodeStateInfo {
-  nodeId: string
-  isConnected: boolean
-  runState: string
-  isConfigured: boolean
-  isProgrammed: boolean
-  mode: string
-}
-
-/**
- * 端口统计数据
- */
-export interface PortStats {
-  index: number
-  txFrames: number
-  rxFrames: number
-  txBytes: number
-  rxBytes: number
-}
-
-/**
- * MCU 运行时统计数据
- */
-export interface RuntimeStats {
-  nodeId: string
-  uptimeMs: number
-  digitalInputs: number
-  digitalOutputs: number
-  digitalInputCount: number
-  digitalOutputCount: number
-  portCount: number
-  ports: PortStats[]
-}
-
-/**
- * 运行时整体快照
- */
-export interface RuntimeSnapshot {
-  nodes: NodeSnapshot[]
-}
-
-// ============================================
-// 变量相关类型
-// ============================================
-
-/**
- * Cart 变量类型 ID 映射
- * 对应 DiverCompiler 输出的 typeid
- */
-export const VariableTypeId = {
-  Bool: 0,
-  Byte: 1,
-  SByte: 2,
-  Int16: 3,
-  UInt16: 4,
-  Int32: 5,
-  UInt32: 6,
-  Int64: 7,
-  UInt64: 8,
-  Float: 9,
-  Double: 10,
-  Char: 11,
-  String: 12,
-  IntArray: 16,
-  ByteArray: 17,
-  FloatArray: 18
-} as const
-
-export type VariableTypeId = (typeof VariableTypeId)[keyof typeof VariableTypeId]
-
-/**
- * 变量信息 - 来自 /api/variables/controllable
- */
-export interface VariableInfo {
-  name: string
-  type: string
-  typeId: number
-  /** 是否可由 Host 控制 (非 LowerIO) */
-  controllable: boolean
-  /** 是否为 LowerIO (MCU 控制) */
-  isLowerIO: boolean
-  /** 是否为 UpperIO (MCU 输出) */
-  isUpperIO: boolean
-  /** 是否为 Mutual (双向) */
-  isMutual: boolean
-}
-
-/**
- * 变量值快照 - SignalR 推送
- */
-export interface VariableValue {
-  name: string
-  value: unknown
-  type: string
-  typeId: number
-}
-
-/**
- * 设置变量请求
- */
-export interface SetVariableRequest {
-  name: string
-  value: unknown
-  typeHint?: string
-}
-
-// ============================================
 // 构建相关类型
 // ============================================
 
@@ -265,20 +306,98 @@ export interface BuildResult {
   tail?: string
 }
 
+/**
+ * Logic 信息
+ */
+export interface LogicInfo {
+  name: string
+  binPath: string
+  jsonPath: string
+  binSize: number
+  jsonSize: number
+}
+
 // ============================================
-// 日志相关类型
+// Probe 相关类型
 // ============================================
 
 /**
- * 节点日志信息
+ * 节点探测结果（只探测不添加）
  */
-export interface NodeLogInfo {
-  nodeId: string
-  nodeName?: string
+export interface NodeProbeResult {
+  ok: boolean
+  error?: string
+  version?: VersionInfo
+  layout?: LayoutInfo
 }
 
 /**
- * 日志分页响应
+ * 添加节点结果（探测并添加）
+ */
+export interface AddNodeResult {
+  ok: boolean
+  error?: string
+  uuid?: string
+  nodeName?: string
+  version?: VersionInfo
+  layout?: LayoutInfo
+}
+
+/**
+ * 端口布局信息（从 layout.ports 获取）
+ */
+export interface PortLayoutInfo {
+  type: string
+  name: string
+}
+
+// ============================================
+// 旧类型（兼容，逐步废弃）
+// ============================================
+
+/**
+ * @deprecated 使用 NodeStateSnapshot
+ */
+export interface NodeSnapshot {
+  nodeId: string
+  runState: string
+  isConnected: boolean
+  isConfigured: boolean
+  isProgrammed: boolean
+  mode: string
+  version?: VersionInfo
+  layout?: LayoutInfo
+  ports?: PortConfig[]
+}
+
+/**
+ * @deprecated 使用 NodeStateSnapshot
+ */
+export interface NodeStateInfo {
+  nodeId: string
+  isConnected: boolean
+  runState: string
+  isConfigured: boolean
+  isProgrammed: boolean
+  mode: string
+}
+
+/**
+ * @deprecated 不再使用
+ */
+export interface LiteGraphData {
+  last_node_id: number
+  last_link_id: number
+  nodes: unknown[]
+  links: unknown[]
+  groups?: unknown[]
+  config?: Record<string, unknown>
+  extra?: Record<string, unknown>
+  version?: number
+}
+
+/**
+ * @deprecated 使用 LogQueryResult
  */
 export interface LogChunkResponse {
   lines: string[]
@@ -286,12 +405,23 @@ export interface LogChunkResponse {
   offset: number
 }
 
-// ============================================
-// LiteGraph 扩展类型
-// ============================================
+/**
+ * @deprecated
+ */
+export interface NodeLogInfo {
+  nodeId: string
+  nodeName?: string
+}
 
 /**
- * Coral MCU 节点属性
+ * @deprecated
+ */
+export interface RuntimeSnapshot {
+  nodes: NodeSnapshot[]
+}
+
+/**
+ * @deprecated
  */
 export interface CoralNodeProperties {
   nodeName: string
@@ -309,7 +439,7 @@ export interface CoralNodeProperties {
 }
 
 /**
- * 根节点属性
+ * @deprecated
  */
 export interface RootNodeProperties {
   name: string

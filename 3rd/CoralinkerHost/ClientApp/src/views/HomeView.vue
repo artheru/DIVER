@@ -146,7 +146,7 @@
             <div class="panel variables-panel">
               <div class="panel-header">
                 <span>Variables</span>
-                <a href="/control" target="_blank" class="control-link" title="Open Control Panel">🎮</a>
+                <button class="control-btn" @click="showControlWindow = true" title="Open Control Panel">🎮</button>
               </div>
               <VariablePanel />
             </div>
@@ -177,6 +177,9 @@
       v-model:show="showAddNodeDialog"
       @confirm="handleAddNodeConfirm"
     />
+    
+    <!-- 遥控器浮动窗口 -->
+    <ControlWindow v-model:visible="showControlWindow" />
   </div>
 </template>
 
@@ -198,6 +201,7 @@ import AssetTree from '@/components/assets/AssetTree.vue'
 import TerminalPanel from '@/components/logs/TerminalPanel.vue'
 import VariablePanel from '@/components/variables/VariablePanel.vue'
 import AddNodeDialog from '@/components/graph/AddNodeDialog.vue'
+import ControlWindow from '@/components/control/ControlWindow.vue'
 import type { AddNodeResult } from '@/components/graph/AddNodeDialog.vue'
 
 // ============================================
@@ -226,6 +230,7 @@ const newFileName = ref('')
 const graphCanvasRef = ref<InstanceType<typeof GraphCanvas> | null>(null)
 const importFileRef = ref<HTMLInputElement | null>(null)
 const showAddNodeDialog = ref(false)
+const showControlWindow = ref(false)
 
 // Splitpanes 尺寸 (百分比)
 const leftPaneSize = ref(75)
@@ -408,11 +413,9 @@ async function handleLoadProject(event: Event) {
     // 重新加载项目
     await projectStore.loadProject()
     
-    // 重新加载 Graph
+    // 重新加载 Graph（从 DIVERSession 获取节点数据）
     if (graphCanvasRef.value) {
-      graphCanvasRef.value.loadFromStore()
-      // 恢复节点会话
-      await graphCanvasRef.value.restoreNodes()
+      await graphCanvasRef.value.loadFromStore()
     }
     
     // 刷新文件树
@@ -438,17 +441,20 @@ function handleAddNode() {
 
 /**
  * 处理添加节点确认
+ * 节点已经在 AddNodeDialog 中通过 addNode API 添加到后端
+ * 这里只需要在前端画布上添加节点
  */
 function handleAddNodeConfirm(data: AddNodeResult) {
   if (graphCanvasRef.value) {
     graphCanvasRef.value.addNode({
-      nodeId: data.nodeId,  // 使用后端分配的 ID
+      uuid: data.uuid,  // 使用后端分配的 UUID
       mcuUri: data.mcuUri,
+      nodeName: data.nodeName,
       version: data.version,
       layout: data.layout,
       ports: data.ports  // 传递端口配置
     })
-    logStore.logUI(`Node added: ${data.version?.productionName || 'Unknown'} at ${data.mcuUri} with ${data.ports?.length || 0} ports`)
+    logStore.logUI(`Node added: ${data.nodeName} (${data.version?.productionName || 'Unknown'}) at ${data.mcuUri}`)
   }
 }
 </script>
@@ -668,9 +674,18 @@ function handleAddNodeConfirm(data: AddNodeResult) {
   min-height: 0;
 }
 
-.control-link {
+.control-btn {
   font-size: 18px;
-  text-decoration: none;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.control-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 /* 对话框底部 */
