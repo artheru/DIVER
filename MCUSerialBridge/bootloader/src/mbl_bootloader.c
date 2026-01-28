@@ -114,14 +114,28 @@ const char* mbl_error_to_string(MCUBootloaderError error) {
             return "Unknown response type";
         case MBL_Error_Proto_ResponseMismatch:
             return "Response type mismatch";
-        case MBL_Error_MCU_ReadFailed:
-            return "MCU Read command failed";
-        case MBL_Error_MCU_EraseFailed:
-            return "MCU Erase command failed";
-        case MBL_Error_MCU_WriteFailed:
-            return "MCU Write command failed";
-        case MBL_Error_MCU_ExitFailed:
-            return "MCU Exit command failed";
+        case MBL_Error_MCU_UnknownCommand:
+            return "MCU: Unknown command";
+        case MBL_Error_MCU_InvalidPayload:
+            return "MCU: Invalid payload";
+        case MBL_Error_MCU_FlashEraseFailed:
+            return "MCU: Flash erase failed";
+        case MBL_Error_MCU_FirmwareDecryptionError:
+            return "MCU: Firmware decryption error";
+        case MBL_Error_MCU_FirmwareLengthError:
+            return "MCU: Firmware length error";
+        case MBL_Error_MCU_NotErased:
+            return "MCU: Not erased";
+        case MBL_Error_MCU_WriteOffsetMisaligned:
+            return "MCU: Write offset misaligned";
+        case MBL_Error_MCU_WriteLengthTooLong:
+            return "MCU: Write length too long";
+        case MBL_Error_MCU_WriteError:
+            return "MCU: Write error";
+        case MBL_Error_MCU_WriteFirmwareCrcMismatch:
+            return "MCU: Firmware CRC mismatch";
+        case MBL_Error_MCU_WriteAppInvalid:
+            return "MCU: App invalid";
         default:
             return "Unknown error";
     }
@@ -556,7 +570,10 @@ MBL_EXPORT MCUBootloaderError mbl_command_read(
 
         return MBL_Error_OK;
     } else if (cmd_type == MBL_RSP_READ_ERR) {
-        return MBL_Error_MCU_ReadFailed;
+        // 解析 MCU 返回的 ErrorCode (payload[0-3], little-endian)
+        uint32_t mcu_error = (uint32_t)payload[0] | ((uint32_t)payload[1] << 8) |
+                            ((uint32_t)payload[2] << 16) | ((uint32_t)payload[3] << 24);
+        return (MCUBootloaderError)(0x0F000000 | (mcu_error & 0xFF));
     } else {
         return MBL_Error_Proto_UnknownResponse;
     }
@@ -611,7 +628,10 @@ MBL_EXPORT MCUBootloaderError mbl_command_erase(
     if (cmd_type == MBL_RSP_ERASE_OK) {
         return MBL_Error_OK;
     } else if (cmd_type == MBL_RSP_ERASE_ERR) {
-        return MBL_Error_MCU_EraseFailed;
+        // 解析 MCU 返回的 ErrorCode (rsp_payload[0-3], little-endian)
+        uint32_t mcu_error = (uint32_t)rsp_payload[0] | ((uint32_t)rsp_payload[1] << 8) |
+                            ((uint32_t)rsp_payload[2] << 16) | ((uint32_t)rsp_payload[3] << 24);
+        return (MCUBootloaderError)(0x0F000000 | (mcu_error & 0xFF));
     } else {
         return MBL_Error_Proto_UnknownResponse;
     }
@@ -673,7 +693,10 @@ MBL_EXPORT MCUBootloaderError mbl_command_write(
     if (cmd_type == MBL_RSP_WRITE_OK) {
         return MBL_Error_OK;
     } else if (cmd_type == MBL_RSP_WRITE_ERR) {
-        return MBL_Error_MCU_WriteFailed;
+        // 解析 MCU 返回的 ErrorCode (rsp_payload[0-3], little-endian)
+        uint32_t mcu_error = (uint32_t)rsp_payload[0] | ((uint32_t)rsp_payload[1] << 8) |
+                            ((uint32_t)rsp_payload[2] << 16) | ((uint32_t)rsp_payload[3] << 24);
+        return (MCUBootloaderError)(0x0F000000 | (mcu_error & 0xFF));
     } else {
         return MBL_Error_Proto_UnknownResponse;
     }
@@ -703,7 +726,10 @@ mbl_command_exit(mbl_handle* handle, uint32_t timeout_ms) {
     if (cmd_type == MBL_RSP_EXIT_OK) {
         return MBL_Error_OK;
     } else if (cmd_type == MBL_RSP_EXIT_ERR) {
-        return MBL_Error_MCU_ExitFailed;
+        // 解析 MCU 返回的 ErrorCode (payload[0-3], little-endian)
+        uint32_t mcu_error = (uint32_t)payload[0] | ((uint32_t)payload[1] << 8) |
+                            ((uint32_t)payload[2] << 16) | ((uint32_t)payload[3] << 24);
+        return (MCUBootloaderError)(0x0F000000 | (mcu_error & 0xFF));
     } else {
         return MBL_Error_Proto_UnknownResponse;
     }

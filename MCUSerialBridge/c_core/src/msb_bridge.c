@@ -174,6 +174,19 @@ MCUSerialBridgeError msb_reset(msb_handle* handle, uint32_t timeout)
     return ret;
 }
 
+MCUSerialBridgeError msb_upgrade(msb_handle* handle, uint32_t timeout)
+{
+    if (!handle)
+        return MSB_Error_Win_HandleNotFound;
+
+    // 发送升级命令，MCU 收到后会重启进入 Bootloader
+    MCUSerialBridgeError ret = mcu_send_packet_and_wait(
+            handle, CommandUpgrade, NULL, 0, NULL, 0, timeout);
+
+    DBG_PRINT("Upgrade finished with result[0x%08X]", ret);
+    return ret;
+}
+
 MCUSerialBridgeError mcu_state(
         msb_handle* handle,
         MCUStateC* state,
@@ -753,6 +766,7 @@ void mcu_serial_bridge_get_api(MCUSerialBridgeAPI* api)
     api->msb_register_port_data_callback = msb_register_port_data_callback;
     api->msb_write_port = msb_write_port;
     api->msb_reset = msb_reset;
+    api->msb_upgrade = msb_upgrade;
     api->msb_start = msb_start;
     api->msb_program = msb_program;
     api->msb_enable_wire_tap = msb_enable_wire_tap;

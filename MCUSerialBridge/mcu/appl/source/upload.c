@@ -93,7 +93,7 @@ void upload_can_packet(
     if (g_mcu_state.mode == MCU_Mode_DIVER &&
         g_mcu_state.running_state == MCU_RunState_Running) {
         CANData can_msg;
-        can_msg.info = *(uint16_t*)&id_info;
+        memcpy(&can_msg.info, &id_info, sizeof(can_msg.info));
         memcpy(can_msg.data, &data_0_3, 4);
         memcpy(can_msg.data + 4, &data_4_7, 4);
         

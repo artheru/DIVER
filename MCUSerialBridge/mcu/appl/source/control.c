@@ -6,11 +6,14 @@
 #include "bsp/digital_io.h"
 #include "bsp/ports.h"
 #include "hal/nvic.h"
+#include "hal/rtc.h"
 #include "hal/systick.h"
 #include "msb_error_c.h"
 #include "msb_protocol.h"
 #include "util/console.h"
 #include "util/mempool.h"
+
+#define RESET_WAIT_TIME (150)
 
 // ===============================
 // VMTXBUF debug logs (temporary)
@@ -246,7 +249,18 @@ MCUSerialBridgeError control_on_configure(
 MCUSerialBridgeError control_on_reset(const uint8_t* data, uint32_t data_length)
 {
     console_printf_do("CONTROL: RESETTING MCU!\n");
-    async_timeout(200, hal_nvic_reset, 0);
+    async_timeout(RESET_WAIT_TIME, hal_nvic_reset, 0);
+    return 0;
+}
+
+MCUSerialBridgeError control_on_upgrade(
+        const uint8_t* data,
+        uint32_t data_length)
+{
+    console_printf_do("CONTROL: ENTERING BOOTLOADER MODE!\n");
+    // 写入 bootflag，然后延迟复位，MCU 重启后会进入 Bootloader
+    hal_rtc_write_bootflag();
+    async_timeout(RESET_WAIT_TIME, hal_nvic_reset, 0);
     return 0;
 }
 

@@ -89,20 +89,41 @@ typedef enum {
     MBL_Error_Proto_ResponseMismatch = 0xE0000006,
 
     /*==========================================================================
-     * MCU 返回的错误 (0x0Fxxxxxx)
+     * MCU 返回的错误 (0x0F0000xx)
      *========================================================================*/
 
-    /** MCU Read 命令失败 */
-    MBL_Error_MCU_ReadFailed = 0x0F000001,
+    /** MCU: 未知命令 */
+    MBL_Error_MCU_UnknownCommand = 0x0F000001,
 
-    /** MCU Erase 命令失败 */
-    MBL_Error_MCU_EraseFailed = 0x0F000002,
+    /** MCU: 无效的 Payload */
+    MBL_Error_MCU_InvalidPayload = 0x0F000002,
 
-    /** MCU Write 命令失败 */
-    MBL_Error_MCU_WriteFailed = 0x0F000003,
+    /** MCU: Flash 擦除失败 */
+    MBL_Error_MCU_FlashEraseFailed = 0x0F000003,
 
-    /** MCU Exit 命令失败 */
-    MBL_Error_MCU_ExitFailed = 0x0F000004,
+    /** MCU: 固件解密错误 */
+    MBL_Error_MCU_FirmwareDecryptionError = 0x0F000004,
+
+    /** MCU: 固件长度错误 */
+    MBL_Error_MCU_FirmwareLengthError = 0x0F000005,
+
+    /** MCU: 未擦除 */
+    MBL_Error_MCU_NotErased = 0x0F000006,
+
+    /** MCU: 写入偏移未对齐 */
+    MBL_Error_MCU_WriteOffsetMisaligned = 0x0F000007,
+
+    /** MCU: 写入长度过长 */
+    MBL_Error_MCU_WriteLengthTooLong = 0x0F000008,
+
+    /** MCU: 写入错误 */
+    MBL_Error_MCU_WriteError = 0x0F000009,
+
+    /** MCU: 固件 CRC 不匹配 */
+    MBL_Error_MCU_WriteFirmwareCrcMismatch = 0x0F00000A,
+
+    /** MCU: App 无效 */
+    MBL_Error_MCU_WriteAppInvalid = 0x0F00000B,
 
 } MCUBootloaderError;
 

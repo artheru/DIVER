@@ -157,6 +157,9 @@ void packet_parse(const void* data_void, uint32_t length, ...)
                     layout_info.port_count);
             break;
         }
+        case CommandUpgrade:
+            ret = control_on_upgrade(other_data, other_data_len);
+            break;
         case CommandStart:
             ret = control_on_start(other_data, other_data_len);
             break;

@@ -37,16 +37,36 @@ namespace MCUBootloaderCLR
         Proto_UnknownResponse = 0xE0000005,
         Proto_ResponseMismatch = 0xE0000006,
 
-        // MCU 返回的错误 (0x0Fxxxxxx)
-        MCU_ReadFailed = 0x0F000001,
-        MCU_EraseFailed = 0x0F000002,
-        MCU_WriteFailed = 0x0F000003,
-        MCU_ExitFailed = 0x0F000004,
+        // MCU 返回的错误 (0x0F0000xx)
+        MCU_UnknownCommand = 0x0F000001,
+        MCU_InvalidPayload = 0x0F000002,
+        MCU_FlashEraseFailed = 0x0F000003,
+        MCU_FirmwareDecryptionError = 0x0F000004,
+        MCU_FirmwareLengthError = 0x0F000005,
+        MCU_NotErased = 0x0F000006,
+        MCU_WriteOffsetMisaligned = 0x0F000007,
+        MCU_WriteLengthTooLong = 0x0F000008,
+        MCU_WriteError = 0x0F000009,
+        MCU_WriteFirmwareCrcMismatch = 0x0F00000A,
+        MCU_WriteAppInvalid = 0x0F00000B,
     }
 
     #endregion
 
     #region 数据结构
+
+    /// <summary>
+    /// 固件元数据（用于 UI 显示，UPG 和 MCU 通用）
+    /// </summary>
+    public record FirmwareMetadata(
+        string ProductName,
+        string Tag,
+        string Commit,
+        string BuildTime,
+        uint AppLength,
+        uint AppCRC32,
+        bool IsValid
+    );
 
     /// <summary>
     /// 下位机固件信息
@@ -88,6 +108,22 @@ namespace MCUBootloaderCLR
             return $"产品: {ProductName}, 标签: {Tag}, Commit: {Commit}, " +
                    $"编译时间: {BuildTime}, 固件大小: {AppLength}, " +
                    $"CRC: 0x{AppCRC32:X8}, 有效: {validStr}";
+        }
+
+        /// <summary>
+        /// 转换为通用元数据
+        /// </summary>
+        public readonly FirmwareMetadata ToMetadata()
+        {
+            return new FirmwareMetadata(
+                ProductName ?? "",
+                Tag ?? "",
+                Commit ?? "",
+                BuildTime ?? "",
+                AppLength,
+                AppCRC32,
+                IsValid == 1
+            );
         }
     }
 
@@ -251,19 +287,19 @@ namespace MCUBootloaderCLR
         }
 
         /// <summary>
-        /// 获取元数据字典（用于 UI 显示）
+        /// 获取固件元数据（用于 UI 显示）
         /// </summary>
-        public Dictionary<string, object> GetMetadata()
+        public FirmwareMetadata GetMetadata()
         {
-            return new Dictionary<string, object>
-            {
-                ["产品型号"] = ProductName,
-                ["标签版本"] = FirmwareTag,
-                ["提交版本"] = FirmwareCommit,
-                ["编译时间"] = BuildTime,
-                ["固件大小"] = FirmwareSize,
-                ["校验码"] = SectionCRC,
-            };
+            return new FirmwareMetadata(
+                ProductName,
+                FirmwareTag,
+                FirmwareCommit,
+                BuildTime,
+                FirmwareSize,
+                SectionCRC,
+                true // UPG 文件解析成功即为有效
+            );
         }
 
         private static string SafeBytesToString(byte[] data, int offset, int length)

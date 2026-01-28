@@ -6,6 +6,7 @@
 #include "appl/version.h"
 #include "appl/vm.h"
 #include "bsp/bsp.h"
+#include "hal/delay.h"
 
 
 int main(void)
@@ -14,6 +15,8 @@ int main(void)
     g_min_log_level = LogLevelDebug;
 
     init_bsp();
+
+    console_printf_do("Application started!\n");
 
     init_version_info();
 

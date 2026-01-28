@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set PDN=FRLD-DIVERBK-V2
+set PDN=CORAL-NODE-V2.0
 set SCONS_OPTS=PDN=%PDN% ENABLE_DIVER_RUNTIME=1 -j 12 debug=1
 set TESTDIVER_EXE=.\build\TestDIVER.exe
 set TESTCS_EXE=.\build\TestCS.exe
@@ -18,6 +18,7 @@ if "%1"=="rtt" goto rtt
 if "%1"=="test" goto test
 if "%1"=="testb" goto testb
 if "%1"=="testbl" goto testbl
+if "%1"=="upg" goto upg
 if "%1"=="all" goto all
 goto usage
 
@@ -82,6 +83,11 @@ if "%4"=="" (
 )
 goto end
 
+:upg
+echo === Generating UPG file ===
+scons %SCONS_OPTS% upg
+goto end
+
 :all
 echo === Build + Flash + Test ===
 scons %SCONS_OPTS%
@@ -107,6 +113,7 @@ echo   rtt     - Start RTT log viewer
 echo   test    - Run PC-side TestDIVER
 echo   testb   - Run PC-side TestBridge
 echo   testbl  - Run Bootloader test (dev.bat testbl PORT UPG_FILE [BAUD])
+echo   upg     - Generate UPG firmware file
 echo   all     - Build, flash, then test
 echo.
 echo Config:

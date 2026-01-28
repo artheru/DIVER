@@ -22,6 +22,17 @@ import { useRuntimeStore } from '@/stores/runtime'
 /** SignalR 连接状态 */
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
 
+/** 升级进度回调函数类型 */
+export type UpgradeProgressCallback = (
+  nodeId: string,
+  progress: number,
+  stage: string,
+  message: string | null
+) => void
+
+// 升级进度回调列表（全局共享）
+const upgradeProgressCallbacks: Set<UpgradeProgressCallback> = new Set()
+
 export function useSignalR() {
   // ============================================
   // 状态
@@ -163,6 +174,33 @@ export function useSignalR() {
     connection.value.on('nodeSnapshot', (snapshot: unknown) => {
       runtimeStore.updateNodeSnapshot(snapshot)
     })
+    
+    // 固件升级进度事件
+    // 格式: upgradeProgress(nodeId: string, progress: number, stage: string, message: string | null)
+    connection.value.on('upgradeProgress', (nodeId: string, progress: number, stage: string, message: string | null) => {
+      // 通知所有注册的回调
+      upgradeProgressCallbacks.forEach(callback => {
+        try {
+          callback(nodeId, progress, stage, message)
+        } catch (err) {
+          console.error('[SignalR] upgradeProgress callback error:', err)
+        }
+      })
+    })
+  }
+  
+  /**
+   * 注册升级进度回调
+   */
+  function onUpgradeProgress(callback: UpgradeProgressCallback) {
+    upgradeProgressCallbacks.add(callback)
+  }
+  
+  /**
+   * 注销升级进度回调
+   */
+  function offUpgradeProgress(callback: UpgradeProgressCallback) {
+    upgradeProgressCallbacks.delete(callback)
   }
   
   /**
@@ -206,6 +244,8 @@ export function useSignalR() {
     error,
     connect,
     disconnect,
-    isConnected
+    isConnected,
+    onUpgradeProgress,
+    offUpgradeProgress
   }
 }

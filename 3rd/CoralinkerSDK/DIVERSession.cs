@@ -330,7 +330,7 @@ public sealed class DIVERSession : IDisposable
                 Console.WriteLine($"[DIVERSession] Probe Reset failed: {err.ToDescription()}");
                 return null;
             }
-            Thread.Sleep(300);
+            Thread.Sleep(MCUNode.ResetWaitTime);
 
             // Get Version
             err = bridge.GetVersion(out var version, 500);

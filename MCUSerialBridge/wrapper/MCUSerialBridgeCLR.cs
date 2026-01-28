@@ -593,6 +593,9 @@ namespace MCUSerialBridgeCLR
         internal static extern MCUSerialBridgeError msb_reset(IntPtr handle, uint timeout_ms);
 
         [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern MCUSerialBridgeError msb_upgrade(IntPtr handle, uint timeout_ms);
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
         public static extern MCUSerialBridgeError msb_version(
             IntPtr handle,
             out VersionInfo version,
@@ -802,6 +805,21 @@ namespace MCUSerialBridgeCLR
                 return MCUSerialBridgeError.Win_HandleNotFound;
 
             return MCUSerialBridgeCoreAPI.msb_reset(nativeHandle, timeout);
+        }
+
+        /// <summary>
+        /// MCU 进入升级模式（Bootloader）
+        /// 发送升级命令后，MCU 会在约 100~200ms 后重启进入 Bootloader 模式。
+        /// 调用此方法后应关闭当前连接，等待 MCU 重启后使用 Bootloader 接口连接。
+        /// </summary>
+        /// <param name="timeout">超时时间（ms）</param>
+        /// <returns>错误码</returns>
+        public MCUSerialBridgeError Upgrade(uint timeout = 200)
+        {
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            return MCUSerialBridgeCoreAPI.msb_upgrade(nativeHandle, timeout);
         }
 
         /// <summary>获取固件版本</summary>

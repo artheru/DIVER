@@ -17,6 +17,7 @@
   <ItemGroup>
     <Compile Include="..\..\MCUSerialBridge\wrapper\MCUSerialBridgeCLR.cs" Link="MCUSerialBridgeCLR.cs" />
     <Compile Include="..\..\MCUSerialBridge\wrapper\MCUSerialBridgeError.cs" Link="MCUSerialBridgeError.cs" />
+    <Compile Include="..\..\MCUSerialBridge\wrapper\MCUBootloaderHandlerCLR.cs" Link="MCUBootloaderHandlerCLR.cs" />
   </ItemGroup>
 
   <!-- Copy native DLL after build -->

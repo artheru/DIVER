@@ -1,4 +1,6 @@
 #include "bsp/ports.h"
+#include "bsp/digital_io.h"
+#include <string.h>
 
 const uint32_t ports_can_num = 1;
 const uint32_t ports_serial_num = 4;
@@ -212,3 +214,39 @@ USARTConfig bsp_serial_configs[4] = {
                 .usage = "RS485-4",
         },
 };
+
+void bsp_get_layout(LayoutInfoC* layout)
+{
+    if (!layout) return;
+
+    // 清空结构体
+    memset(layout, 0, sizeof(LayoutInfoC));
+
+    // 数字 IO 数量
+    layout->digital_input_count = (i8)bsp_get_digital_input_count();
+    layout->digital_output_count = (i8)bsp_get_digital_output_count();
+
+    // 端口数量（串口在前，CAN 在后）
+    uint32_t total_ports = ports_serial_num + ports_can_num;
+    if (total_ports > PACKET_MAX_PORTS_NUM) {
+        total_ports = PACKET_MAX_PORTS_NUM;
+    }
+    layout->port_count = (i8)total_ports;
+
+    // 填充串口端口信息
+    for (uint32_t i = 0; i < ports_serial_num && i < PACKET_MAX_PORTS_NUM; i++) {
+        layout->ports[i].port_type = PortType_Serial;
+        strncpy(layout->ports[i].name, bsp_serial_configs[i].usage, 
+                sizeof(layout->ports[i].name) - 1);
+        layout->ports[i].name[sizeof(layout->ports[i].name) - 1] = '\0';
+    }
+
+    // 填充 CAN 端口信息
+    for (uint32_t i = 0; i < ports_can_num && (ports_serial_num + i) < PACKET_MAX_PORTS_NUM; i++) {
+        uint32_t idx = ports_serial_num + i;
+        layout->ports[idx].port_type = PortType_CAN;
+        strncpy(layout->ports[idx].name, bsp_can_configs[i].usage,
+                sizeof(layout->ports[idx].name) - 1);
+        layout->ports[idx].name[sizeof(layout->ports[idx].name) - 1] = '\0';
+    }
+}

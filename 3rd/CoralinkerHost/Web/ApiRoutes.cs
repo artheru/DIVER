@@ -564,6 +564,57 @@ public static class ApiRoutes
         });
 
         // ============================================
+        // 固件升级 API
+        // ============================================
+
+        app.MapPost("/api/upgrade/parse", async (FirmwareUpgradeService upgradeService, HttpRequest req, CancellationToken ct) =>
+        {
+            if (!req.HasFormContentType)
+                return Results.BadRequest(new { ok = false, error = "Expected multipart/form-data" });
+
+            var form = await req.ReadFormAsync(ct);
+            var file = form.Files.FirstOrDefault();
+            if (file == null)
+                return Results.BadRequest(new { ok = false, error = "No file uploaded" });
+
+            await using var stream = file.OpenReadStream();
+            var result = upgradeService.ParseUpgFile(stream);
+
+            if (!result.Success)
+                return JsonHelper.Json(new { ok = false, error = result.Error });
+
+            return JsonHelper.Json(new { ok = true, metadata = result.Metadata });
+        });
+
+        app.MapPost("/api/upgrade/start", async (FirmwareUpgradeService upgradeService, HttpRequest req, CancellationToken ct) =>
+        {
+            if (!req.HasFormContentType)
+                return Results.BadRequest(new { ok = false, error = "Expected multipart/form-data" });
+
+            var form = await req.ReadFormAsync(ct);
+            var file = form.Files.FirstOrDefault();
+            var mcuUri = form["mcuUri"].FirstOrDefault();
+            var nodeId = form["nodeId"].FirstOrDefault() ?? Guid.NewGuid().ToString();
+
+            if (file == null)
+                return Results.BadRequest(new { ok = false, error = "No file uploaded" });
+            if (string.IsNullOrWhiteSpace(mcuUri))
+                return Results.BadRequest(new { ok = false, error = "Missing mcuUri" });
+
+            await using var stream = file.OpenReadStream();
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms, ct);
+            var upgData = ms.ToArray();
+
+            var result = await upgradeService.UpgradeAsync(mcuUri, upgData, nodeId, ct);
+
+            if (!result.Success)
+                return JsonHelper.Json(new { ok = false, error = result.Error, mcuInfo = result.McuInfo, upgInfo = result.UpgInfo });
+
+            return JsonHelper.Json(new { ok = true, mcuInfo = result.McuInfo, upgInfo = result.UpgInfo });
+        });
+
+        // ============================================
         // 设备发现 API
         // ============================================
 

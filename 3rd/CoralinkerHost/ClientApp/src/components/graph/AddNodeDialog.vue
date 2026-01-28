@@ -122,7 +122,15 @@
             :loading="isProbing"
             :disabled="!canProbe || isAdding"
           >
-            {{ probeResult?.ok ? 'Re-probe' : 'Probe' }}
+            Probe
+          </n-button>
+          <n-button 
+            v-if="probeResult"
+            type="warning"
+            @click="showUpgradeDialog = true"
+            :disabled="isProbing || isAdding"
+          >
+            Upgrade
           </n-button>
           <n-button 
             type="success" 
@@ -136,12 +144,21 @@
       </template>
     </n-card>
   </n-modal>
+  
+  <!-- 固件升级对话框 -->
+  <UpgradeDialog
+    v-model:show="showUpgradeDialog"
+    :mcu-uri="generatedUri"
+    :current-version="probeResult?.version"
+    @complete="handleUpgradeComplete"
+  />
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { NModal, NCard, NButton, NFormItem, NSelect, NRadioGroup, NRadioButton, NInput, NSpin } from 'naive-ui'
 import { getAvailablePorts, probeNode, addNode as apiAddNode } from '@/api/device'
+import UpgradeDialog from './UpgradeDialog.vue'
 import type { LayoutInfo, VersionInfo, NodeProbeResult } from '@/types'
 
 // Props
@@ -204,6 +221,7 @@ const availablePorts = ref<string[]>([])
 const isProbing = ref(false)
 const isAdding = ref(false)
 const probeResult = ref<ProbeResultData | null>(null)
+const showUpgradeDialog = ref(false)
 
 // 波特率选项
 const baudOptions = [
@@ -346,6 +364,12 @@ function resetForm() {
   vid.value = ''
   pid.value = ''
   serial.value = ''
+}
+
+// 处理升级完成
+function handleUpgradeComplete() {
+  // 升级完成后，重新探测以获取新版本信息
+  handleProbe()
 }
 
 // 监听 show 变化

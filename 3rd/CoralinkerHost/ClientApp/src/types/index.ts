@@ -352,6 +352,33 @@ export interface PortLayoutInfo {
 }
 
 // ============================================
+// 固件升级相关类型
+// ============================================
+
+/**
+ * 固件元数据（MCU 和 UPG 通用）
+ */
+export interface FirmwareMetadata {
+  productName: string
+  tag: string
+  commit: string
+  buildTime: string
+  appLength: number
+  appCRC32: number
+  isValid: boolean
+}
+
+/**
+ * 升级进度
+ */
+export interface UpgradeProgress {
+  nodeId: string
+  progress: number
+  stage: 'Connecting' | 'SendingUpgradeCommand' | 'WaitingBootloader' | 'ConnectingBootloader' | 'ReadingMcuInfo' | 'Erasing' | 'Writing' | 'Verifying' | 'Complete' | 'Error'
+  message?: string
+}
+
+// ============================================
 // 旧类型（兼容，逐步废弃）
 // ============================================
 

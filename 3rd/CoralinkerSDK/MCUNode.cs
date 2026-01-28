@@ -11,6 +11,8 @@ public class MCUNode : IDisposable
     private const uint DefaultTimeout = 500;
     private const uint ProgramTimeout = 10000;
 
+    public static readonly int ResetWaitTime = 1000;
+
     private MCUSerialBridge? _bridge;
     private bool _disposed;
 
@@ -96,7 +98,7 @@ public class MCUNode : IDisposable
                 Disconnect();
                 return false;
             }
-            Thread.Sleep(300);
+            Thread.Sleep(ResetWaitTime);
 
             // Get version to verify connection
             err = _bridge.GetVersion(out var version, DefaultTimeout);

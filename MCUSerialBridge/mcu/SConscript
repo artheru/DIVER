@@ -76,7 +76,7 @@ default_defines = {
 merged_defines = {**default_defines, **conf_defines, 'PRODUCTION_NAME': f'"{PDN}"'}
 env.Append(CPPDEFINES=merged_defines)
 
-env['application_shift'] = 0x0
+env['application_shift'] = 0x10000
 
 # Call the unilib SConscript, passing the environment and ChipName
 SConscript('unilib/SConscript', exports={'env': env, 'ChipName': ChipName})
@@ -237,7 +237,7 @@ env.Depends(flash, firmware)
 # upg target
 upg = Command(
     'upg',
-    firmware,
+    f'{fm_path}.bin',
     lambda target, source, env: generate_upg_scons(source=source, pdn=PDN)
 )
 env.Depends(upg, firmware)

@@ -132,7 +132,7 @@ CommandType(1) | Sequence(4) | Timestamp(4) | ErrorCode(4) | OtherData(...)
 | 命令名称              | 值   | 说明                                                                 |
 |-----------------------|------|----------------------------------------------------------------------|
 | CommandConfigure      | 0x01 | 配置端口（串口/CAN），MCU 执行后返回确认响应（0x81，无额外数据）   |
-| CommandReset          | 0x02 | 复位 MCU，MCU 立即返回确认响应（0x82，无额外数据），随后延迟约 200ms 执行复位 |
+| CommandReset          | 0x02 | 复位 MCU，MCU 立即返回确认响应（0x82，无额外数据），随后延迟约 100~200ms 执行复位 |
 | CommandState          | 0x03 | 读取 MCU 状态，MCU 返回响应（0x83，同 seq），携带 4 字节 MCUState |
 | CommandVersion        | 0x04 | 读取 MCU 版本信息，MCU 返回响应（0x84，同 seq），携带 VersionInfo 结构 |
 | CommandEnableWireTap  | 0x05 | 启用 Wire Tap 模式（DIVER 模式下也上传端口数据），MCU 返回确认响应（0x85，同 seq） |

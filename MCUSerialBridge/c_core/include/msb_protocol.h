@@ -77,7 +77,7 @@ typedef enum {
     /**
      * @brief 复位 MCU 命令 (PC → MCU)
      *
-     * 上位机要求 MCU 复位。MCU 收到后立即返回确认响应，然后延迟约 200ms
+     * 上位机要求 MCU 复位。MCU 收到后立即返回确认响应，然后延迟约 100~200ms
      * 后执行复位。 响应命令：0x82（无额外数据）。
      */
     CommandReset = 0x02,
@@ -113,6 +113,15 @@ typedef enum {
      * 响应命令：0x86（同 seq，携带 LayoutInfoC 数据）。
      */
     CommandGetLayout = 0x06,
+
+    /**
+     * @brief 进入升级模式命令 (PC → MCU)
+     *
+     * 上位机要求 MCU 重启进入 Bootloader 模式。
+     * MCU 收到后立即返回确认响应，然后延迟约 100~200ms 后重启进入 Bootloader。
+     * 响应命令：0x87（无额外数据）。
+     */
+    CommandUpgrade = 0x07,
 
     /**
      * @brief 启动 MCU 运行 (PC → MCU)

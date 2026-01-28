@@ -24,6 +24,7 @@ internal static class Program
         builder.Services.AddSingleton<TerminalBroadcaster>();
         builder.Services.AddSingleton<DiverBuildService>();
         builder.Services.AddSingleton<RuntimeSessionService>();
+        builder.Services.AddSingleton<FirmwareUpgradeService>();
         builder.Services.AddHostedService<VariableInspectorPushService>();
 
         var app = builder.Build();

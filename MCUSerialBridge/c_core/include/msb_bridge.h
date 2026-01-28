@@ -72,6 +72,19 @@ DLL_EXPORT MCUSerialBridgeError
 msb_reset(msb_handle* handle, uint32_t timeout_ms);
 
 /**
+ * @brief MCU进入升级模式（Bootloader）
+ *
+ * 发送升级命令，MCU 收到后立即返回确认响应，
+ * 然后延迟约 100~200ms 后重启进入 Bootloader 模式。
+ *
+ * @param handle MCU句柄
+ * @param timeout_ms 超时时间（毫秒）
+ * @return MCUSerialBridgeError 错误码
+ */
+DLL_EXPORT MCUSerialBridgeError
+msb_upgrade(msb_handle* handle, uint32_t timeout_ms);
+
+/**
  * @brief 获取 MCU 当前运行状态
  *
  * 查询 MCU 当前的运行状态，包括 Bridge（透传）
@@ -434,6 +447,7 @@ typedef struct MCUSerialBridgeAPI {
             uint32_t,
             uint32_t);
     MCUSerialBridgeError (*msb_reset)(msb_handle*, uint32_t);
+    MCUSerialBridgeError (*msb_upgrade)(msb_handle*, uint32_t);
     MCUSerialBridgeError (*msb_start)(msb_handle*, uint32_t);
     MCUSerialBridgeError (
             *msb_program)(msb_handle*, const uint8_t*, uint32_t, uint32_t);

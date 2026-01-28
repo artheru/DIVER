@@ -91,6 +91,14 @@ MCUSerialBridgeError control_on_reset(
         uint32_t data_length);
 
 /**
+ * @brief 处理升级命令
+ * MCU 收到后写入 bootflag，延迟约 200ms 后重启进入 Bootloader 模式
+ */
+MCUSerialBridgeError control_on_upgrade(
+        const uint8_t* data,
+        uint32_t data_length);
+
+/**
  * @brief 处理程序下载命令
  * 接收程序数据，支持分片传输。如果程序长度为 0，切换到透传模式
  */

@@ -72,4 +72,17 @@ public sealed class TerminalBroadcaster
         // 发送两个参数：uuid 和 message（message 已经带时间戳）
         return _hub.Clients.All.SendAsync("nodeLogLine", uuid, message, ct);
     }
+
+    /// <summary>
+    /// 推送固件升级进度
+    /// </summary>
+    /// <param name="nodeId">节点 ID</param>
+    /// <param name="progress">进度百分比（0-100）</param>
+    /// <param name="stage">当前阶段</param>
+    /// <param name="message">可选消息</param>
+    /// <param name="ct">取消令牌</param>
+    public Task UpgradeProgressAsync(string nodeId, int progress, string stage, string? message, CancellationToken ct = default)
+    {
+        return _hub.Clients.All.SendAsync("upgradeProgress", nodeId, progress, stage, message, ct);
+    }
 }

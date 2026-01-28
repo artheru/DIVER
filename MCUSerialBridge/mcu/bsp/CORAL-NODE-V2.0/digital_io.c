@@ -17,8 +17,12 @@ static GPIOHandle in_load;
 static GPIOHandle in_f1_emg_stop;
 static GPIOHandle in_f2_safety_edge;
 
-uint32_t output_data_raw;
-uint32_t input_data_raw;
+// 当前 IO 状态（供外部读取）
+volatile uint32_t g_bsp_digital_inputs = 0;
+volatile uint32_t g_bsp_digital_outputs = 0;
+
+#define BSP_DIGITAL_IO_INPUT_NUM 32
+#define BSP_DIGITAL_IO_OUTPUT_NUM 32
 
 void bsp_init_digital_io()
 {
@@ -95,10 +99,10 @@ void bsp_init_digital_io()
     in_f2_safety_edge = hal_gpio_register(in_f2_safety_edge_cfg);
 }
 
-void bsp_digital_io_refresh(uint32_t* input, const uint32_t* output)
+void bsp_digital_io_refresh()
 {
     uint32_t input_raw;
-    uint32_t output_raw = *output;
+    uint32_t output_raw = g_bsp_digital_outputs;
     // Load parallel inputs into 74HCT165 shift registers
     hal_gpio_set(in_load, 0);  // Set S/L low to load parallel data
     delay_ns(200);
@@ -122,7 +126,7 @@ void bsp_digital_io_refresh(uint32_t* input, const uint32_t* output)
     }
 
     // Copy value to arg ptr
-    *input = input_raw;
+    g_bsp_digital_inputs = input_raw;
 
     // Latch the output data to the 74HCT595 output registers
     hal_gpio_set(out_load, 0);  // Ensure RCLK is low
@@ -134,4 +138,26 @@ void bsp_digital_io_refresh(uint32_t* input, const uint32_t* output)
 
     // Set out_noe to 0 to enable outputs (active low)
     hal_gpio_set(out_noe, 0);
+}
+
+void bsp_set_outputs(uint32_t outputs)
+{
+    g_bsp_digital_outputs = outputs;  // 保存输出状态
+    bsp_digital_io_refresh(&g_bsp_digital_inputs, &g_bsp_digital_outputs);
+}
+
+uint32_t bsp_get_inputs()
+{
+    bsp_digital_io_refresh(&g_bsp_digital_inputs, &g_bsp_digital_outputs);
+    return g_bsp_digital_inputs;
+}
+
+uint32_t bsp_get_digital_input_count()
+{
+    return BSP_DIGITAL_IO_INPUT_NUM;
+}
+
+uint32_t bsp_get_digital_output_count()
+{
+    return BSP_DIGITAL_IO_OUTPUT_NUM;
 }

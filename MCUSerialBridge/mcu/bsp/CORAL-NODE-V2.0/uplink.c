@@ -2,8 +2,8 @@
 
 #include "bsp/uplink.h"
 
-USARTConfig bsp_uplink_local_config = {
-        .usage = "UplinkLocal",
+USARTConfig bsp_uplink_harness_config = {
+        .usage = "UplinkHarness",
 
         .usart_no = 2,
         .baud_rate = 1000000,
@@ -57,7 +57,7 @@ USARTConfig bsp_uplink_local_config = {
 
 
 USARTConfig bsp_uplink_config = {
-        .usage = "Uplink",
+        .usage = "UplinkLocal",
 
         .usart_no = 3,
         .baud_rate = 1000000,
@@ -85,8 +85,6 @@ USARTConfig bsp_uplink_config = {
                         .controller = 1,
                         .stream = 3,
                         .channel = 4,
-                        .priority = 1,
-                        .data_width = DMADataWidth_8,
                         .tc_irq_priority = 2,
                         .tc_irq_sub_priority = 0,
                 },
@@ -97,8 +95,6 @@ USARTConfig bsp_uplink_config = {
                         .controller = 1,
                         .stream = 1,
                         .channel = 4,
-                        .priority = 1,
-                        .data_width = DMADataWidth_8,
                         .tc_irq_priority = 2,
                         .tc_irq_sub_priority = 0,
                 },
