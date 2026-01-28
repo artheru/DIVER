@@ -510,6 +510,20 @@ public static class ApiRoutes
         // 日志 API
         // ============================================
 
+        // Terminal 日志（Host 管理）
+        app.MapGet("/api/logs/terminal", (TerminalBroadcaster terminal) =>
+        {
+            var history = terminal.GetHistory();
+            return JsonHelper.Json(new { ok = true, lines = history });
+        });
+
+        app.MapPost("/api/logs/terminal/clear", (TerminalBroadcaster terminal) =>
+        {
+            terminal.ClearHistory();
+            return JsonHelper.Json(new { ok = true });
+        });
+
+        // 节点日志（DIVERSession 管理）
         app.MapGet("/api/logs/nodes", () =>
         {
             var nodeIds = DIVERSession.Instance.GetLoggedNodeIds();

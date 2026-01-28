@@ -89,6 +89,28 @@ export async function getVariable(name: string): Promise<{ ok: boolean; name?: s
 // 日志管理
 // ============================================
 
+// ============================================
+// Terminal 日志 API (Host 管理)
+// ============================================
+
+/**
+ * 获取 Terminal 历史日志
+ */
+export async function getTerminalLogs(): Promise<{ ok: boolean; lines: string[] }> {
+  return get('/api/logs/terminal')
+}
+
+/**
+ * 清空 Terminal 日志
+ */
+export async function clearTerminalLogs(): Promise<{ ok: boolean }> {
+  return post('/api/logs/terminal/clear')
+}
+
+// ============================================
+// 节点日志 API (DIVERSession 管理)
+// ============================================
+
 /**
  * 获取有日志的节点列表
  */

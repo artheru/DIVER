@@ -5,16 +5,19 @@ set PDN=FRLD-DIVERBK-V2
 set SCONS_OPTS=PDN=%PDN% ENABLE_DIVER_RUNTIME=1 -j 12 debug=1
 set TESTDIVER_EXE=.\build\TestDIVER.exe
 set TESTCS_EXE=.\build\TestCS.exe
+set TESTBL_EXE=.\build\TestBL.exe
 set TESTDIVER_PORT=COM18
 set TESTDIVER_BAUD=1000000
 set TESTDIVER_BIN=D:\Documents\Coral\DIVER\3rd\CoralinkerHost\data\assets\generated\TestLogic.bin
 
 if "%1"=="" goto usage
 if "%1"=="build" goto build
+if "%1"=="buildbl" goto buildbl
 if "%1"=="flash" goto flash
 if "%1"=="rtt" goto rtt
 if "%1"=="test" goto test
 if "%1"=="testb" goto testb
+if "%1"=="testbl" goto testbl
 if "%1"=="all" goto all
 goto usage
 
@@ -26,6 +29,15 @@ echo === Building wrapper (csproj) ===
 dotnet build .\wrapper\MCUSerialBridgeWrapper.csproj
 dotnet build .\wrapper\TestDIVER.csproj
 dotnet build .\wrapper\TestCS.csproj
+dotnet build .\wrapper\TestBL.csproj
+goto end
+
+:buildbl
+echo === Building DLL (includes Bootloader) ===
+scons -j 12 build/mcu_serial_bridge.dll
+if errorlevel 1 goto end
+echo === Building TestBL ===
+dotnet build .\wrapper\TestBL.csproj
 goto end
 
 :flash
@@ -51,6 +63,25 @@ echo Port: %TESTDIVER_PORT%, Baud: %TESTDIVER_BAUD%
 %TESTCS_EXE%
 goto end
 
+:testbl
+echo === Running TestBL (Bootloader) ===
+if "%2"=="" (
+    echo Usage: dev.bat testbl [PORT] [UPG_FILE] [BAUD]
+    echo Example: dev.bat testbl COM3 firmware.upg
+    echo Example: dev.bat testbl COM3 firmware.upg 460800
+    goto end
+)
+if "%3"=="" (
+    echo Missing UPG file path
+    goto end
+)
+if "%4"=="" (
+    %TESTBL_EXE% %2 %3
+) else (
+    %TESTBL_EXE% %2 %3 %4
+)
+goto end
+
 :all
 echo === Build + Flash + Test ===
 scons %SCONS_OPTS%
@@ -69,11 +100,14 @@ goto end
 echo Usage: dev.bat [command]
 echo.
 echo Commands:
-echo   build  - Build MCU firmware
-echo   flash  - Flash firmware to MCU
-echo   rtt    - Start RTT log viewer
-echo   test   - Run PC-side TestDIVER
-echo   all    - Build, flash, then test
+echo   build   - Build MCU firmware and all wrappers
+echo   buildbl - Build Bootloader DLL and TestBL only
+echo   flash   - Flash firmware to MCU
+echo   rtt     - Start RTT log viewer
+echo   test    - Run PC-side TestDIVER
+echo   testb   - Run PC-side TestBridge
+echo   testbl  - Run Bootloader test (dev.bat testbl PORT UPG_FILE [BAUD])
+echo   all     - Build, flash, then test
 echo.
 echo Config:
 echo   PDN=%PDN%

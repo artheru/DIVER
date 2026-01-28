@@ -24,16 +24,19 @@ env.Append(BUILDERS={'GenCError': gen_c_builder, 'GenCSError': gen_cs_builder})
 c_header = env.GenCError(c_error_file, gen_script)
 cs_header = env.GenCSError(cs_error_file, gen_script)
 
-# 核心库 (生成 DLL)
+# 核心库 (生成 DLL，包含 MSB 和 Bootloader)
 core_dll = env.SharedLibrary(
     target=os.path.join(build_dir, 'mcu_serial_bridge'),
     source=[
+        # MCU Serial Bridge
         'src/msb_handle.c',
         'src/msb_packet.c',
         'src/msb_thread.c',
         'src/msb_bridge.c',
+        # MCU Bootloader
+        '../bootloader/src/mbl_bootloader.c',
     ],
-    CPPPATH=['include'],
+    CPPPATH=['include', '../bootloader/include'],
     CFLAGS=['/utf-8'],          # 编译 UTF-8
     LINKFLAGS=['/DLL', '/nologo']  # DLL 标志
 )

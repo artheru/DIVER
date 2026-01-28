@@ -101,6 +101,9 @@ export const useLogStore = defineStore('logs', () => {
    * @param line 日志内容
    */
   function appendNodeLog(uuid: string, line: string) {
+    // 确保节点标签存在
+    ensureNodeTab(uuid)
+    
     let logs = nodeLogs.value.get(uuid)
     
     if (!logs) {
@@ -238,6 +241,26 @@ export const useLogStore = defineStore('logs', () => {
   }
   
   /**
+   * 加载 Terminal 历史日志（前端初始化时调用）
+   */
+  async function loadTerminalHistory() {
+    try {
+      const result = await runtimeApi.getTerminalLogs()
+      
+      if (!result.ok || !result.lines) {
+        return
+      }
+      
+      // 用历史日志替换当前内容（避免重复）
+      terminalLines.value = result.lines
+      
+      console.log(`[Logs] Loaded ${result.lines.length} terminal history logs`)
+    } catch (error) {
+      console.error(`[Logs] Failed to load terminal history:`, error)
+    }
+  }
+
+  /**
    * 清空当前标签的日志
    */
   function clearCurrent() {
@@ -283,12 +306,17 @@ export const useLogStore = defineStore('logs', () => {
    * 同步节点标签与节点列表
    * @param nodes 节点列表 [{uuid, nodeName}, ...]
    */
-  function syncNodeTabs(nodes: Array<{ uuid: string; nodeName: string }>) {
+  async function syncNodeTabs(nodes: Array<{ uuid: string; nodeName: string }>) {
     const currentUuids = new Set(nodes.map(n => n.uuid))
+    const newNodes: string[] = []
     
     // 添加新节点
     for (const node of nodes) {
+      const isNew = !nodeInfos.value.has(node.uuid)
       ensureNodeTab(node.uuid, node.nodeName)
+      if (isNew) {
+        newNodes.push(node.uuid)
+      }
     }
     
     // 移除不存在的节点
@@ -296,6 +324,11 @@ export const useLogStore = defineStore('logs', () => {
       if (!currentUuids.has(uuid)) {
         removeNodeTab(uuid)
       }
+    }
+    
+    // 为新节点加载历史日志
+    for (const uuid of newNodes) {
+      await loadNodeHistory(uuid)
     }
   }
   
@@ -319,6 +352,7 @@ export const useLogStore = defineStore('logs', () => {
     switchTab,
     loadNodeLogs,
     loadNodeHistory,
+    loadTerminalHistory,
     clearCurrent,
     clearTerminal,
     clearAll,

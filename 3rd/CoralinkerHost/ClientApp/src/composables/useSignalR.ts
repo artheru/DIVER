@@ -101,6 +101,9 @@ export function useSignalR() {
       runtimeStore.setBackendAvailable(true)
       console.log('[SignalR] Connected to /hubs/terminal')
       
+      // 连接成功后加载历史日志
+      await loadHistoryLogs()
+      
     } catch (err) {
       state.value = 'disconnected'
       error.value = err instanceof Error ? err.message : String(err)
@@ -109,6 +112,27 @@ export function useSignalR() {
     }
   }
   
+  /**
+   * 加载历史日志（连接成功后调用）
+   * - Terminal 历史日志由 Host 管理
+   * - 节点日志由 DIVERSession 管理（在 syncNodeTabs 时自动加载）
+   */
+  async function loadHistoryLogs() {
+    console.log('[SignalR] Loading terminal history logs...')
+    
+    try {
+      // 加载 Terminal 历史日志（Host 管理）
+      await logStore.loadTerminalHistory()
+      
+      // 节点日志在 GraphCanvas.vue 的 syncLogTabs 中自动加载
+      // 不需要在这里加载，因为节点可能还未初始化
+      
+      console.log('[SignalR] Terminal history logs loaded')
+    } catch (error) {
+      console.error('[SignalR] Failed to load terminal history logs:', error)
+    }
+  }
+
   /**
    * 注册 SignalR 事件处理器
    * 将收到的事件分发到对应的 Store
