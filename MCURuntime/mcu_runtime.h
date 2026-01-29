@@ -87,7 +87,7 @@ void vm_put_event_buffer(int portID, int eventID, uchar* buffer, int size); // p
 //   0x01: CommandConfigure - Set MCU port configuration (serial/CAN ports)
 //         Response: 0x81 (same sequence, no additional data)
 //   0x02: CommandReset - Reset MCU
-//         Response: 0x82 (same sequence, no additional data), MCU resets after ~200ms
+//         Response: 0x82 (same sequence, no additional data), MCU resets after 100~200ms
 //   0x03: CommandState - Read MCU state
 //         Response: 0x83 (same sequence, 4 bytes MCUState)
 //   0x04: CommandVersion - Read MCU version info

@@ -1,8 +1,7 @@
 #include "bsp/uplink.h"
 
-#include "bsp/uplink.h"
 
-USARTConfig bsp_uplink_harness_config = {
+USARTConfig bsp_uplink_config = {
         .usage = "UplinkHarness",
 
         .usart_no = 2,
@@ -56,7 +55,7 @@ USARTConfig bsp_uplink_harness_config = {
 };
 
 
-USARTConfig bsp_uplink_config = {
+USARTConfig bsp_uplink_local_config = {
         .usage = "UplinkLocal",
 
         .usart_no = 3,
