@@ -1,6 +1,7 @@
 #include "appl/vm.h"
 //
 #include "appl/control.h"
+#include "appl/fatal_error.h"
 #include "appl/upload.h"
 #include "bsp/digital_io.h"
 #include "util/console.h"
@@ -106,17 +107,16 @@ void report_error(int il_offset, uchar* error_str, int line_no)
             error_str,
             line_no);
 
-    // Fail-fast: stop VM loop to avoid continuin`g execution after memory/stack
-    // corruption. vm_loop() checks g_mcu_state.running_state ==
-    // MCU_RunState_Running.
+    // Fail-fast: stop VM loop
     g_mcu_state.running_state = MCU_RunState_Error;
     g_mcu_state.is_programmed = 0;
-    console_printf_do("VMGlue: VM aborted, MCU state set to Error\n");
+    console_printf_do("VMGlue: VM aborted, sending error to PC...\n");
 
-    // io failsafe
-    // exit
-    while (1) {
-    }
+    // 发送错误到上位机并复位 MCU (此函数不会返回)
+    fatal_error_send_string(il_offset, (const char*)error_str, line_no);
+
+    // 不会执行到这里
+    while (1) {}
 }
 
 void print_line(uchar* str, int length)  // should upload text info.

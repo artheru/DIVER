@@ -3,6 +3,7 @@
 #include "util/console.h"
 //
 #include "appl/threads.h"
+#include "appl/upload.h"
 #include "appl/version.h"
 #include "appl/vm.h"
 #include "bsp/bsp.h"
@@ -15,6 +16,8 @@ int main(void)
     g_min_log_level = LogLevelDebug;
 
     init_bsp();
+
+    init_upload();
 
     console_printf_do("Application started!\n");
 

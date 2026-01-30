@@ -225,3 +225,39 @@ public class MyMCURoutine : LadderLogic<MyVehicle>
 ```
 
 Important Notes: Arguments are popped from stack in reverse order.
+
+## Debug Source Map (`*.diver.map.json`)
+
+When the DiverCompiler compiles C# code to MCU bytecode, it generates a source map file (`{LogicName}.diver.map.json`) that maps IL (Intermediate Language) offsets to source code locations. This is essential for debugging MCU runtime errors.
+
+### Map Format
+
+The map is a JSON array where each entry contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ilOffset` | number | Absolute byte offset in the generated program |
+| `methodIndex` | number | Index of the method in the compiled output |
+| `diverLine` | number | Line number in the `.diver` disassembly file |
+| `methodName` | string | Fully qualified method name (e.g., `Namespace.Class.Method(Args)`) |
+| `sourceFile` | string | Original C# source file name (e.g., `TestLogic.cs`) |
+| `sourceLine` | number | Line number in the original C# source file |
+
+### Example
+
+```json
+[
+  {"ilOffset":239,"methodIndex":0,"diverLine":1,"methodName":"DiverTest.TestLogic.Operation(Int32)","sourceFile":"TestLogic.cs","sourceLine":15},
+  {"ilOffset":242,"methodIndex":0,"diverLine":2,"methodName":"DiverTest.TestLogic.Operation(Int32)","sourceFile":"TestLogic.cs","sourceLine":16}
+]
+```
+
+### Usage for Error Handling
+
+When an MCU fatal error occurs (ASSERT failure or HardFault), the error payload contains an `ilOffset` value. To find the corresponding source location:
+
+1. Load the `{LogicName}.diver.map.json` file
+2. Find the entry with the largest `ilOffset` that is less than or equal to the error's `ilOffset`
+3. The `sourceFile` and `sourceLine` fields indicate the original C# code location
+
+This is used by the CoralinkerHost frontend to provide click-to-jump functionality from error dialogs to source code.

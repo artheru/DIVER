@@ -30,7 +30,22 @@ static inline bool should_upload_port_data(void)
 }
 
 CCM_RAM uint8_t upload_console_writeline_buffer[PACKET_MAX_DATALEN];
-CCM_RAM uint32_t  upload_console_writeline_buffer_length = 0;
+CCM_RAM uint32_t upload_console_writeline_buffer_length;
+
+void init_upload(void)
+{
+    // This value is in CCMRAM area
+    // Which is not initialized by default
+    console_printf_do("[init_upload] BEFORE: addr=0x%08X, val=%u\n",
+                      (uint32_t)&upload_console_writeline_buffer_length,
+                      upload_console_writeline_buffer_length);
+    
+    // 直接写入
+    upload_console_writeline_buffer_length = 0;
+
+    
+    memset(upload_console_writeline_buffer, 0, sizeof(upload_console_writeline_buffer));
+}
 
 void upload_serial_packet(
         const void* data,
@@ -167,18 +182,43 @@ void upload_console_writeline()
 
 uint32_t upload_console_writeline_append(const void* data, uint32_t length)
 {
+    console_printf_do("[upload_append] enter: len=%u, buf_len=%u, max=%u\n",
+                      length,
+                      upload_console_writeline_buffer_length,
+                      PACKET_MAX_DATALEN);
+
     if (length == 0 || data == NULL) {
+        console_printf_do("[upload_append] exit: null/zero input\n");
+        return 0;
+    }
+
+    // 防御性检查：如果 buffer_length 已经超过 max，说明数据损坏
+    if (upload_console_writeline_buffer_length >= PACKET_MAX_DATALEN) {
+        console_printf_do("[upload_append] ERROR: buf_len(%u) >= max(%u)!\n",
+                          upload_console_writeline_buffer_length,
+                          PACKET_MAX_DATALEN);
+        upload_console_writeline_buffer_length = 0;  // 重置
         return 0;
     }
 
     uint32_t max_append =
             PACKET_MAX_DATALEN - upload_console_writeline_buffer_length;
+    console_printf_do("[upload_append] max_append=%u\n", max_append);
+
     if (max_append <= 1) {
+        console_printf_do("[upload_append] exit: buffer full\n");
         return 0;
     }
     if (length >= max_append) {
         length = max_append - 1;
     }
+
+    console_printf_do("[upload_append] memcpy dst=0x%08X, src=0x%08X, len=%u\n",
+                      (uint32_t)(upload_console_writeline_buffer +
+                                 upload_console_writeline_buffer_length),
+                      (uint32_t)data,
+                      length);
+
     memcpy(upload_console_writeline_buffer +
                    upload_console_writeline_buffer_length,
            data,

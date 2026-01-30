@@ -117,6 +117,16 @@ public record StartResult(
 /// <summary>节点启动错误</summary>
 public record NodeStartError(string UUID, string NodeName, string Error);
 
+/// <summary>Cart字段元信息（不含值，用于获取可绑定变量列表）</summary>
+public record CartFieldMeta(
+    string Name,
+    string Type,
+    int TypeId,
+    bool IsLowerIO,
+    bool IsUpperIO,
+    bool IsMutual
+);
+
 /// <summary>Cart字段值</summary>
 public record CartFieldValue(
     string Name,
@@ -298,6 +308,9 @@ public sealed class DIVERSession : IDisposable
 
     /// <summary>节点日志事件</summary>
     public event Action<string, string>? OnNodeLog;
+
+    /// <summary>节点致命错误事件（MCU HardFault 或 ASSERT 失败），参数为 JSON 字符串</summary>
+    public event Action<string, string>? OnFatalError;
 
     private DIVERSession() { }
 
@@ -764,6 +777,7 @@ public sealed class DIVERSession : IDisposable
             // 注册回调
             handle.OnLowerIOReceived += data => HandleLowerIO(entry.UUID, data);
             handle.OnConsoleOutput += msg => HandleConsoleOutput(entry.UUID, msg);
+            handle.OnFatalError += payload => HandleFatalError(entry.UUID, payload);
 
             // Connect
             if (!handle.Connect())
@@ -810,6 +824,34 @@ public sealed class DIVERSession : IDisposable
     #endregion
 
     #region 数据管理接口
+
+    /// <summary>
+    /// 获取所有 Cart 字段元信息（不需要 Start，从节点配置中获取）
+    /// </summary>
+    public List<CartFieldMeta> GetAllCartFieldMetas()
+    {
+        var result = new Dictionary<string, CartFieldMeta>(StringComparer.OrdinalIgnoreCase);
+        
+        foreach (var entry in _nodes.Values)
+        {
+            foreach (var field in entry.CartFields)
+            {
+                if (!result.ContainsKey(field.Name))
+                {
+                    result[field.Name] = new CartFieldMeta(
+                        field.Name,
+                        HostRuntime.GetTypeName(field.TypeId),
+                        field.TypeId,
+                        field.IsLowerIO,
+                        field.IsUpperIO,
+                        field.IsMutual
+                    );
+                }
+            }
+        }
+        
+        return result.Values.ToList();
+    }
 
     /// <summary>
     /// 获取所有 Cart 字段
@@ -1055,6 +1097,119 @@ public sealed class DIVERSession : IDisposable
         OnNodeLog?.Invoke(uuid, message);
     }
 
+    private void HandleFatalError(string uuid, ErrorPayload payload)
+    {
+        if (!_nodes.TryGetValue(uuid, out var entry))
+            return;
+
+        // 记录到日志
+        var errorMsg = payload.Layout == CoreDumpLayout.String
+            ? $"FATAL ERROR: {payload.GetErrorString()}"
+            : $"FATAL ERROR: HardFault at IL={payload.DebugInfo.ILOffset}";
+        
+        entry.LogBuffer.Add(errorMsg);
+        OnNodeLog?.Invoke(uuid, errorMsg);
+
+        // 格式化错误信息为 JSON
+        var errorJson = FormatFatalErrorJson(uuid, entry, payload);
+
+        // 触发专用的 Fatal Error 事件
+        OnFatalError?.Invoke(uuid, errorJson);
+
+        Console.WriteLine($"[DIVERSession] Fatal error from {entry.NodeName}: {errorMsg}");
+
+        // 断开节点连接，标记为离线
+        DisconnectNodeOnFatalError(entry);
+    }
+
+    /// <summary>
+    /// 发生致命错误后断开节点连接
+    /// </summary>
+    private void DisconnectNodeOnFatalError(NodeEntry entry)
+    {
+        try
+        {
+            if (entry.Handle != null)
+            {
+                entry.LogBuffer.Add("Disconnecting node due to fatal error...");
+                OnNodeLog?.Invoke(entry.UUID, "Disconnecting node due to fatal error...");
+
+                // 关闭连接（Dispose会断开）
+                entry.Handle.Dispose();
+                entry.Handle = null;
+
+                // 清除运行时状态
+                entry.State = null;
+                entry.Stats = null;
+
+                Console.WriteLine($"[DIVERSession] Node {entry.NodeName} disconnected due to fatal error");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DIVERSession] Error disconnecting node {entry.NodeName}: {ex.Message}");
+        }
+    }
+
+    private string FormatFatalErrorJson(string uuid, NodeEntry entry, ErrorPayload payload)
+    {
+        var errorData = new JsonObject
+        {
+            ["nodeUuid"] = uuid,
+            ["nodeName"] = entry.NodeName ?? uuid[..8],
+            ["logicName"] = entry.LogicName,
+            ["timestamp"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
+            ["payloadVersion"] = (int)payload.PayloadVersion,
+            ["version"] = new JsonObject
+            {
+                ["productionName"] = payload.Version.ProductionName,
+                ["gitCommit"] = payload.Version.GitCommit,
+                ["buildTime"] = payload.Version.BuildTime
+            },
+            ["debugInfo"] = new JsonObject
+            {
+                ["ilOffset"] = payload.DebugInfo.ILOffset,
+                ["lineNo"] = payload.DebugInfo.LineNo
+            },
+            ["errorType"] = payload.Layout.ToString(),
+            ["errorString"] = payload.Layout == CoreDumpLayout.String ? payload.GetErrorString() : null,
+            ["coreDump"] = FormatCoreDumpJson(payload)
+        };
+
+        return errorData.ToJsonString();
+    }
+
+    private static JsonObject? FormatCoreDumpJson(ErrorPayload payload)
+    {
+        if (payload.Layout != CoreDumpLayout.STM32F4)
+            return null;
+
+        var f4 = payload.GetF4CoreDump();
+        if (!f4.HasValue)
+            return null;
+
+        return new JsonObject
+        {
+            ["r0"] = f4.Value.R0,
+            ["r1"] = f4.Value.R1,
+            ["r2"] = f4.Value.R2,
+            ["r3"] = f4.Value.R3,
+            ["r12"] = f4.Value.R12,
+            ["lr"] = f4.Value.LR,
+            ["pc"] = f4.Value.PC,
+            ["psr"] = f4.Value.PSR,
+            ["msr"] = f4.Value.MSR,
+            ["cfsr"] = f4.Value.CFSR,
+            ["hfsr"] = f4.Value.HFSR,
+            ["dfsr"] = f4.Value.DFSR,
+            ["afsr"] = f4.Value.AFSR,
+            ["bfar"] = f4.Value.BFAR,
+            ["mmar"] = f4.Value.MMAR,
+            ["msp"] = f4.Value.MSP,
+            ["stackEnd"] = f4.Value.StackEnd
+        };
+    }
+
     #endregion
 
     #region 序列化/反序列化
@@ -1127,34 +1282,68 @@ public sealed class DIVERSession : IDisposable
     private static void WriteTypedValue(BinaryWriter bw, int typeid, object? val)
     {
         val ??= HostRuntime.GetDefaultValue(typeid);
+        
+        // 将值转换为 double，统一处理各种数值类型（包括 JsonElement）
+        double numVal = 0;
+        if (val != null)
+        {
+            if (val is System.Text.Json.JsonElement je)
+            {
+                // JsonElement 需要特殊处理
+                if (je.ValueKind == System.Text.Json.JsonValueKind.Number)
+                {
+                    numVal = je.GetDouble();
+                }
+                else if (je.ValueKind == System.Text.Json.JsonValueKind.True)
+                {
+                    numVal = 1;
+                }
+                else if (je.ValueKind == System.Text.Json.JsonValueKind.False)
+                {
+                    numVal = 0;
+                }
+            }
+            else
+            {
+                try
+                {
+                    numVal = Convert.ToDouble(val);
+                }
+                catch
+                {
+                    numVal = 0;
+                }
+            }
+        }
+        
         switch (typeid)
         {
-            case 0:
-                bw.Write(Convert.ToBoolean(val));
+            case 0: // bool
+                bw.Write(numVal != 0);
                 break;
-            case 1:
-                bw.Write(Convert.ToByte(val));
+            case 1: // byte
+                bw.Write((byte)Math.Clamp(Math.Round(numVal), byte.MinValue, byte.MaxValue));
                 break;
-            case 2:
-                bw.Write(Convert.ToSByte(val));
+            case 2: // sbyte
+                bw.Write((sbyte)Math.Clamp(Math.Round(numVal), sbyte.MinValue, sbyte.MaxValue));
                 break;
-            case 3:
-                bw.Write(Convert.ToChar(val));
+            case 3: // char
+                bw.Write((char)Math.Clamp(Math.Round(numVal), char.MinValue, char.MaxValue));
                 break;
-            case 4:
-                bw.Write(Convert.ToInt16(val));
+            case 4: // int16
+                bw.Write((short)Math.Clamp(Math.Round(numVal), short.MinValue, short.MaxValue));
                 break;
-            case 5:
-                bw.Write(Convert.ToUInt16(val));
+            case 5: // uint16
+                bw.Write((ushort)Math.Clamp(Math.Round(numVal), ushort.MinValue, ushort.MaxValue));
                 break;
-            case 6:
-                bw.Write(Convert.ToInt32(val));
+            case 6: // int32
+                bw.Write((int)Math.Clamp(Math.Round(numVal), int.MinValue, int.MaxValue));
                 break;
-            case 7:
-                bw.Write(Convert.ToUInt32(val));
+            case 7: // uint32
+                bw.Write((uint)Math.Clamp(Math.Round(numVal), uint.MinValue, uint.MaxValue));
                 break;
-            case 8:
-                bw.Write(Convert.ToSingle(val));
+            case 8: // float
+                bw.Write((float)numVal);
                 break;
         }
     }

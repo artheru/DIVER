@@ -60,6 +60,9 @@ public class MCUNode : IDisposable
     
     /// <summary>控制台输出事件</summary>
     internal event Action<string>? OnConsoleOutput;
+    
+    /// <summary>致命错误事件（MCU HardFault 或 ASSERT 失败）</summary>
+    internal event Action<ErrorPayload>? OnFatalError;
 
     public MCUNode(string nodeId, string mcuUri)
     {
@@ -134,6 +137,7 @@ public class MCUNode : IDisposable
             // Register callbacks
             _bridge.RegisterMemoryLowerIOCallback(data => OnLowerIOReceived?.Invoke(data));
             _bridge.RegisterConsoleWriteLineCallback(msg => OnConsoleOutput?.Invoke(msg));
+            _bridge.RegisterFatalErrorCallback(payload => OnFatalError?.Invoke(payload));
 
             LastError = null;
             return true;

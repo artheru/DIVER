@@ -715,6 +715,29 @@ MCUSerialBridgeError msb_register_console_writeline_callback(
 }
 
 // --------------------
+// 注册 Fatal Error 回调
+// --------------------
+MCUSerialBridgeError msb_register_fatal_error_callback(
+        msb_handle* handle,
+        msb_on_fatal_error_callback_function_t callback,
+        void* user_ctx)
+{
+    if (!handle)
+        return MSB_Error_Win_HandleNotFound;
+
+    handle->fatal_error_callback = NULL;
+    handle->fatal_error_callback_ctx = user_ctx;
+    handle->fatal_error_callback = callback;
+    handle->last_fatal_error_time_ms = 0;  // 初始化为 0，首次一定会触发
+
+    DBG_PRINT(
+            "Registered fatal_error callback to[0x%08X]",
+            (uint32_t)(size_t)(void*)callback);
+
+    return MSB_Error_OK;
+}
+
+// --------------------
 // 获取运行时统计数据
 // --------------------
 DLL_EXPORT MCUSerialBridgeError msb_get_stats(
@@ -773,5 +796,6 @@ void mcu_serial_bridge_get_api(MCUSerialBridgeAPI* api)
     api->msb_memory_upper_io = msb_memory_upper_io;
     api->msb_register_memory_lower_io_callback = msb_register_memory_lower_io_callback;
     api->msb_register_console_writeline_callback = msb_register_console_writeline_callback;
+    api->msb_register_fatal_error_callback = msb_register_fatal_error_callback;
     api->msb_get_stats = msb_get_stats;
 }

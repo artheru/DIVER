@@ -131,11 +131,14 @@
             <JoystickWidget 
               v-if="widget.type === 'joystick'"
               :config="widget.config"
+              :type-id-x="getVarTypeId(widget.config.variableX as string)"
+              :type-id-y="getVarTypeId(widget.config.variableY as string)"
               @change="(v) => handleJoystickChange(widget, v)"
             />
             <SliderWidget 
               v-else-if="widget.type === 'slider'"
               :config="widget.config"
+              :type-id="getVarTypeId(widget.config.variable as string)"
               @change="(v) => handleSliderChange(widget, v)"
             />
             <SwitchWidget 
@@ -168,85 +171,167 @@
             <button class="close-btn" @click="closeConfigDialog">×</button>
           </div>
           <div class="config-dialog-body">
-            <!-- 通用配置 -->
+            <!-- Position -->
             <div class="config-section">
-              <h4>Grid Position</h4>
-              <div class="config-row">
-                <label>Column</label>
-                <input type="number" v-model.number="editingWidget.gridX" :min="0" :max="gridCols - 1" />
-              </div>
-              <div class="config-row">
-                <label>Row</label>
-                <input type="number" v-model.number="editingWidget.gridY" :min="0" :max="gridRows - 1" />
-              </div>
-              <div class="config-row">
-                <label>Width (cells)</label>
-                <input type="number" v-model.number="editingWidget.gridW" :min="1" :max="gridCols" />
-              </div>
-              <div class="config-row">
-                <label>Height (cells)</label>
-                <input type="number" v-model.number="editingWidget.gridH" :min="1" :max="gridRows" />
+              <h4>Position</h4>
+              <div class="config-row-inline">
+                <div class="inline-field">
+                  <label>Col</label>
+                  <input type="number" v-model.number="editingWidget.gridX" :min="0" :max="gridCols - 1" />
+                </div>
+                <div class="inline-field">
+                  <label>Row</label>
+                  <input type="number" v-model.number="editingWidget.gridY" :min="0" :max="gridRows - 1" />
+                </div>
+                <div class="inline-field">
+                  <label>W</label>
+                  <input type="number" v-model.number="editingWidget.gridW" :min="1" :max="gridCols" />
+                </div>
+                <div class="inline-field">
+                  <label>H</label>
+                  <input type="number" v-model.number="editingWidget.gridH" :min="1" :max="gridRows" />
+                </div>
               </div>
             </div>
 
             <!-- 摇杆配置 -->
             <template v-if="editingWidget.type === 'joystick'">
+              <!-- X Axis -->
               <div class="config-section">
-                <h4>Variable Binding</h4>
+                <h4>X Axis (Left/Right)</h4>
                 <div class="config-row">
-                  <label>X Axis</label>
-                  <select v-model="editingWidget.config.variableX">
+                  <label>Variable</label>
+                  <select v-model="editingWidget.config.variableX" @change="onJoystickVarXChange">
                     <option value="">-- None --</option>
-                    <option v-for="v in controllableVarList" :key="v" :value="v">{{ v }}</option>
+                    <option v-for="v in controllableVarList" :key="v.name" :value="v.name">
+                      {{ v.name }} ({{ v.type }})
+                    </option>
                   </select>
                 </div>
-                <div class="config-row">
-                  <label>Y Axis</label>
-                  <select v-model="editingWidget.config.variableY">
-                    <option value="">-- None --</option>
-                    <option v-for="v in controllableVarList" :key="v" :value="v">{{ v }}</option>
-                  </select>
+                <div class="config-row-inline">
+                  <div class="range-field">
+                    <label>Range</label>
+                    <input type="number" v-model.number="editingWidget.config.minX" step="any" />
+                    <span class="range-sep">→</span>
+                    <input type="number" v-model.number="editingWidget.config.maxX" step="any" />
+                  </div>
+                  <div class="toggle-field">
+                    <label>Auto Return</label>
+                    <button 
+                      class="toggle-switch" 
+                      :class="{ on: editingWidget.config.autoReturnX }"
+                      @click="editingWidget.config.autoReturnX = !editingWidget.config.autoReturnX"
+                    >
+                      <span class="toggle-slider"></span>
+                    </button>
+                  </div>
                 </div>
               </div>
+              
+              <!-- Y Axis -->
               <div class="config-section">
-                <h4>Range</h4>
+                <h4>Y Axis (Up/Down)</h4>
                 <div class="config-row">
-                  <label>Min X</label>
-                  <input type="number" v-model.number="editingWidget.config.minX" step="0.1" />
+                  <label>Variable</label>
+                  <select v-model="editingWidget.config.variableY" @change="onJoystickVarYChange">
+                    <option value="">-- None --</option>
+                    <option v-for="v in controllableVarList" :key="v.name" :value="v.name">
+                      {{ v.name }} ({{ v.type }})
+                    </option>
+                  </select>
                 </div>
-                <div class="config-row">
-                  <label>Max X</label>
-                  <input type="number" v-model.number="editingWidget.config.maxX" step="0.1" />
+                <div class="config-row-inline">
+                  <div class="range-field">
+                    <label>Range</label>
+                    <input type="number" v-model.number="editingWidget.config.minY" step="any" />
+                    <span class="range-sep">→</span>
+                    <input type="number" v-model.number="editingWidget.config.maxY" step="any" />
+                  </div>
+                  <div class="toggle-field">
+                    <label>Auto Return</label>
+                    <button 
+                      class="toggle-switch" 
+                      :class="{ on: editingWidget.config.autoReturnY }"
+                      @click="editingWidget.config.autoReturnY = !editingWidget.config.autoReturnY"
+                    >
+                      <span class="toggle-slider"></span>
+                    </button>
+                  </div>
                 </div>
+              </div>
+              
+              <!-- Keyboard -->
+              <div class="config-section">
+                <h4>Keyboard</h4>
                 <div class="config-row">
-                  <label>Min Y</label>
-                  <input type="number" v-model.number="editingWidget.config.minY" step="0.1" />
+                  <label>Preset</label>
+                  <select @change="applyJoystickPreset($event)">
+                    <option value="">-- Select --</option>
+                    <option value="wasd">WASD</option>
+                    <option value="ijkl">IJKL</option>
+                    <option value="arrows">Arrow Keys</option>
+                  </select>
                 </div>
-                <div class="config-row">
-                  <label>Max Y</label>
-                  <input type="number" v-model.number="editingWidget.config.maxY" step="0.1" />
+                <div class="key-grid">
+                  <div class="key-row">
+                    <input type="text" class="key-input" :value="editingWidget.config.keyUp" @keydown.prevent="captureKey($event, 'keyUp')" placeholder="↑" readonly />
+                  </div>
+                  <div class="key-row">
+                    <input type="text" class="key-input" :value="editingWidget.config.keyLeft" @keydown.prevent="captureKey($event, 'keyLeft')" placeholder="←" readonly />
+                    <span class="key-center">⊕</span>
+                    <input type="text" class="key-input" :value="editingWidget.config.keyRight" @keydown.prevent="captureKey($event, 'keyRight')" placeholder="→" readonly />
+                  </div>
+                  <div class="key-row">
+                    <input type="text" class="key-input" :value="editingWidget.config.keyDown" @keydown.prevent="captureKey($event, 'keyDown')" placeholder="↓" readonly />
+                  </div>
                 </div>
-                <div class="config-row">
-                  <label>Auto Return</label>
-                  <input type="checkbox" v-model="editingWidget.config.autoReturn" />
+                <div class="config-row-inline speed-row">
+                  <div class="speed-field">
+                    <label>Move</label>
+                    <input type="number" v-model.number="editingWidget.config.moveSpeed" min="10" max="500" step="10" placeholder="100" />
+                    <span class="speed-unit">%/s</span>
+                  </div>
+                  <div class="speed-field">
+                    <label>Return</label>
+                    <input type="number" v-model.number="editingWidget.config.returnSpeed" min="10" max="500" step="10" placeholder="200" />
+                    <span class="speed-unit">%/s</span>
+                  </div>
                 </div>
               </div>
             </template>
 
             <!-- 滑块配置 -->
             <template v-else-if="editingWidget.type === 'slider'">
+              <!-- Variable & Settings -->
               <div class="config-section">
-                <h4>Variable Binding</h4>
+                <h4>Variable &amp; Settings</h4>
                 <div class="config-row">
                   <label>Variable</label>
-                  <select v-model="editingWidget.config.variable">
+                  <select v-model="editingWidget.config.variable" @change="onSliderVarChange">
                     <option value="">-- None --</option>
-                    <option v-for="v in controllableVarList" :key="v" :value="v">{{ v }}</option>
+                    <option v-for="v in controllableVarList" :key="v.name" :value="v.name">
+                      {{ v.name }} ({{ v.type }})
+                    </option>
                   </select>
                 </div>
-              </div>
-              <div class="config-section">
-                <h4>Settings</h4>
+                <div class="config-row-inline">
+                  <div class="range-field">
+                    <label>Range</label>
+                    <input type="number" v-model.number="editingWidget.config.min" step="any" />
+                    <span class="range-sep">→</span>
+                    <input type="number" v-model.number="editingWidget.config.max" step="any" />
+                  </div>
+                  <div class="toggle-field">
+                    <label>Auto Return</label>
+                    <button 
+                      class="toggle-switch" 
+                      :class="{ on: editingWidget.config.autoReturn }"
+                      @click="editingWidget.config.autoReturn = !editingWidget.config.autoReturn"
+                    >
+                      <span class="toggle-slider"></span>
+                    </button>
+                  </div>
+                </div>
                 <div class="config-row">
                   <label>Orientation</label>
                   <select v-model="editingWidget.config.orientation">
@@ -254,41 +339,85 @@
                     <option value="vertical">Vertical</option>
                   </select>
                 </div>
+              </div>
+              
+              <!-- Keyboard -->
+              <div class="config-section">
+                <h4>Keyboard</h4>
                 <div class="config-row">
-                  <label>Min</label>
-                  <input type="number" v-model.number="editingWidget.config.min" step="0.1" />
+                  <label>Preset</label>
+                  <select @change="applySliderPreset($event)">
+                    <option value="">-- Select --</option>
+                    <option value="zx">Z / X</option>
+                    <option value="nm">N / M</option>
+                    <option value="rf">R / F</option>
+                    <option value="tg">T / G</option>
+                    <option value="yh">Y / H</option>
+                  </select>
                 </div>
-                <div class="config-row">
-                  <label>Max</label>
-                  <input type="number" v-model.number="editingWidget.config.max" step="0.1" />
+                <div class="key-pair">
+                  <div class="key-item">
+                    <span class="key-label">−</span>
+                    <input type="text" class="key-input" :value="editingWidget.config.keyDecrease" @keydown.prevent="captureKey($event, 'keyDecrease')" placeholder="-" readonly />
+                  </div>
+                  <div class="key-item">
+                    <span class="key-label">+</span>
+                    <input type="text" class="key-input" :value="editingWidget.config.keyIncrease" @keydown.prevent="captureKey($event, 'keyIncrease')" placeholder="+" readonly />
+                  </div>
                 </div>
-                <div class="config-row">
-                  <label>Auto Return</label>
-                  <input type="checkbox" v-model="editingWidget.config.autoReturn" />
+                <div class="config-row-inline speed-row">
+                  <div class="speed-field">
+                    <label>Move</label>
+                    <input type="number" v-model.number="editingWidget.config.moveSpeed" min="10" max="500" step="10" placeholder="100" />
+                    <span class="speed-unit">%/s</span>
+                  </div>
+                  <div class="speed-field">
+                    <label>Return</label>
+                    <input type="number" v-model.number="editingWidget.config.returnSpeed" min="10" max="500" step="10" placeholder="200" />
+                    <span class="speed-unit">%/s</span>
+                  </div>
                 </div>
               </div>
             </template>
 
             <!-- 开关配置 -->
             <template v-else-if="editingWidget.type === 'switch'">
+              <!-- Variable & Settings -->
               <div class="config-section">
-                <h4>Variable Binding</h4>
+                <h4>Variable &amp; Settings</h4>
                 <div class="config-row">
                   <label>Variable</label>
                   <select v-model="editingWidget.config.variable">
                     <option value="">-- None --</option>
-                    <option v-for="v in controllableVarList" :key="v" :value="v">{{ v }}</option>
+                    <option v-for="v in controllableVarList" :key="v.name" :value="v.name">
+                      {{ v.name }} ({{ v.type }})
+                    </option>
                   </select>
                 </div>
-              </div>
-              <div class="config-section">
-                <h4>Settings</h4>
                 <div class="config-row">
                   <label>States</label>
                   <select v-model.number="editingWidget.config.states">
                     <option :value="2">2 (OFF/ON)</option>
                     <option :value="3">3 (-1/0/+1)</option>
                   </select>
+                </div>
+              </div>
+              
+              <!-- Keyboard -->
+              <div class="config-section">
+                <h4>Keyboard</h4>
+                <div class="config-row">
+                  <label>Preset</label>
+                  <select @change="applySwitchPreset($event)">
+                    <option value="">-- Select --</option>
+                    <option value="c">C</option>
+                    <option value="v">V</option>
+                    <option value="b">B</option>
+                  </select>
+                </div>
+                <div class="key-single">
+                  <span class="key-label">Toggle</span>
+                  <input type="text" class="key-input large" :value="editingWidget.config.keyToggle" @keydown.prevent="captureKey($event, 'keyToggle')" placeholder="Press key..." readonly />
                 </div>
               </div>
             </template>
@@ -304,9 +433,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useRuntimeStore } from '@/stores'
+import { useRuntimeStore, useProjectStore } from '@/stores'
 import JoystickWidget from './JoystickWidget.vue'
 import SliderWidget from './SliderWidget.vue'
 import SwitchWidget from './SwitchWidget.vue'
@@ -328,6 +457,7 @@ const emit = defineEmits<{
 // ============================================
 
 const runtimeStore = useRuntimeStore()
+const projectStore = useProjectStore()
 
 // ============================================
 // 类型定义
@@ -348,7 +478,6 @@ interface GridWidget {
 // ============================================
 
 const CELL_SIZE = 32
-const STORAGE_KEY = 'controlWindowLayout'
 
 // ============================================
 // 窗口状态
@@ -371,8 +500,8 @@ const isResizing = ref(false)
 // 网格和控件状态
 // ============================================
 
-const gridCols = ref(8)
-const gridRows = ref(8)
+const gridCols = ref(12)
+const gridRows = ref(12)
 const isLocked = ref(false)
 const widgets = ref<GridWidget[]>([])
 
@@ -393,6 +522,7 @@ const widgetDragStartGridY = ref(0)
 
 // 控件调整大小
 const isWidgetResizing = ref(false)
+const resizingWidgetId = ref<string | null>(null)
 const widgetResizeStartX = ref(0)
 const widgetResizeStartY = ref(0)
 const widgetResizeStartW = ref(0)
@@ -421,18 +551,86 @@ const gridBackgroundStyle = computed(() => ({
   gridTemplateRows: `repeat(${gridRows.value}, ${CELL_SIZE}px)`
 }))
 
-// 可控变量列表 - 同时从 controllableVarNames 和 variableList 获取
-const { controllableVarNames, variableList } = storeToRefs(runtimeStore)
+// 可控变量列表 - 返回带有类型信息的对象
+const { fieldMetas, variableList } = storeToRefs(runtimeStore)
 
-const controllableVarList = computed(() => {
-  // 首先尝试从 controllableVarNames 获取
-  const fromControllable = Array.from(controllableVarNames.value)
-  if (fromControllable.length > 0) {
-    return fromControllable
-  }
-  // 如果为空，则从 variableList 获取所有变量名
-  return variableList.value.map(v => v.name)
+// 支持绑定的类型 ID（数值类型，不包括 string 等）
+// 0=bool, 1=byte, 2=sbyte, 3=char, 4=i16, 5=u16, 6=i32, 7=u32, 8=f32
+// 注意：只有 controllableVarNames 中的变量才能被控制
+const BINDABLE_TYPE_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
+// 整数类型 ID（用于决定显示格式）
+const INTEGER_TYPE_IDS = [0, 1, 2, 3, 4, 5, 6, 7]
+
+interface BindableVariable {
+  name: string
+  type: string
+  typeId: number
+  isInteger: boolean
+}
+
+const controllableVarList = computed<BindableVariable[]>(() => {
+  // 从 fieldMetas 获取变量元信息，过滤：
+  // 1. 必须是可控制的变量（非 LowerIO）
+  // 2. 必须是可绑定的数值类型
+  // 注意：fieldMetas 不需要 Start 就能获取，在页面加载时获取
+  return fieldMetas.value
+    .filter(f => 
+      !f.isLowerIO && 
+      BINDABLE_TYPE_IDS.includes(f.typeId)
+    )
+    .map(f => ({
+      name: f.name,
+      type: f.type,
+      typeId: f.typeId,
+      isInteger: INTEGER_TYPE_IDS.includes(f.typeId)
+    }))
 })
+
+// 根据变量名获取类型信息
+function getVarTypeId(varName: string): number {
+  const v = variableList.value.find(v => v.name === varName)
+  return v?.typeId ?? 8 // 默认 f32
+}
+
+function isIntegerType(typeId: number): boolean {
+  return INTEGER_TYPE_IDS.includes(typeId)
+}
+
+/** 获取类型对应的默认范围 */
+function getDefaultRange(typeId: number): { min: number; max: number } {
+  if (isIntegerType(typeId)) {
+    return { min: -100, max: 100 }
+  }
+  return { min: -1, max: 1 }
+}
+
+/** 当 Joystick X 变量改变时更新默认范围 */
+function onJoystickVarXChange() {
+  if (!editingWidget.value) return
+  const typeId = getVarTypeId(String(editingWidget.value.config.variableX || ''))
+  const range = getDefaultRange(typeId)
+  editingWidget.value.config.minX = range.min
+  editingWidget.value.config.maxX = range.max
+}
+
+/** 当 Joystick Y 变量改变时更新默认范围 */
+function onJoystickVarYChange() {
+  if (!editingWidget.value) return
+  const typeId = getVarTypeId(String(editingWidget.value.config.variableY || ''))
+  const range = getDefaultRange(typeId)
+  editingWidget.value.config.minY = range.min
+  editingWidget.value.config.maxY = range.max
+}
+
+/** 当 Slider 变量改变时更新默认范围 */
+function onSliderVarChange() {
+  if (!editingWidget.value) return
+  const typeId = getVarTypeId(String(editingWidget.value.config.variable || ''))
+  const range = getDefaultRange(typeId)
+  editingWidget.value.config.min = range.min
+  editingWidget.value.config.max = range.max
+}
 
 // ============================================
 // 窗口拖动
@@ -475,34 +673,45 @@ function stopDrag() {
 function addWidget(type: 'joystick' | 'slider' | 'switch') {
   const id = `widget-${Date.now()}`
   
-  // 默认配置
+  // 默认配置（float: -1~1, int: -100~100）
   const defaults: Record<string, Partial<GridWidget>> = {
     joystick: { 
-      gridW: 4, gridH: 4, 
-      config: { variableX: '', variableY: '', minX: -1, maxX: 1, minY: -1, maxY: 1, autoReturn: true } 
+      gridW: 5, gridH: 7, 
+      config: { 
+        variableX: '', variableY: '', 
+        minX: -1, maxX: 1, minY: -1, maxY: 1, 
+        autoReturnX: true, autoReturnY: true,
+        keyUp: '', keyDown: '', keyLeft: '', keyRight: '',
+        moveSpeed: 100, returnSpeed: 200
+      } 
     },
     slider: { 
-      gridW: 4, gridH: 2, 
-      config: { variable: '', orientation: 'horizontal', min: 0, max: 1, autoReturn: false } 
+      gridW: 5, gridH: 2, 
+      config: { 
+        variable: '', orientation: 'horizontal', 
+        min: -1, max: 1, autoReturn: false,
+        keyDecrease: '', keyIncrease: '',
+        moveSpeed: 100, returnSpeed: 200
+      } 
     },
     switch: { 
-      gridW: 2, gridH: 2, 
-      config: { variable: '', states: 2 } 
+      gridW: 3, gridH: 2, 
+      config: { variable: '', states: 2, keyToggle: '' } 
     }
   }
   
-  const def = defaults[type]
+  const def = defaults[type]!
   
   // 找到空闲位置
-  const pos = findEmptyPosition(def.gridW || 2, def.gridH || 2)
+  const pos = findEmptyPosition(def.gridW ?? 2, def.gridH ?? 2)
   
   widgets.value.push({
     id,
     type,
     gridX: pos.x,
     gridY: pos.y,
-    gridW: def.gridW || 2,
-    gridH: def.gridH || 2,
+    gridW: def.gridW ?? 2,
+    gridH: def.gridH ?? 2,
     config: { ...def.config } as Record<string, unknown>
   })
   
@@ -603,18 +812,23 @@ function stopWidgetDrag() {
 // ============================================
 
 function startWidgetResize(widget: GridWidget, event: MouseEvent) {
+  event.stopPropagation()
   isWidgetResizing.value = true
+  resizingWidgetId.value = widget.id
   widgetResizeStartX.value = event.clientX
   widgetResizeStartY.value = event.clientY
   widgetResizeStartW.value = widget.gridW
   widgetResizeStartH.value = widget.gridH
   
-  document.addEventListener('mousemove', (e) => onWidgetResize(widget, e))
-  document.addEventListener('mouseup', () => stopWidgetResize(widget))
+  document.addEventListener('mousemove', onWidgetResizeMove)
+  document.addEventListener('mouseup', stopWidgetResizeMove)
 }
 
-function onWidgetResize(widget: GridWidget, event: MouseEvent) {
-  if (!isWidgetResizing.value) return
+function onWidgetResizeMove(event: MouseEvent) {
+  if (!isWidgetResizing.value || !resizingWidgetId.value) return
+  
+  const widget = widgets.value.find(w => w.id === resizingWidgetId.value)
+  if (!widget) return
   
   const dx = event.clientX - widgetResizeStartX.value
   const dy = event.clientY - widgetResizeStartY.value
@@ -633,10 +847,11 @@ function onWidgetResize(widget: GridWidget, event: MouseEvent) {
   }
 }
 
-function stopWidgetResize(_widget: GridWidget) {
+function stopWidgetResizeMove() {
   isWidgetResizing.value = false
-  document.removeEventListener('mousemove', onWidgetResize as EventListener)
-  document.removeEventListener('mouseup', stopWidgetResize as EventListener)
+  resizingWidgetId.value = null
+  document.removeEventListener('mousemove', onWidgetResizeMove)
+  document.removeEventListener('mouseup', stopWidgetResizeMove)
   saveLayout()
 }
 
@@ -668,33 +883,122 @@ function saveWidgetConfig() {
 }
 
 // ============================================
-// 控件值变化处理
+// 键盘绑定配置
 // ============================================
 
-async function handleJoystickChange(widget: GridWidget, value: { x: number; y: number }) {
+/** 捕获按键 */
+function captureKey(event: KeyboardEvent, field: string) {
+  if (!editingWidget.value) return
+  editingWidget.value.config[field] = event.key
+}
+
+/** 应用摇杆预设 */
+function applyJoystickPreset(event: Event) {
+  if (!editingWidget.value) return
+  const preset = (event.target as HTMLSelectElement).value
+  
+  const presets: Record<string, { up: string; down: string; left: string; right: string }> = {
+    wasd: { up: 'w', down: 's', left: 'a', right: 'd' },
+    ijkl: { up: 'i', down: 'k', left: 'j', right: 'l' },
+    arrows: { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight' }
+  }
+  
+  const p = presets[preset]
+  if (p) {
+    editingWidget.value.config.keyUp = p.up
+    editingWidget.value.config.keyDown = p.down
+    editingWidget.value.config.keyLeft = p.left
+    editingWidget.value.config.keyRight = p.right
+  }
+  
+  // 重置 select
+  ;(event.target as HTMLSelectElement).value = ''
+}
+
+/** 应用滑块预设 */
+function applySliderPreset(event: Event) {
+  if (!editingWidget.value) return
+  const preset = (event.target as HTMLSelectElement).value
+  
+  const presets: Record<string, { dec: string; inc: string }> = {
+    zx: { dec: 'z', inc: 'x' },
+    nm: { dec: 'n', inc: 'm' },
+    rf: { dec: 'r', inc: 'f' },
+    tg: { dec: 't', inc: 'g' },
+    yh: { dec: 'y', inc: 'h' }
+  }
+  
+  const p = presets[preset]
+  if (p) {
+    editingWidget.value.config.keyDecrease = p.dec
+    editingWidget.value.config.keyIncrease = p.inc
+  }
+  
+  ;(event.target as HTMLSelectElement).value = ''
+}
+
+/** 应用开关预设 */
+function applySwitchPreset(event: Event) {
+  if (!editingWidget.value) return
+  const preset = (event.target as HTMLSelectElement).value
+  
+  if (preset) {
+    editingWidget.value.config.keyToggle = preset
+  }
+  
+  ;(event.target as HTMLSelectElement).value = ''
+}
+
+// ============================================
+// 控件值变化处理（节流）
+// ============================================
+
+// 变量发送节流：100ms 间隔（每秒最多 10 次）
+const SEND_THROTTLE_MS = 100
+const pendingVars = new Map<string, unknown>()
+let sendTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleSend() {
+  if (sendTimer !== null) return
+  sendTimer = setTimeout(flushPendingVars, SEND_THROTTLE_MS)
+}
+
+async function flushPendingVars() {
+  sendTimer = null
+  if (pendingVars.size === 0) return
+  
+  const toSend = new Map(pendingVars)
+  pendingVars.clear()
+  
+  for (const [name, value] of toSend) {
+    try {
+      await runtimeStore.setVariable(name, value)
+    } catch (error) {
+      console.error(`Failed to set variable ${name}:`, error)
+    }
+  }
+}
+
+function handleJoystickChange(widget: GridWidget, value: { x?: number; y?: number }) {
   const varX = widget.config.variableX as string
   const varY = widget.config.variableY as string
   
-  try {
-    if (varX) await runtimeStore.setVariable(varX, value.x)
-    if (varY) await runtimeStore.setVariable(varY, value.y)
-  } catch (error) {
-    console.error('Failed to set joystick variables:', error)
-  }
+  // 只发送变化的轴（undefined 表示没变化）
+  if (varX && value.x !== undefined) pendingVars.set(varX, value.x)
+  if (varY && value.y !== undefined) pendingVars.set(varY, value.y)
+  if (pendingVars.size > 0) scheduleSend()
 }
 
-async function handleSliderChange(widget: GridWidget, value: number) {
+function handleSliderChange(widget: GridWidget, value: number) {
   const varName = widget.config.variable as string
   if (!varName) return
   
-  try {
-    await runtimeStore.setVariable(varName, value)
-  } catch (error) {
-    console.error('Failed to set slider variable:', error)
-  }
+  pendingVars.set(varName, value)
+  scheduleSend()
 }
 
 async function handleSwitchChange(widget: GridWidget, value: number) {
+  // Switch 不需要节流，立即发送
   const varName = widget.config.variable as string
   if (!varName) return
   
@@ -718,7 +1022,7 @@ function getWidgetStyle(widget: GridWidget) {
   }
 }
 
-function isDropTarget(index: number): boolean {
+function isDropTarget(_index: number): boolean {
   // 暂时不实现拖放高亮
   return false
 }
@@ -743,40 +1047,34 @@ function closeMenus() {
 // ============================================
 
 function saveLayout() {
-  const layout = {
+  projectStore.updateControlLayout({
     windowX: windowX.value,
     windowY: windowY.value,
     gridCols: gridCols.value,
     gridRows: gridRows.value,
     isLocked: isLocked.value,
     widgets: widgets.value
-  }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(layout))
+  })
 }
 
 function loadLayout() {
-  const saved = localStorage.getItem(STORAGE_KEY)
-  if (saved) {
-    try {
-      const layout = JSON.parse(saved)
-      windowX.value = layout.windowX ?? 100
-      windowY.value = layout.windowY ?? 100
-      gridCols.value = layout.gridCols ?? 8
-      gridRows.value = layout.gridRows ?? 8
-      isLocked.value = layout.isLocked ?? false
-      widgets.value = layout.widgets ?? []
-    } catch {
-      console.warn('Failed to load control window layout')
-    }
-  }
+  const layout = projectStore.controlLayout
+  windowX.value = layout.windowX ?? 100
+  windowY.value = layout.windowY ?? 100
+  gridCols.value = layout.gridCols ?? 12
+  gridRows.value = layout.gridRows ?? 12
+  isLocked.value = layout.isLocked ?? false
+  widgets.value = layout.widgets ?? []
 }
 
 // ============================================
 // 生命周期
 // ============================================
 
-onMounted(() => {
+onMounted(async () => {
   loadLayout()
+  // 刷新字段元信息（用于遥控器绑定）
+  await runtimeStore.refreshFieldMetas()
 })
 
 // 点击窗口外部取消选择
@@ -1055,7 +1353,7 @@ onUnmounted(() => {
   background: var(--panel-color);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  width: 400px;
+  width: 480px;
   max-height: 80vh;
   overflow: hidden;
   display: flex;
@@ -1096,33 +1394,40 @@ onUnmounted(() => {
 
 .config-section {
   margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.config-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
 }
 
 .config-section h4 {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--text-muted);
-  margin: 0 0 8px 0;
+  color: var(--primary);
+  margin: 0 0 10px 0;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
+/* 基本行布局 */
 .config-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   margin-bottom: 8px;
 }
 
 .config-row label {
   font-size: 13px;
   color: var(--text-muted);
+  width: 80px;
+  flex-shrink: 0;
 }
 
-.config-row input[type="number"],
-.config-row input[type="text"],
 .config-row select {
-  width: 140px;
+  flex: 1;
   padding: 6px 10px;
   background: var(--body-color);
   border: 1px solid var(--border-color);
@@ -1131,9 +1436,254 @@ onUnmounted(() => {
   font-size: 13px;
 }
 
-.config-row input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
+/* 内联多字段行 */
+.config-row-inline {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.inline-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inline-field label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.inline-field input[type="number"] {
+  width: 55px;
+  padding: 6px 8px;
+  background: var(--body-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-color);
+  font-size: 13px;
+  text-align: center;
+}
+
+.inline-field input[type="number"]::-webkit-inner-spin-button {
+  margin-left: 6px;
+}
+
+/* Range 字段 */
+.range-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.range-field label {
+  font-size: 12px;
+  color: var(--text-muted);
+  width: 50px;
+  flex-shrink: 0;
+}
+
+.range-field input[type="number"] {
+  width: 90px;
+  padding: 6px 8px;
+  background: var(--body-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-color);
+  font-size: 13px;
+  text-align: right;
+}
+
+.range-field input[type="number"]::-webkit-inner-spin-button {
+  margin-left: 6px;
+}
+
+.range-sep {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Toggle 开关字段 */
+.toggle-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toggle-field label {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.toggle-switch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  background: var(--body-color);
+  border: 1px solid var(--border-color);
+  border-radius: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.toggle-switch .toggle-slider {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: all 0.2s;
+}
+
+.toggle-switch.on {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.toggle-switch.on .toggle-slider {
+  left: 20px;
+  background: white;
+}
+
+/* Speed 字段 */
+.speed-row {
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.speed-row {
+  justify-content: space-between;
+}
+
+.speed-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.speed-field label {
+  font-size: 13px;
+  color: var(--text-color);
+  min-width: 45px;
+}
+
+.speed-field input[type="number"] {
+  width: 70px;
+  padding: 6px 8px;
+  background: var(--body-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-color);
+  font-size: 13px;
+  text-align: right;
+}
+
+.speed-field input[type="number"]::-webkit-inner-spin-button {
+  margin-left: 6px;
+}
+
+.speed-unit {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* 按键绑定网格（摇杆用） */
+.key-grid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px;
+  background: var(--body-color);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+}
+
+.key-grid .key-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.key-input {
+  width: 38px;
+  height: 30px;
+  text-align: center;
+  background: var(--panel-color-2);
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-color);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.key-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.3);
+}
+
+.key-input::placeholder {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.key-center {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* 按键对（滑块用） */
+.key-pair {
+  display: flex;
+  justify-content: center;
+  gap: 32px;
+  padding: 10px;
+  background: var(--body-color);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+}
+
+.key-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.key-label {
+  font-size: 16px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* 单个按键（开关用） */
+.key-single {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px;
+  background: var(--body-color);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+}
+
+.key-input.large {
+  width: 70px;
+  height: 36px;
+  font-size: 14px;
 }
 
 .config-dialog-footer {

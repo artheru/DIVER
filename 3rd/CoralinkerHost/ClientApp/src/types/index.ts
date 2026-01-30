@@ -20,6 +20,29 @@ export interface ProjectState {
   selectedFile: string | null
   /** 最后一次构建的 ID */
   lastBuildId: string | null
+  /** 遥控器布局配置 */
+  controlLayout?: ControlLayoutConfig
+}
+
+/** 遥控器布局配置 */
+export interface ControlLayoutConfig {
+  windowX: number
+  windowY: number
+  gridCols: number
+  gridRows: number
+  isLocked: boolean
+  widgets: ControlWidget[]
+}
+
+/** 遥控器控件 */
+export interface ControlWidget {
+  id: string
+  type: 'joystick' | 'slider' | 'switch'
+  gridX: number
+  gridY: number
+  gridW: number
+  gridH: number
+  config: Record<string, any>
 }
 
 // ============================================
@@ -185,6 +208,18 @@ export interface SessionState {
 // ============================================
 // 变量相关类型
 // ============================================
+
+/**
+ * Cart 字段元信息 - 不含值，用于获取可绑定变量列表（不需要 Start）
+ */
+export interface CartFieldMeta {
+  name: string
+  type: string
+  typeId: number
+  isLowerIO: boolean
+  isUpperIO: boolean
+  isMutual: boolean
+}
 
 /**
  * Cart 字段值 - 对应 CartFieldValue

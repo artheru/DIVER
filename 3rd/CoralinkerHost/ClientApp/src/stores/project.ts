@@ -14,7 +14,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as projectApi from '@/api/project'
 import * as deviceApi from '@/api/device'
-import type { ProjectState, BuildResult, NodeExportData } from '@/types'
+import type { ProjectState, BuildResult, NodeExportData, ControlLayoutConfig, ControlWidget } from '@/types'
 
 export const useProjectStore = defineStore('project', () => {
   // ============================================
@@ -41,6 +41,16 @@ export const useProjectStore = defineStore('project', () => {
   
   /** 最后一次构建结果 */
   const lastBuildResult = ref<BuildResult | null>(null)
+  
+  /** 遥控器布局配置 */
+  const controlLayout = ref<ControlLayoutConfig>({
+    windowX: 100,
+    windowY: 100,
+    gridCols: 12,
+    gridRows: 12,
+    isLocked: false,
+    widgets: []
+  })
   
   // ============================================
   // 计算属性
@@ -69,6 +79,11 @@ export const useProjectStore = defineStore('project', () => {
       selectedFile.value = state.selectedFile
       lastBuildId.value = state.lastBuildId
       
+      // 加载遥控器配置（如果有）
+      if (state.controlLayout) {
+        controlLayout.value = state.controlLayout
+      }
+      
       dirty.value = false
       syncState.value = 'synced'
       
@@ -94,7 +109,8 @@ export const useProjectStore = defineStore('project', () => {
       const state: ProjectState = {
         selectedAsset: selectedAsset.value,
         selectedFile: selectedFile.value,
-        lastBuildId: lastBuildId.value
+        lastBuildId: lastBuildId.value,
+        controlLayout: controlLayout.value
       }
       
       // 更新项目状态
@@ -133,6 +149,22 @@ export const useProjectStore = defineStore('project', () => {
   }
   
   /**
+   * 更新遥控器布局配置
+   */
+  function updateControlLayout(layout: Partial<ControlLayoutConfig>) {
+    Object.assign(controlLayout.value, layout)
+    dirty.value = true
+  }
+  
+  /**
+   * 设置遥控器控件列表
+   */
+  function setControlWidgets(widgets: ControlWidget[]) {
+    controlLayout.value.widgets = widgets
+    dirty.value = true
+  }
+  
+  /**
    * 创建新项目
    */
   async function createNew() {
@@ -145,6 +177,14 @@ export const useProjectStore = defineStore('project', () => {
       selectedFile.value = null
       lastBuildId.value = null
       lastBuildResult.value = null
+      controlLayout.value = {
+        windowX: 100,
+        windowY: 100,
+        gridCols: 12,
+        gridRows: 12,
+        isLocked: false,
+        widgets: []
+      }
       
       dirty.value = false
       syncState.value = 'synced'
@@ -231,6 +271,7 @@ export const useProjectStore = defineStore('project', () => {
     dirty,
     syncState,
     lastBuildResult,
+    controlLayout,
     
     // 计算属性
     hasSelectedAsset,
@@ -241,6 +282,8 @@ export const useProjectStore = defineStore('project', () => {
     saveProject,
     setSelectedAsset,
     setSelectedFile,
+    updateControlLayout,
+    setControlWidgets,
     createNew,
     exportZip,
     build,

@@ -28,6 +28,13 @@
             
             <!-- 路由视图 -->
             <router-view v-else />
+
+            <!-- MCU 致命错误对话框 -->
+            <FatalErrorDialog 
+              v-model:show="showFatalError"
+              :error-data="currentFatalError"
+              @goto-source="handleGotoSource"
+            />
           </div>
         </n-notification-provider>
       </n-dialog-provider>
@@ -36,7 +43,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { 
   NConfigProvider, 
   NMessageProvider, 
@@ -47,7 +54,8 @@ import {
   type GlobalThemeOverrides
 } from 'naive-ui'
 import { useProjectStore, useFilesStore, useUiStore } from '@/stores'
-import { useSignalR } from '@/composables'
+import { useSignalR, type FatalErrorData } from '@/composables'
+import FatalErrorDialog from '@/components/graph/FatalErrorDialog.vue'
 
 // ============================================
 // 主题配置
@@ -108,7 +116,41 @@ const filesStore = useFilesStore()
 const uiStore = useUiStore()
 
 // 初始化 SignalR 连接
-useSignalR()
+const { onFatalError, offFatalError } = useSignalR()
+
+// ============================================
+// 致命错误处理
+// ============================================
+
+const showFatalError = ref(false)
+const currentFatalError = ref<FatalErrorData | null>(null)
+
+/**
+ * 处理 MCU 致命错误
+ */
+function handleFatalError(errorData: FatalErrorData) {
+  console.error('[App] Fatal error received:', errorData)
+  currentFatalError.value = errorData
+  showFatalError.value = true
+}
+
+/**
+ * 跳转到源代码
+ */
+function handleGotoSource(file: string, line: number) {
+  console.log(`[App] Go to source: ${file}:${line}`)
+  // 通过 UI store 触发源码跳转
+  uiStore.gotoSource(file, line)
+}
+
+// 注册致命错误回调
+onMounted(() => {
+  onFatalError(handleFatalError)
+})
+
+onUnmounted(() => {
+  offFatalError(handleFatalError)
+})
 
 /**
  * 应用初始化

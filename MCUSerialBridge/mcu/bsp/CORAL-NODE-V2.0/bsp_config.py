@@ -3,6 +3,7 @@ CHIP_NAME = "STM32F405RG"
 
 # 预定义宏
 CPP_DEFINES = {
+    "USE_CCM_RAM": True,
     "HSE_VALUE": 12000000,
     "FORCE_PLL_M": 12,
 }

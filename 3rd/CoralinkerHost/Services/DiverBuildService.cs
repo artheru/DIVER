@@ -20,28 +20,31 @@ public sealed class DiverBuildService
     {
         _store.EnsureDataLayout();
         
-        await _terminal.LineAsync($"[build] ========== Starting Build Process ==========", ct);
-        await _terminal.LineAsync($"[build] Target file: {logicFileName}", ct);
-        await _terminal.LineAsync($"[build] Source length: {logicCs.Length} characters", ct);
+        // 清空 Build 日志缓冲区
+        _terminal.ClearBuildHistory();
+        
+        await _terminal.BuildLineAsync($"========== Starting Build Process ==========", ct);
+        await _terminal.BuildLineAsync($"Target file: {logicFileName}", ct);
+        await _terminal.BuildLineAsync($"Source length: {logicCs.Length} characters", ct);
 
         // Use single fixed build folder - clear it before each build
         var buildRoot = Path.Combine(_store.BuildsDir, "current");
         if (Directory.Exists(buildRoot))
         {
-            await _terminal.LineAsync($"[build] Cleaning previous build folder: {buildRoot}", ct);
+            await _terminal.BuildLineAsync($"Cleaning previous build folder: {buildRoot}", ct);
             try
             {
                 Directory.Delete(buildRoot, recursive: true);
-                await _terminal.LineAsync($"[build] Clean completed successfully", ct);
+                await _terminal.BuildLineAsync($"Clean completed successfully", ct);
             }
             catch (Exception ex)
             {
-                await _terminal.LineAsync($"[build] Warning: Could not fully clean build folder: {ex.Message}", ct);
+                await _terminal.BuildLineAsync($"Warning: Could not fully clean build folder: {ex.Message}", ct);
             }
         }
         
         Directory.CreateDirectory(buildRoot);
-        await _terminal.LineAsync($"[build] Build root created: {buildRoot}", ct);
+        await _terminal.BuildLineAsync($"Build root created: {buildRoot}", ct);
         var projDir = Path.Combine(buildRoot, "proj");
         Directory.CreateDirectory(projDir);
 
@@ -78,14 +81,14 @@ public sealed class DiverBuildService
         if (Directory.Exists(_store.InputsDir))
         {
             var sourceFiles = Directory.GetFiles(_store.InputsDir, "*.cs", SearchOption.AllDirectories);
-            await _terminal.LineAsync($"[build] Copying {sourceFiles.Length} source file(s) from inputs:", ct);
+            await _terminal.BuildLineAsync($"Copying {sourceFiles.Length} source file(s) from inputs:", ct);
             foreach (var src in sourceFiles)
             {
                 var rel = Path.GetRelativePath(_store.InputsDir, src);
                 var dest = Path.Combine(projDir, rel);
                 Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
                 File.Copy(src, dest, overwrite: true);
-                await _terminal.LineAsync($"[build]   + {rel}", ct);
+                await _terminal.BuildLineAsync($"  + {rel}", ct);
             }
         }
         else
@@ -101,7 +104,7 @@ public sealed class DiverBuildService
         // Only write if we haven't just copied it (technically we did, but this ensures logicCs is used if passed explicitly)
         // Since ApiRoutes reads from disk, this is redundant but safe.
         await File.WriteAllTextAsync(selectedDest, logicCs, Encoding.UTF8, ct);
-        await _terminal.LineAsync($"[build] Using logic source: {logicFileName}", ct);
+        await _terminal.BuildLineAsync($"Using logic source: {logicFileName}", ct);
 
         // Minimal csproj to run Fody + DiverCompiler weaver without bringing in DiverTest's debug/runtime artifacts
         // Use timestamped assembly name to avoid file locking issues with AssemblyLoadContext
@@ -138,7 +141,7 @@ public sealed class DiverBuildService
                           """;
         await File.WriteAllTextAsync(Path.Combine(projDir, "FodyWeavers.xml"), fodyWeavers, Encoding.UTF8, ct);
 
-        await _terminal.LineAsync($"[build] Preparing MSBuild process...", ct);
+        await _terminal.BuildLineAsync($"Preparing MSBuild process...", ct);
         
         var psi = new ProcessStartInfo
         {
@@ -157,9 +160,9 @@ public sealed class DiverBuildService
         psi.Environment["DOTNET_CLI_UI_LANGUAGE"] = "en";
         psi.Environment["DOTNET_NOLOGO"] = "true";
 
-        await _terminal.LineAsync($"[build] Executing: dotnet build -c Debug", ct);
-        await _terminal.LineAsync($"[build] Working directory: {projDir}", ct);
-        await _terminal.LineAsync($"[build] ---------- MSBuild Output ----------", ct);
+        await _terminal.BuildLineAsync($"Executing: dotnet build -c Debug", ct);
+        await _terminal.BuildLineAsync($"Working directory: {projDir}", ct);
+        await _terminal.BuildLineAsync($"---------- MSBuild Output ----------", ct);
         
         using var proc = Process.Start(psi);
         if (proc == null) throw new InvalidOperationException("Failed to start dotnet build.");
@@ -175,30 +178,30 @@ public sealed class DiverBuildService
         await Task.WhenAll(stdout, stderr);
         await proc.WaitForExitAsync(ct);
 
-        await _terminal.LineAsync($"[build] ---------- End MSBuild Output ----------", ct);
+        await _terminal.BuildLineAsync($"---------- End MSBuild Output ----------", ct);
         
         if (proc.ExitCode != 0)
         {
-            await _terminal.LineAsync($"[build] BUILD FAILED with exit code {proc.ExitCode}", ct);
+            await _terminal.BuildLineAsync($"BUILD FAILED with exit code {proc.ExitCode}", ct);
             throw new BuildFailedException(proc.ExitCode, logPath, ring.Snapshot());
         }
         
-        await _terminal.LineAsync($"[build] MSBuild completed successfully (exit code 0)", ct);
+        await _terminal.BuildLineAsync($"MSBuild completed successfully (exit code 0)", ct);
 
         var outDir = Path.Combine(projDir, "bin", "Debug", "net8.0");
         var dllPath = Path.Combine(outDir, assemblyName + ".dll");
-        await _terminal.LineAsync($"[build] Looking for output assembly: {dllPath}", ct);
+        await _terminal.BuildLineAsync($"Looking for output assembly: {dllPath}", ct);
         
         if (!File.Exists(dllPath))
             throw new FileNotFoundException("Build succeeded but output DLL not found.", dllPath);
         
         var dllSize = new FileInfo(dllPath).Length;
-        await _terminal.LineAsync($"[build] Output assembly found: {dllSize:N0} bytes", ct);
+        await _terminal.BuildLineAsync($"Output assembly found: {dllSize:N0} bytes", ct);
 
         // Clear previous generated artifacts before extracting new ones
         if (Directory.Exists(_store.GeneratedDir))
         {
-            await _terminal.LineAsync($"[build] Clearing previous generated artifacts from: {_store.GeneratedDir}", ct);
+            await _terminal.BuildLineAsync($"Clearing previous generated artifacts from: {_store.GeneratedDir}", ct);
             foreach (var f in Directory.GetFiles(_store.GeneratedDir, "*", SearchOption.TopDirectoryOnly))
             {
                 try { File.Delete(f); } catch { /* ignore locked files */ }
@@ -207,25 +210,28 @@ public sealed class DiverBuildService
         Directory.CreateDirectory(_store.GeneratedDir);
 
         // Extract artifacts directly into generated folder (no subfolders)
-        await _terminal.LineAsync($"[build] Extracting DIVER artifacts from assembly...", ct);
+        await _terminal.BuildLineAsync($"Extracting DIVER artifacts from assembly...", ct);
         var artifacts = ExtractArtifacts(dllPath, _store.GeneratedDir);
         
         foreach (var kv in artifacts)
         {
             var art = kv.Value;
-            await _terminal.LineAsync($"[build]   + {kv.Key}:", ct);
-            await _terminal.LineAsync($"[build]       .bin:          {new FileInfo(art.BinPath).Length:N0} bytes", ct);
-            await _terminal.LineAsync($"[build]       .bin.json:     {new FileInfo(art.MetaJsonPath).Length:N0} bytes", ct);
-            await _terminal.LineAsync($"[build]       .diver:        {new FileInfo(art.DiverPath).Length:N0} bytes", ct);
-            await _terminal.LineAsync($"[build]       .diver.map.json: {new FileInfo(art.DiverMapPath).Length:N0} bytes", ct);
+            await _terminal.BuildLineAsync($"  + {kv.Key}:", ct);
+            await _terminal.BuildLineAsync($"      .bin:          {new FileInfo(art.BinPath).Length:N0} bytes", ct);
+            await _terminal.BuildLineAsync($"      .bin.json:     {new FileInfo(art.MetaJsonPath).Length:N0} bytes", ct);
+            await _terminal.BuildLineAsync($"      .diver:        {new FileInfo(art.DiverPath).Length:N0} bytes", ct);
+            await _terminal.BuildLineAsync($"      .diver.map.json: {new FileInfo(art.DiverMapPath).Length:N0} bytes", ct);
         }
         
-        await _terminal.LineAsync($"[build] ========== Build Complete ==========", ct);
-        await _terminal.LineAsync($"[build] Successfully extracted {artifacts.Count} logic artifact set(s)", ct);
+        await _terminal.BuildLineAsync($"========== Build Complete ==========", ct);
+        await _terminal.BuildLineAsync($"Successfully extracted {artifacts.Count} logic artifact set(s)", ct);
 
         return new BuildResult(buildRoot, projDir, dllPath, artifacts) { BuildId = buildId };
     }
 
+    /// <summary>
+    /// 消费 MSBuild 输出流，发送到 Build 日志面板
+    /// </summary>
     private async Task ConsumeAsync(StreamReader reader, StreamWriter log, RingBuffer ring, CancellationToken ct)
     {
         while (!reader.EndOfStream && !ct.IsCancellationRequested)
@@ -235,7 +241,8 @@ public sealed class DiverBuildService
             if (string.IsNullOrWhiteSpace(line)) continue;
             await log.WriteLineAsync(line);
             ring.Add(line);
-            await _terminal.LineAsync(line, ct);
+            // MSBuild 输出不加时间戳，直接发送
+            await _terminal.BuildLineRawAsync(line, ct);
         }
     }
 

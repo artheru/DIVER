@@ -1,6 +1,5 @@
 using System.Text;
 using CoralinkerSDK;
-using MCUSerialBridgeCLR;
 
 namespace CoralinkerSDK;
 
@@ -149,6 +148,63 @@ class Program
         // 注册事件
         session.OnStateChanged += state => Console.WriteLine($"[Session] State changed: {state}");
         session.OnNodeLog += (uuid, msg) => Console.WriteLine($"[{uuid[..8]}] {msg}");
+        session.OnFatalError += (uuid, errorJson) =>
+        {
+            Console.WriteLine();
+            Console.WriteLine("╔════════════════════════════════════════════════════════╗");
+            Console.WriteLine("║            MCU FATAL ERROR RECEIVED                    ║");
+            Console.WriteLine("╠════════════════════════════════════════════════════════╣");
+            Console.WriteLine($"║ Node: {uuid[..8]}");
+            
+            // 解析 JSON 并显示
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(errorJson);
+                var root = doc.RootElement;
+                
+                Console.WriteLine($"║ Payload Version: {root.GetProperty("payloadVersion").GetInt32()}");
+                
+                var version = root.GetProperty("version");
+                Console.WriteLine($"║ Firmware: {version.GetProperty("productionName").GetString()} ({version.GetProperty("gitCommit").GetString()})");
+                
+                var debugInfo = root.GetProperty("debugInfo");
+                Console.WriteLine($"║ IL Offset: {debugInfo.GetProperty("ilOffset").GetInt32()}");
+                Console.WriteLine($"║ Line No: {debugInfo.GetProperty("lineNo").GetInt32()}");
+                
+                var errorType = root.GetProperty("errorType").GetString();
+                Console.WriteLine($"║ Type: {errorType}");
+                
+                if (errorType == "String" && root.TryGetProperty("errorString", out var errorStr) && errorStr.ValueKind != System.Text.Json.JsonValueKind.Null)
+                {
+                    Console.WriteLine($"║ Error: {errorStr.GetString()}");
+                }
+                else if (errorType == "STM32F4" && root.TryGetProperty("coreDump", out var coreDump) && coreDump.ValueKind != System.Text.Json.JsonValueKind.Null)
+                {
+                    Console.WriteLine($"║ PC: 0x{coreDump.GetProperty("pc").GetUInt32():X8}  LR: 0x{coreDump.GetProperty("lr").GetUInt32():X8}");
+                    Console.WriteLine($"║ CFSR: 0x{coreDump.GetProperty("cfsr").GetUInt32():X8}  HFSR: 0x{coreDump.GetProperty("hfsr").GetUInt32():X8}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"║ Parse error: {ex.Message}");
+            }
+            
+            Console.WriteLine("╠════════════════════════════════════════════════════════╣");
+            Console.WriteLine("║ JSON:");
+            // 格式化输出 JSON
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(errorJson);
+                var formatted = System.Text.Json.JsonSerializer.Serialize(doc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                Console.WriteLine(formatted);
+            }
+            catch
+            {
+                Console.WriteLine(errorJson);
+            }
+            Console.WriteLine("╚════════════════════════════════════════════════════════╝");
+            Console.WriteLine();
+        };
 
         try
         {

@@ -387,6 +387,34 @@ DLL_EXPORT MCUSerialBridgeError msb_register_console_writeline_callback(
         void* user_ctx);
 
 /**
+ * @brief 致命错误回调函数类型定义
+ *
+ * 当 MCU 上报致命错误 (CommandError 0xFF) 时，会调用该回调函数。
+ * MCU 会连续发送多次相同错误（防止丢包），回调内部会去重，只触发一次。
+ *
+ * @param payload 指向 ErrorPayloadC 结构（仅在回调内有效）
+ * @param user_ctx 用户注册的上下文参数
+ */
+typedef void (*msb_on_fatal_error_callback_function_t)(
+        const ErrorPayloadC* payload,
+        void* user_ctx);
+
+/**
+ * @brief 注册致命错误回调函数
+ *
+ * MCU 上报致命错误时，会调用用户提供的回调函数。
+ *
+ * @param handle MCU 句柄
+ * @param callback 用户提供的回调函数指针
+ * @param user_ctx 用户上下文参数
+ * @return MCUSerialBridgeError 错误码
+ */
+DLL_EXPORT MCUSerialBridgeError msb_register_fatal_error_callback(
+        msb_handle* handle,
+        msb_on_fatal_error_callback_function_t callback,
+        void* user_ctx);
+
+/**
  * @brief 获取 MCU 运行时统计数据
  *
  * 查询 MCU 的运行时统计数据，包括 IO 状态和端口收发统计。
@@ -464,6 +492,10 @@ typedef struct MCUSerialBridgeAPI {
     MCUSerialBridgeError (*msb_register_console_writeline_callback)(
             msb_handle*,
             msb_on_console_writeline_callback_function_t,
+            void*);
+    MCUSerialBridgeError (*msb_register_fatal_error_callback)(
+            msb_handle*,
+            msb_on_fatal_error_callback_function_t,
             void*);
     MCUSerialBridgeError (*msb_get_stats)(
             msb_handle*,

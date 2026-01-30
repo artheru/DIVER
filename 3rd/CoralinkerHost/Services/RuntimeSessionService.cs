@@ -26,6 +26,19 @@ public sealed class RuntimeSessionService
                 // ignore broadcast errors
             }
         };
+
+        // 订阅致命错误事件，广播到 SignalR（JSON 已由 DIVERSession 格式化）
+        _session.OnFatalError += async (uuid, errorJson) =>
+        {
+            try
+            {
+                await _terminal.FatalErrorJsonAsync(errorJson);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[RuntimeSessionService] Error broadcasting fatal error: {ex.Message}");
+            }
+        };
     }
 
     /// <summary>

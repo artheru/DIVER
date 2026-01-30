@@ -189,6 +189,41 @@ DWORD WINAPI parse_thread_func(LPVOID param)
                             msg_len,
                             handle->console_writeline_callback_ctx);
                 }
+            } else if (command == CommandError) {
+                // Fatal Error (MCU -> PC, MCU 致命错误上报)
+                // MCU 会连续发送多次（防止丢包），需要时间去重（5秒内不重复触发）
+                if (len < sizeof(PayloadHeader) + sizeof(ErrorPayloadC)) {
+                    DBG_PRINT("Fatal Error: Payload too short, len=%u", len);
+                    continue;
+                }
+
+                ErrorPayloadC* error_payload =
+                        (ErrorPayloadC*)((uint8_t*)local_buf + sizeof(PayloadHeader));
+
+                // 时间去重：距离上次触发超过 5 秒才触发
+                uint64_t now_ms = GetTickCount64();
+                uint64_t elapsed_ms = now_ms - handle->last_fatal_error_time_ms;
+                
+                if (elapsed_ms >= 5000) {
+                    handle->last_fatal_error_time_ms = now_ms;
+                    
+                    DBG_PRINT(
+                            "Fatal Error: version=%u, il_offset=%d, line=%d, layout=%u, seq=%u",
+                            error_payload->payload_version,
+                            error_payload->debug_info.il_offset,
+                            error_payload->debug_info.line_no,
+                            error_payload->core_dump_layout,
+                            seq);
+                    
+                    if (handle->fatal_error_callback) {
+                        handle->fatal_error_callback(
+                                error_payload,
+                                handle->fatal_error_callback_ctx);
+                    }
+                } else {
+                    DBG_PRINT("Fatal Error: Duplicate within 5s (elapsed=%llums), seq=%u skipped", 
+                              elapsed_ms, seq);
+                }
             } else {
                 // -------------------------------
                 // 找到对应的 SeqWaiter

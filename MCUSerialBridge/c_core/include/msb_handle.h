@@ -90,6 +90,11 @@ typedef struct msb_handle {
     msb_on_console_writeline_callback_function_t console_writeline_callback;
     void* console_writeline_callback_ctx;
 
+    // Fatal Error 回调（MCU 致命错误上报）
+    msb_on_fatal_error_callback_function_t fatal_error_callback;
+    void* fatal_error_callback_ctx;
+    uint64_t last_fatal_error_time_ms;  // 上次触发时间戳（用于去重，5秒内不重复触发）
+
     // 用户自定义回调
     void (*error_cb)(MCUSerialBridgeError err, const char* msg, int len);
 } msb_handle;

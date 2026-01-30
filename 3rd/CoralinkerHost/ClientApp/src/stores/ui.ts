@@ -56,6 +56,9 @@ export const useUiStore = defineStore('ui', () => {
   
   /** 应用是否已初始化 */
   const initialized = ref(false)
+
+  /** 源码跳转请求 */
+  const sourceJumpRequest = ref<{ file: string; line: number } | null>(null)
   
   // ============================================
   // 计算属性
@@ -186,6 +189,22 @@ export const useUiStore = defineStore('ui', () => {
   function setInitialized() {
     initialized.value = true
   }
+
+  /**
+   * 跳转到源码
+   * 切换到编辑器视图并跳转到指定文件和行
+   */
+  function gotoSource(file: string, line: number) {
+    sourceJumpRequest.value = { file, line }
+    viewMode.value = 'editor'
+  }
+
+  /**
+   * 清除源码跳转请求
+   */
+  function clearSourceJumpRequest() {
+    sourceJumpRequest.value = null
+  }
   
   return {
     // 状态
@@ -196,6 +215,7 @@ export const useUiStore = defineStore('ui', () => {
     confirmConfig,
     notifications,
     initialized,
+    sourceJumpRequest,
     
     // 计算属性
     isGraphView,
@@ -213,6 +233,8 @@ export const useUiStore = defineStore('ui', () => {
     error,
     warning,
     info,
-    setInitialized
+    setInitialized,
+    gotoSource,
+    clearSourceJumpRequest
   }
 })

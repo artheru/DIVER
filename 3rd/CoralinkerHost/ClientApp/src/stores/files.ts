@@ -239,6 +239,8 @@ export const useFilesStore = defineStore('files', () => {
     
     // 刷新文件树
     await loadFileTree()
+    // 刷新打开的文件
+    await refreshOpenTabs()
     
     console.log(`[Files] Uploaded: ${result.name}`)
     return result
@@ -250,6 +252,81 @@ export const useFilesStore = defineStore('files', () => {
   function notifyBuildComplete() {
     buildVersion.value++
     console.log(`[Files] Build version: ${buildVersion.value}`)
+  }
+  
+  /**
+   * 刷新所有打开的 Tab 的内容
+   * 用于 Build 或 Upload 后更新文件内容
+   */
+  async function refreshOpenTabs() {
+    console.log(`[Files] Refreshing ${tabs.value.length} open tab(s)...`)
+    
+    for (const tab of tabs.value) {
+      try {
+        const response = await filesApi.readFile(tab.path)
+        
+        if (tab.isBinary) {
+          // 二进制文件只在没有修改时刷新
+          if (!tab.dirty) {
+            tab.base64 = response.base64
+            tab.size = response.sizeBytes
+          }
+        } else {
+          // 文本文件：如果没有修改，更新内容
+          if (!tab.dirty) {
+            tab.content = response.text
+            tab.size = response.sizeBytes
+          } else {
+            // 如果有未保存的修改，保留 dirty 状态但更新 size
+            tab.size = response.sizeBytes
+          }
+        }
+        
+        console.log(`[Files] Refreshed: ${tab.name}`)
+      } catch (error) {
+        console.warn(`[Files] Failed to refresh ${tab.path}:`, error)
+      }
+    }
+  }
+  
+  /**
+   * 保存指定 Tab
+   * @param tabId Tab ID
+   */
+  async function saveTab(tabId: string) {
+    const tab = tabs.value.find(t => t.id === tabId)
+    if (!tab || !tab.dirty) return false
+    
+    // 检查是否是 generated 文件夹下的文件（不允许保存）
+    if (tab.path.startsWith('generated/') || tab.path.includes('/generated/')) {
+      console.warn(`[Files] Cannot save generated file: ${tab.path}`)
+      return false
+    }
+    
+    if (tab.isBinary) {
+      await filesApi.writeFile({
+        path: tab.path,
+        kind: 'binary',
+        base64: tab.base64
+      })
+    } else {
+      await filesApi.writeFile({
+        path: tab.path,
+        kind: 'text',
+        text: tab.content
+      })
+    }
+    
+    tab.dirty = false
+    console.log(`[Files] Saved: ${tab.path}`)
+    return true
+  }
+  
+  /**
+   * 检查文件路径是否为只读（generated 文件夹下的文件）
+   */
+  function isReadonlyPath(path: string): boolean {
+    return path.startsWith('generated/') || path.includes('/generated/')
   }
   
   return {
@@ -271,9 +348,12 @@ export const useFilesStore = defineStore('files', () => {
     switchToTab,
     updateTabContent,
     saveCurrentTab,
+    saveTab,
     createNewInput,
     deleteFile,
     uploadAsset,
-    notifyBuildComplete
+    notifyBuildComplete,
+    refreshOpenTabs,
+    isReadonlyPath
   }
 })

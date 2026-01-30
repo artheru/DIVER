@@ -461,6 +461,13 @@ public static class ApiRoutes
         // 变量 API
         // ============================================
 
+        // 获取所有字段元信息（不需要 Start，用于遥控器绑定）
+        app.MapGet("/api/variables/meta", () =>
+        {
+            var metas = DIVERSession.Instance.GetAllCartFieldMetas();
+            return JsonHelper.Json(new { ok = true, fields = metas });
+        });
+
         app.MapGet("/api/variables", () =>
         {
             var fields = DIVERSession.Instance.GetAllCartFields();
@@ -669,6 +676,24 @@ public static class ApiRoutes
             }
         });
 
+        // 获取 diver.map.json（用于错误定位到源码行号）
+        app.MapGet("/api/runtime/diver-map/{logicName}", async (string logicName, ProjectStore store, CancellationToken ct) =>
+        {
+            try
+            {
+                var mapPath = Path.Combine(store.GeneratedDir, $"{logicName}.diver.map.json");
+                if (!File.Exists(mapPath))
+                    return Results.NotFound(new { ok = false, error = "Map file not found" });
+
+                var json = await File.ReadAllTextAsync(mapPath, ct);
+                return Results.Content(json, "application/json");
+            }
+            catch (Exception ex)
+            {
+                return JsonHelper.Json(new { ok = false, error = ex.Message });
+            }
+        });
+
         // ============================================
         // 导入/导出 API
         // ============================================
@@ -830,20 +855,59 @@ internal static class ValueParser
     public static object? ParseValueByType(object? value, string typeHint)
     {
         if (value == null) return null;
+        
+        // 先尝试提取数值（处理 JsonElement 和各种数值类型）
+        var numericValue = ExtractNumericValue(value);
         var str = value.ToString() ?? "";
 
         return typeHint.ToLowerInvariant() switch
         {
             "boolean" or "bool" => bool.TryParse(str, out var b) ? b : str == "1",
-            "byte" => byte.TryParse(str, out var by) ? by : (byte)0,
-            "sbyte" => sbyte.TryParse(str, out var sb) ? sb : (sbyte)0,
-            "int16" or "short" => short.TryParse(str, out var s) ? s : (short)0,
-            "uint16" or "ushort" => ushort.TryParse(str, out var us) ? us : (ushort)0,
-            "int32" or "int" => int.TryParse(str, out var i) ? i : 0,
-            "uint32" or "uint" => uint.TryParse(str, out var ui) ? ui : 0u,
-            "single" or "float" => float.TryParse(str, out var f) ? f : 0f,
+            // 整数类型：如果是浮点数，先转换为 double 再取整
+            "byte" => numericValue.HasValue ? (byte)Math.Round(numericValue.Value) : (byte.TryParse(str, out var by) ? by : (byte)0),
+            "sbyte" => numericValue.HasValue ? (sbyte)Math.Round(numericValue.Value) : (sbyte.TryParse(str, out var sb) ? sb : (sbyte)0),
+            "int16" or "short" => numericValue.HasValue ? (short)Math.Round(numericValue.Value) : (short.TryParse(str, out var s) ? s : (short)0),
+            "uint16" or "ushort" => numericValue.HasValue ? (ushort)Math.Round(numericValue.Value) : (ushort.TryParse(str, out var us) ? us : (ushort)0),
+            "int32" or "int" => numericValue.HasValue ? (int)Math.Round(numericValue.Value) : (int.TryParse(str, out var i) ? i : 0),
+            "uint32" or "uint" => numericValue.HasValue ? (uint)Math.Round(numericValue.Value) : (uint.TryParse(str, out var ui) ? ui : 0u),
+            "single" or "float" => numericValue.HasValue ? (float)numericValue.Value : (float.TryParse(str, out var f) ? f : 0f),
             "byte[]" => ParseHexBytes(str),
             _ => value
+        };
+    }
+    
+    /// <summary>
+    /// 从各种类型中提取数值（处理 JsonElement、double、float、int 等）
+    /// </summary>
+    private static double? ExtractNumericValue(object? value)
+    {
+        if (value == null) return null;
+        
+        // 处理 JsonElement
+        if (value is System.Text.Json.JsonElement je)
+        {
+            if (je.ValueKind == System.Text.Json.JsonValueKind.Number)
+            {
+                return je.GetDouble();
+            }
+            return null;
+        }
+        
+        // 处理常见数值类型
+        return value switch
+        {
+            double d => d,
+            float f => f,
+            int i => i,
+            long l => l,
+            short s => s,
+            byte b => b,
+            sbyte sb => sb,
+            uint ui => ui,
+            ulong ul => ul,
+            ushort us => us,
+            decimal dec => (double)dec,
+            _ => null
         };
     }
 

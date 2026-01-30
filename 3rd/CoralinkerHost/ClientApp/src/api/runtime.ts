@@ -9,6 +9,7 @@ import { get, post } from './index'
 import type {
   StartResult,
   SessionState,
+  CartFieldMeta,
   CartFieldValue,
   SetVariableRequest,
   LogQueryResult,
@@ -54,6 +55,13 @@ export async function getSessionState(): Promise<{
 // ============================================
 // 变量管理
 // ============================================
+
+/**
+ * 获取所有字段元信息（不需要 Start，用于遥控器绑定）
+ */
+export async function getFieldMetas(): Promise<{ ok: boolean; fields: CartFieldMeta[] }> {
+  return get('/api/variables/meta')
+}
 
 /**
  * 获取所有 Cart 变量

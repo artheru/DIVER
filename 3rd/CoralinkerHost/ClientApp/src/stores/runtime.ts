@@ -12,7 +12,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as runtimeApi from '@/api/runtime'
 import * as deviceApi from '@/api/device'
-import type { NodeStateSnapshot, NodeFullInfo, CartFieldValue, VariableValue } from '@/types'
+import type { NodeStateSnapshot, NodeFullInfo, CartFieldMeta, VariableValue } from '@/types'
 
 /**
  * 应用状态枚举
@@ -36,6 +36,9 @@ export const useRuntimeStore = defineStore('runtime', () => {
   /** 节点状态 Map<uuid, NodeStateSnapshot> */
   const nodeStates = ref<Map<string, NodeStateSnapshot>>(new Map())
   
+  /** 后端会话状态（作为真实状态来源） */
+  const backendSessionRunning = ref(false)
+  
   /** 节点完整信息 Map<uuid, NodeFullInfo> */
   const nodeInfos = ref<Map<string, NodeFullInfo>>(new Map())
   
@@ -44,6 +47,9 @@ export const useRuntimeStore = defineStore('runtime', () => {
   
   /** 变量可控信息 Map<name, controllable> */
   const variableControllable = ref<Map<string, boolean>>(new Map())
+  
+  /** 字段元信息列表（不需要 Start 就能获取） */
+  const fieldMetas = ref<CartFieldMeta[]>([])
   
   /** 正在编辑的变量名 */
   const editingVarName = ref<string | null>(null)
@@ -105,12 +111,15 @@ export const useRuntimeStore = defineStore('runtime', () => {
   /**
    * 设置后端可用状态
    */
-  function setBackendAvailable(available: boolean) {
+  async function setBackendAvailable(available: boolean) {
     isBackendAvailable.value = available
     if (available && appState.value === 'offline') {
       appState.value = 'idle'
+      // 同步后端会话状态，确保前端状态与后端一致
+      await syncSessionState()
     } else if (!available) {
       appState.value = 'offline'
+      backendSessionRunning.value = false
     }
   }
   
@@ -141,7 +150,6 @@ export const useRuntimeStore = defineStore('runtime', () => {
         for (const state of result.nodes) {
           nodeStates.value.set(state.uuid, state)
         }
-        updateAppStateFromNodes()
       }
     } catch (error) {
       console.error('[Runtime] Failed to refresh node states:', error)
@@ -149,9 +157,40 @@ export const useRuntimeStore = defineStore('runtime', () => {
   }
   
   /**
+   * 同步后端会话状态（作为状态真实来源）
+   */
+  async function syncSessionState() {
+    try {
+      const result = await runtimeApi.getSessionState()
+      if (result.ok && result.isRunning !== undefined) {
+        backendSessionRunning.value = result.isRunning
+        
+        // 同步前端状态：后端状态是真实来源
+        if (result.isRunning && appState.value !== 'running' && appState.value !== 'stopping') {
+          appState.value = 'running'
+        } else if (!result.isRunning && appState.value === 'running') {
+          appState.value = 'idle'
+        }
+      }
+    } catch (error) {
+      console.error('[Runtime] Failed to sync session state:', error)
+    }
+  }
+  
+  /**
    * 根据节点状态更新应用状态
+   * 注意：后端会话状态优先，此函数仅作为辅助
    */
   function updateAppStateFromNodes() {
+    // 如果后端说正在运行，前端必须同步
+    if (backendSessionRunning.value) {
+      if (appState.value !== 'running' && appState.value !== 'stopping') {
+        appState.value = 'running'
+      }
+      return
+    }
+    
+    // 如果后端没在运行，检查节点状态（用于检测意外启动等情况）
     let anyRunning = false
     for (const state of nodeStates.value.values()) {
       if (state.runState === 'running') {
@@ -182,6 +221,8 @@ export const useRuntimeStore = defineStore('runtime', () => {
       const result = await runtimeApi.start()
       
       if (result.ok) {
+        // 后端启动成功，标记后端状态
+        backendSessionRunning.value = true
         appState.value = 'running'
         
         // 刷新变量列表
@@ -193,13 +234,21 @@ export const useRuntimeStore = defineStore('runtime', () => {
         console.log(`[Runtime] Started: ${result.successNodes}/${result.totalNodes} nodes`)
         return { ok: true }
       } else {
-        appState.value = 'idle'
+        // 启动失败，同步后端状态确保一致
+        await syncSessionState()
+        if (!backendSessionRunning.value) {
+          appState.value = 'idle'
+        }
         const error = result.error || 'Start failed'
         console.error('[Runtime] Start failed:', error)
         return { ok: false, error }
       }
     } catch (error) {
-      appState.value = 'idle'
+      // 异常情况，同步后端状态确保一致
+      await syncSessionState()
+      if (!backendSessionRunning.value) {
+        appState.value = 'idle'
+      }
       const message = error instanceof Error ? error.message : 'Unknown error'
       console.error('[Runtime] Start failed:', message)
       return { ok: false, error: message }
@@ -223,6 +272,8 @@ export const useRuntimeStore = defineStore('runtime', () => {
       
       await runtimeApi.stop()
       
+      // 后端已停止，更新状态
+      backendSessionRunning.value = false
       appState.value = 'idle'
       
       // 刷新节点状态
@@ -231,10 +282,30 @@ export const useRuntimeStore = defineStore('runtime', () => {
       console.log('[Runtime] Stopped')
       return { ok: true }
     } catch (error) {
-      appState.value = 'running' // 恢复
+      // 停止失败，同步后端状态确保一致
+      await syncSessionState()
       const message = error instanceof Error ? error.message : 'Unknown error'
       console.error('[Runtime] Stop failed:', message)
       return { ok: false, error: message }
+    }
+  }
+  
+  /**
+   * 刷新字段元信息（不需要 Start，用于遥控器绑定）
+   */
+  async function refreshFieldMetas() {
+    try {
+      const result = await runtimeApi.getFieldMetas()
+      if (result.ok) {
+        fieldMetas.value = result.fields
+        // 同时更新 variableControllable
+        variableControllable.value.clear()
+        for (const f of result.fields) {
+          variableControllable.value.set(f.name, !f.isLowerIO)
+        }
+      }
+    } catch (error) {
+      console.error('[Runtime] Failed to refresh field metas:', error)
     }
   }
   
@@ -372,7 +443,11 @@ export const useRuntimeStore = defineStore('runtime', () => {
     
     console.log('[Runtime] Starting state polling')
     statePollingTimer = setInterval(async () => {
-      await refreshNodeStates()
+      // 同时刷新节点状态和会话状态
+      await Promise.all([
+        refreshNodeStates(),
+        syncSessionState()
+      ])
     }, STATE_POLLING_INTERVAL)
   }
   
@@ -392,6 +467,7 @@ export const useRuntimeStore = defineStore('runtime', () => {
    */
   function reset() {
     stopStatePolling()
+    backendSessionRunning.value = false
     appState.value = isBackendAvailable.value ? 'idle' : 'offline'
     nodeStates.value.clear()
     nodeInfos.value.clear()
@@ -404,11 +480,13 @@ export const useRuntimeStore = defineStore('runtime', () => {
     // 状态
     appState,
     isBackendAvailable,
+    backendSessionRunning,
     sessionType,
     nodeStates,
     nodeInfos,
     variables,
     variableControllable,
+    fieldMetas,
     editingVarName,
     
     // 计算属性
@@ -426,8 +504,10 @@ export const useRuntimeStore = defineStore('runtime', () => {
     setBackendAvailable,
     refreshNodes,
     refreshNodeStates,
+    syncSessionState,
     start,
     stop,
+    refreshFieldMetas,
     refreshVariables,
     setVariable,
     updateNodeState,

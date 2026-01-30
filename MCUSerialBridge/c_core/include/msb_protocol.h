@@ -510,6 +510,95 @@ typedef struct {
 STATIC_ASSERT(sizeof(RuntimeStatsC) == 16 + 16 * PACKET_MAX_PORTS_NUM, 
               "RuntimeStatsC size error");
 
+/* ===============================
+ * Error Payload (CommandError 0xFF)
+ * =============================== */
+
+/** 当前 ErrorPayload 版本号 */
+#define ERROR_PAYLOAD_VERSION 1
+
+/**
+ * @brief DIVER 运行时调试信息 (16 x 4 = 64 bytes)
+ */
+typedef struct {
+    i32 il_offset;        /**< 当前 IL 指令偏移 */
+    i32 line_no;          /**< C 代码行号 (来自 __LINE__) */
+    u32 reserved[14];     /**< 保留字段 */
+} DIVERDebugInfoC;
+
+STATIC_ASSERT(sizeof(DIVERDebugInfoC) == 64, "DIVERDebugInfoC size must be 64 bytes");
+
+/**
+ * @brief Core Dump 数据布局类型
+ */
+typedef enum {
+    CoreDumpLayout_String = 0,    /**< 后续是字符串，按字符串解析 */
+    CoreDumpLayout_STM32F4 = 4,   /**< STM32F4 Core Dump 变量 */
+    /* 其他值保留，用于后续扩展 (F7, H7 等) */
+} CoreDumpLayoutEnum;
+
+/**
+ * @brief STM32F4 Core Dump 变量 (17 个寄存器)
+ * 
+ * 与 hal/core_dump.h 中的 CoreDumpVariables 一致
+ */
+typedef struct {
+    u32 R0;
+    u32 R1;
+    u32 R2;
+    u32 R3;
+    u32 R12;
+    u32 LR;         /**< 链接寄存器 */
+    u32 PC;         /**< 程序计数器 */
+    u32 PSR;        /**< 程序状态寄存器 */
+    u32 MSR;        /**< 主状态寄存器 */
+    u32 CFSR;       /**< 可配置故障状态寄存器 */
+    u32 HFSR;       /**< 硬故障状态寄存器 */
+    u32 DFSR;       /**< 调试故障状态寄存器 */
+    u32 AFSR;       /**< 辅助故障状态寄存器 */
+    u32 BFAR;       /**< 总线故障地址寄存器 */
+    u32 MMAR;       /**< 内存管理故障地址寄存器 */
+    u32 MSP;        /**< 主堆栈指针 */
+    u32 StackEnd;   /**< 堆栈结束地址 */
+} CoreDumpVariablesF4C;
+
+STATIC_ASSERT(sizeof(CoreDumpVariablesF4C) == 68, "CoreDumpVariablesF4C size must be 68 bytes");
+
+/**
+ * @brief Core Dump 数据联合体 (32 x 4 = 128 bytes)
+ * 
+ * 根据 CoreDumpLayoutEnum 选择解析方式：
+ * - Layout_String: 使用 raw 作为字符串
+ * - Layout_STM32F4: 使用 f4 结构
+ */
+typedef union {
+    CoreDumpVariablesF4C f4;   /**< STM32F4 寄存器 (68 bytes) */
+    u8 raw[128];               /**< 原始字节 / 字符串 (32 x 4) */
+} CoreDumpDataC;
+
+STATIC_ASSERT(sizeof(CoreDumpDataC) == 128, "CoreDumpDataC size must be 128 bytes");
+
+/**
+ * @brief 错误上报 Payload 结构 (CommandError 0xFF)
+ * 
+ * 包含完整的错误上下文信息：
+ * - 版本号：用于上位机判断 Payload 格式
+ * - 版本信息：用于上位机判断固件版本
+ * - 调试信息：IL 偏移、行号等
+ * - Core Dump：寄存器状态或错误字符串
+ * 
+ * Total: 4 + 56 + 64 + 4 + 128 = 256 bytes
+ */
+typedef struct {
+    u32 payload_version;            /**< Payload 版本号 (当前 = 1) */
+    VersionInfoC version;           /**< 固件版本信息 (56 bytes) */
+    DIVERDebugInfoC debug_info;     /**< DIVER 调试信息 (64 bytes) */
+    u32 core_dump_layout;           /**< Core Dump 布局类型 (4 bytes) */
+    CoreDumpDataC core_dump;        /**< Core Dump 数据 (128 bytes) */
+} ErrorPayloadC;
+
+STATIC_ASSERT(sizeof(ErrorPayloadC) == 256, "ErrorPayloadC size must be 256 bytes");
+
 #pragma pack(pop)
 
 #ifdef __cplusplus

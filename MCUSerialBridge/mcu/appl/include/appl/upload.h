@@ -3,6 +3,12 @@
 #include "common.h"
 #include "hal/dcan.h"
 
+/**
+ * @brief 初始化上传模块
+ * @note 必须在使用其他 upload 函数前调用
+ */
+void init_upload(void);
+
 void upload_serial_packet(
         const void* data,
         uint32_t length,

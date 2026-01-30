@@ -224,7 +224,32 @@ defineExpose({
   },
   
   /** 聚焦编辑器 */
-  focus: () => editor?.focus()
+  focus: () => editor?.focus(),
+
+  /** 跳转到指定行，闪烁高亮 1 秒 */
+  goToLine: (lineNumber: number) => {
+    if (editor) {
+      editor.revealLineInCenter(lineNumber)
+      editor.setPosition({ lineNumber, column: 1 })
+      editor.focus()
+      
+      // 闪烁高亮该行（1秒后移除）
+      const decorationIds = editor.deltaDecorations([], [{
+        range: new monaco.Range(lineNumber, 1, lineNumber, 1),
+        options: {
+          isWholeLine: true,
+          className: 'flash-line-highlight'
+        }
+      }])
+      
+      // 1秒后移除高亮
+      setTimeout(() => {
+        if (editor) {
+          editor.deltaDecorations(decorationIds, [])
+        }
+      }, 1000)
+    }
+  }
 })
 </script>
 
@@ -235,5 +260,25 @@ defineExpose({
   min-height: 200px;
   border-radius: var(--radius);
   overflow: hidden;
+}
+</style>
+
+<style>
+/* 闪烁行高亮样式（需要全局） */
+.flash-line-highlight {
+  background: rgba(255, 213, 79, 0.4) !important;
+  animation: flash-highlight 1s ease-out;
+}
+
+@keyframes flash-highlight {
+  0% {
+    background: rgba(255, 213, 79, 0.6) !important;
+  }
+  50% {
+    background: rgba(255, 213, 79, 0.3) !important;
+  }
+  100% {
+    background: rgba(255, 213, 79, 0.1) !important;
+  }
 }
 </style>

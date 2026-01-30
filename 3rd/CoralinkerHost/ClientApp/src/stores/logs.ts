@@ -30,13 +30,16 @@ export const useLogStore = defineStore('logs', () => {
   /** 终端日志行 */
   const terminalLines = ref<string[]>([])
   
+  /** Build 日志行 */
+  const buildLines = ref<string[]>([])
+  
   /** 节点日志 Map<uuid, string[]> */
   const nodeLogs = ref<Map<string, string[]>>(new Map())
   
   /** 节点信息 Map<uuid, NodeLogInfo> */
   const nodeInfos = ref<Map<string, NodeLogInfo>>(new Map())
   
-  /** 当前激活的日志标签 ('terminal' 或 uuid) */
+  /** 当前激活的日志标签 ('terminal', 'build' 或 uuid) */
   const activeTab = ref<string>('terminal')
   
   // ============================================
@@ -47,6 +50,9 @@ export const useLogStore = defineStore('logs', () => {
   const currentLines = computed(() => {
     if (activeTab.value === 'terminal') {
       return terminalLines.value
+    }
+    if (activeTab.value === 'build') {
+      return buildLines.value
     }
     return nodeLogs.value.get(activeTab.value) || []
   })
@@ -93,6 +99,34 @@ export const useLogStore = defineStore('logs', () => {
    */
   function logUI(line: string) {
     appendTerminal(`[UI][${getTimestamp()}] ${line}`)
+  }
+
+  /**
+   * 添加 Build 日志行
+   * @param line 日志内容
+   */
+  function appendBuild(line: string) {
+    buildLines.value.push(line)
+    
+    // 限制日志数量
+    if (buildLines.value.length > MAX_LOG_LINES) {
+      buildLines.value.splice(0, buildLines.value.length - MAX_LOG_LINES)
+    }
+  }
+
+  /**
+   * 添加 Build 日志行 (带时间戳)
+   * @param line 日志内容
+   */
+  function logBuild(line: string) {
+    appendBuild(`[${getTimestamp()}] ${line}`)
+  }
+
+  /**
+   * 清空 Build 日志
+   */
+  function clearBuild() {
+    buildLines.value.length = 0
   }
   
   /**
@@ -266,6 +300,8 @@ export const useLogStore = defineStore('logs', () => {
   function clearCurrent() {
     if (activeTab.value === 'terminal') {
       terminalLines.value.length = 0
+    } else if (activeTab.value === 'build') {
+      buildLines.value.length = 0
     } else {
       const logs = nodeLogs.value.get(activeTab.value)
       if (logs) {
@@ -335,6 +371,7 @@ export const useLogStore = defineStore('logs', () => {
   return {
     // 状态
     terminalLines,
+    buildLines,
     nodeLogs,
     nodeInfos,
     activeTab,
@@ -346,6 +383,9 @@ export const useLogStore = defineStore('logs', () => {
     // 方法
     appendTerminal,
     logUI,
+    appendBuild,
+    logBuild,
+    clearBuild,
     appendNodeLog,
     ensureNodeTab,
     removeNodeTab,

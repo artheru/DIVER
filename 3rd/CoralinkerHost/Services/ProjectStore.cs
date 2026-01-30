@@ -64,7 +64,10 @@ public sealed class ProjectStore
             ["selectedAsset"] = snap.SelectedAsset,
             ["selectedFile"] = snap.SelectedFile,
             ["lastBuildId"] = snap.LastBuildId,
-            ["nodes"] = JsonSerializer.SerializeToNode(nodes, ProjectJson.Options)
+            ["nodes"] = JsonSerializer.SerializeToNode(nodes, ProjectJson.Options),
+            ["controlLayout"] = snap.ControlLayout != null 
+                ? JsonSerializer.SerializeToNode(snap.ControlLayout, ProjectJson.Options) 
+                : null
         };
         
         var json = projectData.ToJsonString(ProjectJson.Options);
@@ -86,10 +89,17 @@ public sealed class ProjectStore
             var root = doc.RootElement;
             
             // 读取基本属性
+            ControlLayoutConfig? controlLayout = null;
+            if (root.TryGetProperty("controlLayout", out var cl) && cl.ValueKind == JsonValueKind.Object)
+            {
+                controlLayout = JsonSerializer.Deserialize<ControlLayoutConfig>(cl.GetRawText(), ProjectJson.Options);
+            }
+            
             var state = new ProjectState(
                 root.TryGetProperty("selectedAsset", out var sa) && sa.ValueKind == JsonValueKind.String ? sa.GetString() : null,
                 root.TryGetProperty("selectedFile", out var sf) && sf.ValueKind == JsonValueKind.String ? sf.GetString() : null,
-                root.TryGetProperty("lastBuildId", out var lb) && lb.ValueKind == JsonValueKind.String ? lb.GetString() : null
+                root.TryGetProperty("lastBuildId", out var lb) && lb.ValueKind == JsonValueKind.String ? lb.GetString() : null,
+                controlLayout
             );
             
             Set(state);
@@ -264,14 +274,40 @@ public sealed record AssetInfo(string Name, long SizeBytes, DateTime LastWriteUt
 public sealed record ProjectState(
     string? SelectedAsset,     // 当前选中的 .cs 资源文件名
     string? SelectedFile,      // 当前在编辑器中打开的文件路径
-    string? LastBuildId        // 最后一次构建的 ID
+    string? LastBuildId,       // 最后一次构建的 ID
+    ControlLayoutConfig? ControlLayout = null  // 遥控器布局配置
 )
 {
     public static ProjectState CreateDefault()
     {
-        return new ProjectState(null, null, null);
+        return new ProjectState(null, null, null, null);
     }
 }
+
+/// <summary>
+/// 遥控器布局配置
+/// </summary>
+public sealed record ControlLayoutConfig(
+    int WindowX,
+    int WindowY,
+    int GridCols,
+    int GridRows,
+    bool IsLocked,
+    List<ControlWidget>? Widgets
+);
+
+/// <summary>
+/// 遥控器控件
+/// </summary>
+public sealed record ControlWidget(
+    string Id,
+    string Type,
+    int GridX,
+    int GridY,
+    int GridW,
+    int GridH,
+    JsonElement? Config
+);
 
 internal static class ProjectJson
 {

@@ -13,7 +13,7 @@
 #include "util/console.h"
 #include "util/mempool.h"
 
-#define RESET_WAIT_TIME (150)
+#define RESET_WAIT_TIME (200)
 
 // ===============================
 // VMTXBUF debug logs (temporary)

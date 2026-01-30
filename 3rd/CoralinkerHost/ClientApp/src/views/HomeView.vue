@@ -32,17 +32,29 @@
                 >
                   Graph
                 </button>
-                <button 
+                <div
                   v-for="tab in tabs" 
                   :key="tab.id"
-                  class="tab"
-                  :class="{ active: activeTabId === tab.id, dirty: tab.dirty }"
-                  @click="switchToTab(tab.id)"
+                  class="tab-wrapper"
+                  :class="{ active: activeTabId === tab.id }"
                 >
-                  {{ tab.name }}
-                  <span v-if="tab.dirty" class="dirty-dot">•</span>
+                  <button 
+                    class="tab"
+                    :class="{ active: activeTabId === tab.id, dirty: tab.dirty, readonly: isReadonlyFile(tab.path) }"
+                    @click="switchToTab(tab.id)"
+                  >
+                    <span v-if="isReadonlyFile(tab.path)" class="readonly-icon" title="Read-only (generated file)">🔒</span>
+                    {{ tab.name }}
+                    <span v-if="tab.dirty" class="dirty-dot">•</span>
+                  </button>
+                  <button 
+                    v-if="tab.dirty && !isReadonlyFile(tab.path)" 
+                    class="tab-save" 
+                    @click.stop="handleSaveTab(tab.id)"
+                    title="Save (Ctrl+S)"
+                  >💾</button>
                   <span class="tab-close" @click.stop="closeTab(tab.id)">×</span>
-                </button>
+                </div>
                 
                 <!-- Graph 工具按钮 -->
                 <div class="tab-spacer"></div>
@@ -100,11 +112,13 @@
               </div>
               
               <!-- 编辑器 -->
-              <div v-show="viewMode === 'editor'" class="editor-container">
+              <div v-show="viewMode === 'editor'" class="editor-container" @keydown.space.stop>
                 <CodeEditor 
+                  ref="codeEditorRef"
                   v-if="activeTab && !activeTab.isBinary"
                   :content="activeTab.content || ''"
                   :language="getLanguage(activeTab.path)"
+                  :readonly="isReadonlyFile(activeTab.path)"
                   @update:content="updateContent"
                 />
                 <HexEditor 
@@ -121,7 +135,7 @@
           <!-- 左下：终端/日志 -->
           <Pane :min-size="15">
             <div class="panel terminal-panel">
-              <TerminalPanel />
+              <TerminalPanel @gotoSource="handleGotoSource" />
             </div>
           </Pane>
         </Splitpanes>
@@ -184,7 +198,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { NButton, NModal, NCard, NInput } from 'naive-ui'
 import { storeToRefs } from 'pinia'
 import { Splitpanes, Pane } from 'splitpanes'
@@ -215,7 +229,7 @@ const logStore = useLogStore()
 const runtimeStore = useRuntimeStore()
 
 const { tabs, activeTabId, activeTab } = storeToRefs(filesStore)
-const { viewMode } = storeToRefs(uiStore)
+const { viewMode, sourceJumpRequest } = storeToRefs(uiStore)
 const { canEdit } = storeToRefs(runtimeStore)
 
 // 自动保存
@@ -228,9 +242,95 @@ useAutoSave()
 const showNewFileDialog = ref(false)
 const newFileName = ref('')
 const graphCanvasRef = ref<InstanceType<typeof GraphCanvas> | null>(null)
+const codeEditorRef = ref<InstanceType<typeof CodeEditor> | null>(null)
 const importFileRef = ref<HTMLInputElement | null>(null)
 const showAddNodeDialog = ref(false)
 const showControlWindow = ref(false)
+
+// ============================================
+// 源码跳转处理
+// ============================================
+
+/**
+ * 监听源码跳转请求
+ * 当从错误对话框点击跳转时触发
+ */
+watch(sourceJumpRequest, async (request) => {
+  if (!request) return
+  
+  console.log(`[HomeView] Source jump request: ${request.file}:${request.line}`)
+  
+  // 查找匹配的文件
+  const targetPath = findSourceFile(request.file)
+  if (!targetPath) {
+    console.warn(`[HomeView] Source file not found: ${request.file}`)
+    uiStore.error('File Not Found', `Cannot find source file: ${request.file}`)
+    uiStore.clearSourceJumpRequest()
+    return
+  }
+  
+  // 打开文件
+  await filesStore.openFile(targetPath)
+  
+  // 等待 DOM 更新后跳转到行
+  await nextTick()
+  
+  // 再等待一下让 Monaco 初始化
+  setTimeout(() => {
+    if (codeEditorRef.value) {
+      codeEditorRef.value.goToLine(request.line)
+    }
+    uiStore.clearSourceJumpRequest()
+  }, 100)
+})
+
+/**
+ * 在 assets/inputs 目录中查找源文件
+ * @param fileName 源文件名，如 "TestLogic.cs"
+ */
+function findSourceFile(fileName: string): string | null {
+  console.log(`[HomeView] findSourceFile: looking for "${fileName}"`)
+  
+  // 通过 filesStore 检查文件是否存在
+  const fileTree = filesStore.fileTree
+  
+  // 递归查找文件
+  function searchInTree(items: any[], target: string): string | null {
+    for (const item of items) {
+      // 文件树使用 kind: 'file' | 'folder'，不是 type
+      if (item.kind === 'file') {
+        // 检查文件名是否匹配
+        if (item.name === target) {
+          console.log(`[HomeView] Found file by name: ${item.path}`)
+          return item.path
+        }
+        // 检查完整路径结尾
+        if (item.path.endsWith('/' + target) || item.path.endsWith('\\' + target)) {
+          console.log(`[HomeView] Found file by path suffix: ${item.path}`)
+          return item.path
+        }
+      } else if (item.kind === 'folder' && item.children) {
+        const found = searchInTree(item.children, target)
+        if (found) return found
+      }
+    }
+    return null
+  }
+  
+  if (fileTree && fileTree.length > 0) {
+    console.log(`[HomeView] Searching in file tree with ${fileTree.length} root items`)
+    const result = searchInTree(fileTree, fileName)
+    if (!result) {
+      console.warn(`[HomeView] Source file not found in file tree: "${fileName}"`)
+      // 打印文件树结构帮助调试
+      console.log('[HomeView] File tree structure:', JSON.stringify(fileTree, null, 2))
+    }
+    return result
+  }
+  
+  console.warn('[HomeView] File tree not available or empty')
+  return null
+}
 
 // Splitpanes 尺寸 (百分比)
 const leftPaneSize = ref(75)
@@ -298,6 +398,95 @@ async function handleFileSelect(path: string) {
 }
 
 /**
+ * 处理从 TerminalPanel 的 gotoSource 事件（Build 错误跳转）
+ * @param fileName 源文件名，如 "TestLogic.cs"
+ * @param line 行号
+ */
+async function handleGotoSource(fileName: string, line: number) {
+  console.log(`[HomeView] handleGotoSource: ${fileName}:${line}`)
+  
+  // 查找文件路径
+  const targetPath = findSourceFile(fileName)
+  if (!targetPath) {
+    uiStore.error('File Not Found', `Cannot find source file: ${fileName}`)
+    return
+  }
+  
+  // 打开文件并切换到编辑器模式
+  await filesStore.openFile(targetPath)
+  uiStore.setViewMode('editor')
+  
+  // 等待 DOM 更新后跳转到行
+  await nextTick()
+  
+  // 再等待一下让 Monaco 初始化
+  setTimeout(() => {
+    if (codeEditorRef.value) {
+      codeEditorRef.value.goToLine(line)
+    }
+  }, 100)
+}
+
+/**
+ * 检查文件路径是否为只读（generated 文件夹下的文件）
+ */
+function isReadonlyFile(path: string): boolean {
+  return filesStore.isReadonlyPath(path)
+}
+
+/**
+ * 保存指定 Tab
+ */
+async function handleSaveTab(tabId: string) {
+  try {
+    const success = await filesStore.saveTab(tabId)
+    if (success) {
+      uiStore.success('Saved', 'File saved successfully')
+    }
+  } catch (error) {
+    uiStore.error('Save Failed', String(error))
+  }
+}
+
+/**
+ * 保存当前活动 Tab (用于 Ctrl+S)
+ */
+async function saveActiveTab() {
+  if (!activeTabId.value) return
+  
+  const tab = activeTab.value
+  if (!tab || !tab.dirty) return
+  
+  // 检查是否是只读文件
+  if (isReadonlyFile(tab.path)) {
+    uiStore.error('Read-only', 'Cannot save generated files')
+    return
+  }
+  
+  await handleSaveTab(activeTabId.value)
+}
+
+/**
+ * 处理键盘快捷键
+ */
+function handleKeydown(event: KeyboardEvent) {
+  // Ctrl+S 或 Cmd+S (Mac)
+  if ((event.ctrlKey || event.metaKey) && event.key === 's') {
+    event.preventDefault()
+    saveActiveTab()
+  }
+}
+
+// 注册/注销键盘事件监听
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
+})
+
+/**
  * 更新编辑器内容
  */
 function updateContent(content: string) {
@@ -348,6 +537,16 @@ async function createNewFile() {
  * 新建项目
  */
 async function handleNewProject() {
+  // 同步后端状态，确保前端状态是最新的
+  await runtimeStore.syncSessionState()
+  
+  // 检查是否正在运行
+  if (runtimeStore.backendSessionRunning || runtimeStore.isRunning) {
+    logStore.logUI('\x1b[31mERROR:\x1b[0m Cannot create new project while session is running. Please stop first.')
+    uiStore.error('Cannot Create', 'Please stop the session first')
+    return
+  }
+  
   if (!confirm('Create a new project? This will clear the current graph and assets.')) {
     return
   }
@@ -598,36 +797,86 @@ function handleAddNodeConfirm(data: AddNodeResult) {
   margin: 0 6px;
 }
 
+/* Tab wrapper for grouped tab elements */
+.tab-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  transition: background var(--transition-fast);
+}
+
+.tab-wrapper:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tab-wrapper.active {
+  background: rgba(79, 140, 255, 0.1);
+}
+
 .tab {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 6px 8px 6px 12px;
   background: transparent;
   color: var(--text-muted);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
   font-size: 13px;
   transition: all var(--transition-fast);
   white-space: nowrap;
 }
 
 .tab:hover {
-  background: rgba(255, 255, 255, 0.05);
   color: var(--text-color);
 }
 
 .tab.active {
-  background: rgba(79, 140, 255, 0.15);
   color: var(--text-color);
+}
+
+.tab.readonly {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.tab .readonly-icon {
+  font-size: 10px;
+  opacity: 0.7;
 }
 
 .tab .dirty-dot {
   color: var(--warning);
 }
 
+.tab-save {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  opacity: 0.7;
+}
+
+.tab-save:hover {
+  color: var(--success);
+  opacity: 1;
+}
+
 .tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px 4px 4px;
   font-size: 16px;
   line-height: 1;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   opacity: 0.5;
   margin-left: 4px;
 }

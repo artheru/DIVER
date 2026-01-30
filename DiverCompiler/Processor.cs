@@ -1729,11 +1729,36 @@ internal partial class Processor
                         if (!first) map.Append(',');
                         first = false;
 
+                        // 获取源文件路径和行号
+                        string srcFile = "";
+                        int srcLine = 0;
+                        try
+                        {
+                            var ins = il;
+                            SequencePoint srcSp;
+                            do
+                            {
+                                srcSp = m.md.DebugInformation.GetSequencePoint(ins);
+                                ins = ins?.Previous;
+                            } while ((srcSp == null || srcSp.StartLine == 0xfeefee) && ins != null);
+
+                            if (srcSp != null && !string.IsNullOrEmpty(srcSp.Document?.Url))
+                            {
+                                srcFile = Path.GetFileName(srcSp.Document.Url);
+                                srcLine = srcSp.StartLine;
+                            }
+                        }
+                        catch { }
+
                         string escName = m.name.Replace("\\", "\\\\").Replace("\"", "\\\"");
-                        map.Append("{\"a\":").Append(abs)
-                           .Append(",\"m\":").Append(j)
-                           .Append(",\"l\":").Append(globalLine)
-                           .Append(",\"n\":\"").Append(escName).Append("\"}");
+                        string escFile = srcFile.Replace("\\", "\\\\").Replace("\"", "\\\"");
+                        // Map format: ilOffset, methodIndex, diverLine, methodName, sourceFile, sourceLine
+                        map.Append("{\"ilOffset\":").Append(abs)
+                           .Append(",\"methodIndex\":").Append(j)
+                           .Append(",\"diverLine\":").Append(globalLine)
+                           .Append(",\"methodName\":\"").Append(escName).Append("\"")
+                           .Append(",\"sourceFile\":\"").Append(escFile).Append("\"")
+                           .Append(",\"sourceLine\":").Append(srcLine).Append("}");
 
                         globalLine++;
                     }

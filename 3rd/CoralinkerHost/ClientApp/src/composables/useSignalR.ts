@@ -30,23 +30,71 @@ export type UpgradeProgressCallback = (
   message: string | null
 ) => void
 
+/** 致命错误数据类型 */
+export interface FatalErrorData {
+  nodeUuid: string
+  nodeName: string
+  logicName: string | null
+  timestamp: string
+  payloadVersion: number
+  version: {
+    productionName: string | null
+    gitCommit: string | null
+    buildTime: string | null
+  }
+  debugInfo: {
+    ilOffset: number
+    lineNo: number
+  }
+  errorType: 'String' | 'STM32F4'
+  errorString: string | null
+  coreDump: {
+    r0: number
+    r1: number
+    r2: number
+    r3: number
+    r12: number
+    lr: number
+    pc: number
+    psr: number
+    msr: number
+    cfsr: number
+    hfsr: number
+    dfsr: number
+    afsr: number
+    bfar: number
+    mmar: number
+    msp: number
+    stackEnd: number
+  } | null
+}
+
+/** 致命错误回调函数类型 */
+export type FatalErrorCallback = (error: FatalErrorData) => void
+
 // 升级进度回调列表（全局共享）
 const upgradeProgressCallbacks: Set<UpgradeProgressCallback> = new Set()
 
+// 致命错误回调列表（全局共享）
+const fatalErrorCallbacks: Set<FatalErrorCallback> = new Set()
+
+// ============================================
+// 单例状态（全局共享，避免多次连接）
+// ============================================
+
+/** SignalR 连接实例（单例） */
+const connection = ref<signalR.HubConnection | null>(null)
+
+/** 连接状态（单例） */
+const state = ref<ConnectionState>('disconnected')
+
+/** 错误信息（单例） */
+const error = ref<string | null>(null)
+
+/** 是否已注册事件处理器（防止重复注册） */
+let eventHandlersRegistered = false
+
 export function useSignalR() {
-  // ============================================
-  // 状态
-  // ============================================
-  
-  /** SignalR 连接实例 */
-  const connection = ref<signalR.HubConnection | null>(null)
-  
-  /** 连接状态 */
-  const state = ref<ConnectionState>('disconnected')
-  
-  /** 错误信息 */
-  const error = ref<string | null>(null)
-  
   // ============================================
   // Store 引用
   // ============================================
@@ -63,47 +111,58 @@ export function useSignalR() {
    * 配置自动重连和事件处理器
    */
   async function connect() {
+    // 已连接，直接返回
     if (connection.value?.state === signalR.HubConnectionState.Connected) {
-      return // 已连接
+      console.log('[SignalR] Already connected, skipping')
+      return
+    }
+    
+    // 正在连接中，避免重复连接
+    if (state.value === 'connecting') {
+      console.log('[SignalR] Connection in progress, skipping')
+      return
     }
     
     state.value = 'connecting'
     error.value = null
     
     try {
-      // 创建连接，配置自动重连策略
-      connection.value = new signalR.HubConnectionBuilder()
-        .withUrl('/hubs/terminal')
-        .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
-        .configureLogging(signalR.LogLevel.Warning)
-        .build()
-      
-      // 注册事件处理器
-      registerEventHandlers()
-      
-      // 注册连接状态回调
-      connection.value.onreconnecting(() => {
-        state.value = 'reconnecting'
-        runtimeStore.setBackendAvailable(false)
-        console.log('[SignalR] Reconnecting...')
-      })
-      
-      connection.value.onreconnected(() => {
-        state.value = 'connected'
-        runtimeStore.setBackendAvailable(true)
-        console.log('[SignalR] Reconnected')
-      })
-      
-      connection.value.onclose((err) => {
-        state.value = 'disconnected'
-        runtimeStore.setBackendAvailable(false)
-        if (err) {
-          error.value = err.message
-          console.error('[SignalR] Connection closed with error:', err)
-        } else {
-          console.log('[SignalR] Connection closed')
-        }
-      })
+      // 只有在没有连接实例时才创建新连接
+      if (!connection.value) {
+        console.log('[SignalR] Creating new connection...')
+        connection.value = new signalR.HubConnectionBuilder()
+          .withUrl('/hubs/terminal')
+          .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
+          .configureLogging(signalR.LogLevel.Warning)
+          .build()
+        
+        // 注册事件处理器（只注册一次）
+        registerEventHandlers()
+        
+        // 注册连接状态回调
+        connection.value.onreconnecting(() => {
+          state.value = 'reconnecting'
+          runtimeStore.setBackendAvailable(false)
+          console.log('[SignalR] Reconnecting...')
+        })
+        
+        connection.value.onreconnected(() => {
+          state.value = 'connected'
+          runtimeStore.setBackendAvailable(true)
+          console.log('[SignalR] Reconnected')
+        })
+        
+        connection.value.onclose((err) => {
+          state.value = 'disconnected'
+          runtimeStore.setBackendAvailable(false)
+          if (err) {
+            error.value = err.message
+            console.error('[SignalR] Connection closed with error:', err)
+          } else {
+            console.log('[SignalR] Connection closed')
+          }
+        })
+      }
       
       // 启动连接
       await connection.value.start()
@@ -151,10 +210,24 @@ export function useSignalR() {
   function registerEventHandlers() {
     if (!connection.value) return
     
+    // 防止重复注册
+    if (eventHandlersRegistered) {
+      console.log('[SignalR] Event handlers already registered, skipping')
+      return
+    }
+    eventHandlersRegistered = true
+    console.log('[SignalR] Registering event handlers...')
+    
     // 终端日志事件
     // 格式: terminalLine(line: string)
     connection.value.on('terminalLine', (line: string) => {
       logStore.appendTerminal(line)
+    })
+    
+    // Build 日志事件（专用通道）
+    // 格式: buildLine(line: string)
+    connection.value.on('buildLine', (line: string) => {
+      logStore.appendBuild(line)
     })
     
     // 节点日志事件
@@ -187,6 +260,20 @@ export function useSignalR() {
         }
       })
     })
+
+    // MCU 致命错误事件
+    // 格式: fatalError(errorData: FatalErrorData)
+    connection.value.on('fatalError', (errorData: FatalErrorData) => {
+      console.error('[SignalR] Fatal error received:', errorData)
+      // 通知所有注册的回调
+      fatalErrorCallbacks.forEach(callback => {
+        try {
+          callback(errorData)
+        } catch (err) {
+          console.error('[SignalR] fatalError callback error:', err)
+        }
+      })
+    })
   }
   
   /**
@@ -201,6 +288,20 @@ export function useSignalR() {
    */
   function offUpgradeProgress(callback: UpgradeProgressCallback) {
     upgradeProgressCallbacks.delete(callback)
+  }
+
+  /**
+   * 注册致命错误回调
+   */
+  function onFatalError(callback: FatalErrorCallback) {
+    fatalErrorCallbacks.add(callback)
+  }
+
+  /**
+   * 注销致命错误回调
+   */
+  function offFatalError(callback: FatalErrorCallback) {
+    fatalErrorCallbacks.delete(callback)
   }
   
   /**
@@ -246,6 +347,8 @@ export function useSignalR() {
     disconnect,
     isConnected,
     onUpgradeProgress,
-    offUpgradeProgress
+    offUpgradeProgress,
+    onFatalError,
+    offFatalError
   }
 }

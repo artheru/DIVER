@@ -3,7 +3,7 @@
   "nodes": [
     {
       "nodeId": "node1",
-      "mcuUri": "serial://name=COM18&baudrate=1000000",
+      "mcuUri": "serial://name=COM5&baudrate=1000000",
       "binPath": "../CoralinkerHost/data/assets/generated/TestLogic.bin",
       "metaJsonPath": "../CoralinkerHost/data/assets/generated/TestLogic.bin.json",
       "logicName": "TestLogic",
@@ -13,7 +13,6 @@
         { "type": "serial", "baud": 9600, "receiveFrameMs": 0 },
         { "type": "serial", "baud": 9600, "receiveFrameMs": 0 },
         { "type": "can", "baud": 500000, "retryTimeMs": 10 },
-        { "type": "can", "baud": 500000, "retryTimeMs": 10 }
       ]
     }
   ]

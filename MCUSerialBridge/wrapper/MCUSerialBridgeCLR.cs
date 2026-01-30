@@ -310,6 +310,208 @@ namespace MCUSerialBridgeCLR
     }
 
     /// <summary>
+    /// Core Dump 数据布局类型
+    /// </summary>
+    public enum CoreDumpLayout : uint
+    {
+        /// <summary>后续是字符串，按字符串解析</summary>
+        String = 0,
+        /// <summary>STM32F4 Core Dump 变量</summary>
+        STM32F4 = 4,
+    }
+
+    /// <summary>
+    /// DIVER 运行时调试信息 (64 bytes)
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct DIVERDebugInfo
+    {
+        /// <summary>当前 IL 指令偏移</summary>
+        public int ILOffset;
+
+        /// <summary>C 代码行号 (来自 __LINE__)</summary>
+        public int LineNo;
+
+        /// <summary>保留字段</summary>
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 14)]
+        public uint[] Reserved;
+    }
+
+    /// <summary>
+    /// STM32F4 Core Dump 变量 (68 bytes, 17 个寄存器)
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CoreDumpVariablesF4
+    {
+        public uint R0;
+        public uint R1;
+        public uint R2;
+        public uint R3;
+        public uint R12;
+        /// <summary>链接寄存器</summary>
+        public uint LR;
+        /// <summary>程序计数器</summary>
+        public uint PC;
+        /// <summary>程序状态寄存器</summary>
+        public uint PSR;
+        /// <summary>主状态寄存器</summary>
+        public uint MSR;
+        /// <summary>可配置故障状态寄存器</summary>
+        public uint CFSR;
+        /// <summary>硬故障状态寄存器</summary>
+        public uint HFSR;
+        /// <summary>调试故障状态寄存器</summary>
+        public uint DFSR;
+        /// <summary>辅助故障状态寄存器</summary>
+        public uint AFSR;
+        /// <summary>总线故障地址寄存器</summary>
+        public uint BFAR;
+        /// <summary>内存管理故障地址寄存器</summary>
+        public uint MMAR;
+        /// <summary>主堆栈指针</summary>
+        public uint MSP;
+        /// <summary>堆栈结束地址</summary>
+        public uint StackEnd;
+    }
+
+    /// <summary>
+    /// Core Dump 数据联合体 (128 bytes)
+    /// </summary>
+    [StructLayout(LayoutKind.Explicit, Size = 128)]
+    public struct CoreDumpData
+    {
+        /// <summary>原始字节数据</summary>
+        [FieldOffset(0)]
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 128)]
+        public byte[] Raw;
+    }
+
+    /// <summary>
+    /// 错误上报 Payload 结构 (256 bytes)
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ErrorPayload
+    {
+        /// <summary>Payload 版本号 (当前 = 1)</summary>
+        public uint PayloadVersion;
+
+        /// <summary>固件版本信息 (56 bytes)</summary>
+        public VersionInfo Version;
+
+        /// <summary>DIVER 调试信息 (64 bytes)</summary>
+        public DIVERDebugInfo DebugInfo;
+
+        /// <summary>Core Dump 布局类型</summary>
+        public uint CoreDumpLayoutValue;
+
+        /// <summary>Core Dump 数据 (128 bytes)</summary>
+        public CoreDumpData CoreDump;
+
+        /// <summary>获取 Core Dump 布局类型枚举</summary>
+        public readonly CoreDumpLayout Layout => (CoreDumpLayout)CoreDumpLayoutValue;
+
+        /// <summary>
+        /// 获取错误字符串（当 Layout == String 时）
+        /// </summary>
+        public readonly string GetErrorString()
+        {
+            if (Layout != CoreDumpLayout.String || CoreDump.Raw == null)
+                return string.Empty;
+
+            int len = Array.IndexOf(CoreDump.Raw, (byte)0);
+            if (len < 0) len = CoreDump.Raw.Length;
+            return System.Text.Encoding.UTF8.GetString(CoreDump.Raw, 0, len);
+        }
+
+        /// <summary>
+        /// 获取 STM32F4 Core Dump 数据（当 Layout == STM32F4 时）
+        /// </summary>
+        public readonly CoreDumpVariablesF4? GetF4CoreDump()
+        {
+            if (Layout != CoreDumpLayout.STM32F4 || CoreDump.Raw == null)
+                return null;
+
+            IntPtr ptr = Marshal.AllocHGlobal(68);
+            try
+            {
+                Marshal.Copy(CoreDump.Raw, 0, ptr, 68);
+                return Marshal.PtrToStructure<CoreDumpVariablesF4>(ptr);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(ptr);
+            }
+        }
+
+        /// <summary>
+        /// 转换为 JSON 对象
+        /// </summary>
+        public readonly JObject ToJson()
+        {
+            var json = new JObject
+            {
+                ["payloadVersion"] = PayloadVersion,
+                ["version"] = new JObject
+                {
+                    ["productionName"] = Version.ProductionName?.Trim('\0') ?? "",
+                    ["gitTag"] = Version.GitTag?.Trim('\0') ?? "",
+                    ["gitCommit"] = Version.GitCommit?.Trim('\0') ?? "",
+                    ["buildTime"] = Version.BuildTime?.Trim('\0') ?? ""
+                },
+                ["debugInfo"] = new JObject
+                {
+                    ["ilOffset"] = DebugInfo.ILOffset,
+                    ["lineNo"] = DebugInfo.LineNo
+                },
+                ["coreDumpLayout"] = Layout.ToString()
+            };
+
+            if (Layout == CoreDumpLayout.String)
+            {
+                json["errorString"] = GetErrorString();
+            }
+            else if (Layout == CoreDumpLayout.STM32F4)
+            {
+                var f4 = GetF4CoreDump();
+                if (f4.HasValue)
+                {
+                    var v = f4.Value;
+                    json["coreDump"] = new JObject
+                    {
+                        ["R0"] = $"0x{v.R0:X8}",
+                        ["R1"] = $"0x{v.R1:X8}",
+                        ["R2"] = $"0x{v.R2:X8}",
+                        ["R3"] = $"0x{v.R3:X8}",
+                        ["R12"] = $"0x{v.R12:X8}",
+                        ["LR"] = $"0x{v.LR:X8}",
+                        ["PC"] = $"0x{v.PC:X8}",
+                        ["PSR"] = $"0x{v.PSR:X8}",
+                        ["MSR"] = $"0x{v.MSR:X8}",
+                        ["CFSR"] = $"0x{v.CFSR:X8}",
+                        ["HFSR"] = $"0x{v.HFSR:X8}",
+                        ["DFSR"] = $"0x{v.DFSR:X8}",
+                        ["AFSR"] = $"0x{v.AFSR:X8}",
+                        ["BFAR"] = $"0x{v.BFAR:X8}",
+                        ["MMAR"] = $"0x{v.MMAR:X8}",
+                        ["MSP"] = $"0x{v.MSP:X8}",
+                        ["StackEnd"] = $"0x{v.StackEnd:X8}"
+                    };
+                }
+            }
+
+            return json;
+        }
+
+        /// <summary>
+        /// 转换为可读字符串
+        /// </summary>
+        public override readonly string ToString()
+        {
+            return $"ErrorPayload(v{PayloadVersion}): IL={DebugInfo.ILOffset}, Line={DebugInfo.LineNo}, Layout={Layout}";
+        }
+    }
+
+    /// <summary>
     /// MCU 硬件布局信息结构体
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
@@ -725,6 +927,19 @@ namespace MCUSerialBridgeCLR
             IntPtr user_ctx
         );
 
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate void msb_on_fatal_error_callback_function_t(
+            IntPtr payload,
+            IntPtr user_ctx
+        );
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern MCUSerialBridgeError msb_register_fatal_error_callback(
+            IntPtr handle,
+            msb_on_fatal_error_callback_function_t callback,
+            IntPtr user_ctx
+        );
+
         [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
         internal static extern MCUSerialBridgeError msb_get_stats(
             IntPtr handle,
@@ -1110,6 +1325,7 @@ namespace MCUSerialBridgeCLR
 
         private MCUSerialBridgeCoreAPI.msb_on_memory_lower_io_callback_function_t _memoryLowerIOCallback;
         private MCUSerialBridgeCoreAPI.msb_on_console_writeline_callback_function_t _consoleWriteLineCallback;
+        private MCUSerialBridgeCoreAPI.msb_on_fatal_error_callback_function_t _fatalErrorCallback;
 
         /// <summary>
         /// 注册指定端口(Serial)的回调函数
@@ -1406,6 +1622,51 @@ namespace MCUSerialBridgeCLR
             return MCUSerialBridgeCoreAPI.msb_register_console_writeline_callback(
                 nativeHandle,
                 _consoleWriteLineCallback,
+                IntPtr.Zero
+            );
+        }
+
+        /// <summary>
+        /// 注册 MCU 致命错误回调（MCU HardFault 或 ASSERT 失败时触发）
+        /// </summary>
+        /// <param name="callback">接收错误回调，ErrorPayload 为错误详情</param>
+        /// <returns>错误码</returns>
+        /// <remarks>
+        /// 注意事项：
+        /// 1. MCU 检测到致命错误时会连续发送多次（防止丢包），C 层已做去重，回调只会触发一次。
+        /// 2. 回调触发后 MCU 会自动复位，连接会断开。
+        /// 3. 错误信息包括：IL 偏移、行号、Core Dump 寄存器或错误字符串。
+        /// 4. 可通过 ErrorPayload.ToJson() 获取 JSON 格式的错误详情，便于上报前端显示。
+        /// </remarks>
+        public MCUSerialBridgeError RegisterFatalErrorCallback(Action<ErrorPayload> callback)
+        {
+            if (callback == null)
+                return MCUSerialBridgeError.Win_InvalidParam;
+
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            // 包装 C# 回调为 P/Invoke 委托
+            void del(IntPtr payload, IntPtr user_ctx)
+            {
+                try
+                {
+                    var errorPayload = Marshal.PtrToStructure<ErrorPayload>(payload);
+                    callback(errorPayload);
+                }
+                catch
+                {
+                    // 解析失败直接忽略，保证回调不会抛异常阻塞 C 层线程
+                }
+            }
+
+            // 保存引用，防止 GC 回收
+            _fatalErrorCallback = del;
+
+            // 调用 C 层注册
+            return MCUSerialBridgeCoreAPI.msb_register_fatal_error_callback(
+                nativeHandle,
+                _fatalErrorCallback,
                 IntPtr.Zero
             );
         }
