@@ -11,51 +11,59 @@
 -->
 
 <template>
-  <Teleport to="body">
+  <component :is="embedded ? 'div' : Teleport" :to="embedded ? undefined : 'body'">
     <div 
       v-if="visible"
       class="control-window"
-      :style="windowStyle"
-      :class="{ 'is-dragging': isDragging, 'is-resizing': isResizing }"
+      :class="{ 
+        'is-dragging': isDragging, 
+        'is-resizing': isResizing,
+        'is-embedded': embedded,
+        'is-readonly': readonly
+      }"
+      :style="embedded ? embeddedStyle : windowStyle"
     >
-      <!-- 标题栏 -->
-      <div class="window-header" @mousedown="startDrag">
+      <!-- 标题栏（嵌入模式下不显示） -->
+      <div v-if="!embedded" class="window-header" @mousedown="startDrag">
         <span class="window-title">🎮 Control Panel</span>
         <div class="window-actions">
-          <!-- 锁定按钮 -->
-          <button 
-            class="action-btn"
-            :class="{ active: isLocked }"
-            @click.stop="toggleLock"
-            :title="isLocked ? 'Unlock Layout' : 'Lock Layout'"
-          >
-            {{ isLocked ? '🔒' : '🔓' }}
-          </button>
-          <!-- 添加控件按钮 -->
-          <button 
-            class="action-btn"
-            :disabled="isLocked"
-            @click.stop="showAddWidgetMenu = !showAddWidgetMenu"
-            title="Add Widget"
-          >
-            ➕
-          </button>
-          <!-- 网格设置按钮 -->
-          <button 
-            class="action-btn"
-            :disabled="isLocked"
-            @click.stop="showGridSettings = !showGridSettings"
-            title="Grid Settings"
-          >
-            ⚙️
-          </button>
+          <!-- 编辑按钮（只读模式下隐藏） -->
+          <template v-if="!readonly">
+            <!-- 锁定按钮 -->
+            <button 
+              class="action-btn"
+              :class="{ active: isLocked }"
+              @click.stop="toggleLock"
+              :title="isLocked ? 'Unlock Layout' : 'Lock Layout'"
+            >
+              {{ isLocked ? '🔒' : '🔓' }}
+            </button>
+            <!-- 添加控件按钮 -->
+            <button 
+              class="action-btn"
+              :disabled="isLocked"
+              @click.stop="showAddWidgetMenu = !showAddWidgetMenu"
+              title="Add Widget"
+            >
+              ➕
+            </button>
+            <!-- 网格设置按钮 -->
+            <button 
+              class="action-btn"
+              :disabled="isLocked"
+              @click.stop="showGridSettings = !showGridSettings"
+              title="Grid Settings"
+            >
+              ⚙️
+            </button>
+          </template>
           <!-- 关闭按钮 -->
           <button class="action-btn close" @click.stop="close" title="Close">×</button>
         </div>
       </div>
 
-      <!-- 添加控件菜单 -->
-      <div v-if="showAddWidgetMenu" class="dropdown-menu add-widget-menu">
+      <!-- 添加控件菜单（只读模式下不显示） -->
+      <div v-if="showAddWidgetMenu && !readonly" class="dropdown-menu add-widget-menu">
         <button @click="addWidget('joystick')">
           <span class="menu-icon">✛</span>
           <span>Joystick (双轴)</span>
@@ -70,8 +78,8 @@
         </button>
       </div>
 
-      <!-- 网格设置菜单 -->
-      <div v-if="showGridSettings" class="dropdown-menu grid-settings-menu">
+      <!-- 网格设置菜单（只读模式下不显示） -->
+      <div v-if="showGridSettings && !readonly" class="dropdown-menu grid-settings-menu">
         <div class="setting-row">
           <label>Columns (X)</label>
           <input 
@@ -148,23 +156,23 @@
             />
           </div>
 
-          <!-- 控件工具栏（非锁定时显示） -->
-          <div v-if="!isLocked && selectedWidgetId === widget.id" class="widget-toolbar">
+          <!-- 控件工具栏（非锁定且非只读时显示） -->
+          <div v-if="!isLocked && !readonly && selectedWidgetId === widget.id" class="widget-toolbar">
             <button @click.stop="openWidgetConfig(widget)" title="Configure">⚙️</button>
             <button @click.stop="removeWidget(widget.id)" title="Delete">🗑️</button>
           </div>
 
-          <!-- 调整大小手柄（非锁定时显示） -->
+          <!-- 调整大小手柄（非锁定且非只读时显示） -->
           <div 
-            v-if="!isLocked && selectedWidgetId === widget.id"
+            v-if="!isLocked && !readonly && selectedWidgetId === widget.id"
             class="resize-handle"
             @mousedown.stop="startWidgetResize(widget, $event)"
           ></div>
         </div>
       </div>
 
-      <!-- 控件配置对话框 -->
-      <div v-if="showConfigDialog && editingWidget" class="config-dialog-overlay" @click="closeConfigDialog">
+      <!-- 控件配置对话框（只读模式下不显示） -->
+      <div v-if="showConfigDialog && editingWidget && !readonly" class="config-dialog-overlay" @click="closeConfigDialog">
         <div class="config-dialog" @click.stop>
           <div class="config-dialog-header">
             <span>Configure {{ editingWidget.type }}</span>
@@ -429,11 +437,11 @@
         </div>
       </div>
     </div>
-  </Teleport>
+  </component>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, Teleport } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRuntimeStore, useProjectStore } from '@/stores'
 import JoystickWidget from './JoystickWidget.vue'
@@ -444,9 +452,14 @@ import SwitchWidget from './SwitchWidget.vue'
 // Props 和 Emits
 // ============================================
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   visible: boolean
-}>()
+  readonly?: boolean   // 只读模式：只能操控，不能修改布局和参数
+  embedded?: boolean   // 嵌入模式：不使用 Teleport，不显示关闭按钮
+}>(), {
+  readonly: false,
+  embedded: false
+})
 
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void
@@ -539,6 +552,12 @@ const windowStyle = computed(() => ({
   top: `${windowY.value}px`,
   width: `${gridCols.value * CELL_SIZE + 18}px`,  // margin 16px + border 2px
   height: `${gridRows.value * CELL_SIZE + 62}px`  // header 44px + margin 16px + border 2px
+}))
+
+// 嵌入模式下的样式（无定位，自动填充）
+const embeddedStyle = computed(() => ({
+  width: `${gridCols.value * CELL_SIZE + 18}px`,
+  height: `${gridRows.value * CELL_SIZE + 18}px`  // 嵌入模式无 header
 }))
 
 const canvasStyle = computed(() => ({
@@ -1113,6 +1132,14 @@ onUnmounted(() => {
   z-index: 1000;
   min-width: 300px;
   min-height: 200px;
+}
+
+/* 嵌入模式：不浮动，无阴影 */
+.control-window.is-embedded {
+  position: relative;
+  box-shadow: none;
+  border-radius: var(--radius);
+  z-index: auto;
 }
 
 .control-window.is-dragging {
