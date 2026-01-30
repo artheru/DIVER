@@ -12,9 +12,7 @@
     <!-- 状态栏 -->
     <header class="status-bar">
       <div class="status-left">
-        <a href="/" class="back-link" title="Back to Editor">← Editor</a>
-        <span class="separator">|</span>
-        <span class="app-title">🎮 Control Panel</span>
+        <span class="app-title">🎮</span>
       </div>
       
       <div class="status-center">
@@ -53,7 +51,7 @@
       <!-- 空状态提示 -->
       <div v-if="!hasWidgets" class="empty-hint">
         <p>No widgets configured</p>
-        <p class="hint-sub">Go to <a href="/">Editor</a> to add and configure control widgets</p>
+        <p class="hint-sub">Please configure control widgets in the main editor first</p>
       </div>
     </main>
   </div>
@@ -158,24 +156,8 @@ onMounted(async () => {
   gap: 12px;
 }
 
-.back-link {
-  color: var(--text-muted);
-  font-size: 13px;
-  text-decoration: none;
-}
-
-.back-link:hover {
-  color: var(--primary);
-}
-
-.separator {
-  color: var(--border-color);
-}
-
 .app-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-color);
+  font-size: 20px;
 }
 
 .status-center {
