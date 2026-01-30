@@ -152,7 +152,7 @@ import { Handle, Position } from '@vue-flow/core'
 import { NSelect } from 'naive-ui'
 import { useRuntimeStore, useFilesStore } from '@/stores'
 import { storeToRefs } from 'pinia'
-import { getLogicList, programNode } from '@/api/device'
+import { getLogicList, programNode, configureNode } from '@/api/device'
 import type { PortConfig, PortDescriptor, RuntimeStats, LogicInfo, LayoutInfo } from '@/types'
 import PortConfigEdit from './PortConfigEdit.vue'
 import PortStatsView from './PortStatsView.vue'
@@ -313,9 +313,25 @@ function toggleCollapse() {
   isCollapsed.value = !isCollapsed.value
 }
 
-function updateNodeName() {
+async function updateNodeName() {
   if (localNodeName.value !== props.data.nodeName) {
+    // 先更新本地 UI
     updateNodeData(props.id, { nodeName: localNodeName.value })
+    
+    // 保存到后端
+    try {
+      const result = await configureNode(props.id, { nodeName: localNodeName.value })
+      if (result.ok) {
+        console.log(`[CoralNode] Node name updated: ${props.id} -> ${localNodeName.value}`)
+        // 刷新变量元信息和变量列表（因为 __iteration 变量名包含节点名）
+        await runtimeStore.refreshFieldMetas()
+        await runtimeStore.refreshVariables()
+      } else {
+        console.error(`[CoralNode] Failed to save node name`)
+      }
+    } catch (error) {
+      console.error(`[CoralNode] Error saving node name:`, error)
+    }
   }
 }
 

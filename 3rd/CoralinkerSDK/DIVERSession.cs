@@ -832,6 +832,20 @@ public sealed class DIVERSession : IDisposable
     {
         var result = new Dictionary<string, CartFieldMeta>(StringComparer.OrdinalIgnoreCase);
         
+        // 添加每个节点的内置 __iteration 字段（LowerIO, int32）
+        foreach (var entry in _nodes.Values)
+        {
+            var iterationName = $"{entry.NodeName}.__iteration";
+            result[iterationName] = new CartFieldMeta(
+                Name: iterationName,
+                Type: "Int32",
+                TypeId: 6, // TypeId for Int32
+                IsLowerIO: true,
+                IsUpperIO: false,
+                IsMutual: false
+            );
+        }
+        
         foreach (var entry in _nodes.Values)
         {
             foreach (var field in entry.CartFields)
@@ -873,7 +887,23 @@ public sealed class DIVERSession : IDisposable
             }
         }
 
-        // 构建结果
+        // 添加每个节点的内置 __iteration 字段值
+        foreach (var entry in _nodes.Values)
+        {
+            var iteration = HostRuntime.GetIteration(entry.UUID);
+            var iterationName = $"{entry.NodeName}.__iteration";
+            result[iterationName] = new CartFieldValue(
+                Name: iterationName,
+                Type: "Int32",
+                TypeId: 6, // TypeId for Int32
+                Value: iteration ?? 0,
+                IsLowerIO: true,
+                IsUpperIO: false,
+                IsMutual: false
+            );
+        }
+
+        // 构建其他变量结果
         foreach (var kv in _variables)
         {
             fieldInfoMap.TryGetValue(kv.Key, out var fieldInfo);
@@ -1243,7 +1273,8 @@ public sealed class DIVERSession : IDisposable
         if (ms.Length >= 4)
         {
             var iteration = br.ReadInt32();
-            // 可选：存储 iteration
+            // 存储 iteration 到 HostRuntime
+            HostRuntime.SetCartVariable(uuid, "__iteration", iteration);
         }
 
         foreach (var field in fields)

@@ -316,6 +316,10 @@ export const useRuntimeStore = defineStore('runtime', () => {
     try {
       const result = await runtimeApi.getAllVariables()
       if (result.ok) {
+        // 清除旧变量，完全替换（避免节点重命名后旧变量残留）
+        variables.value.clear()
+        variableControllable.value.clear()
+        
         for (const v of result.variables) {
           variables.value.set(v.name, {
             name: v.name,
