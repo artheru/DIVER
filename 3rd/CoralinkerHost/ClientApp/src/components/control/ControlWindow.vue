@@ -779,7 +779,8 @@ function removeWidget(id: string) {
 function selectWidget(id: string, event: MouseEvent) {
   selectedWidgetId.value = id
   
-  if (!isLocked.value) {
+  // 只读模式或锁定状态下不允许拖动
+  if (!isLocked.value && !props.readonly) {
     // 开始拖动控件
     const widget = widgets.value.find(w => w.id === id)
     if (widget) {

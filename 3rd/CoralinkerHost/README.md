@@ -100,6 +100,8 @@ dotnet run
 │   │   │   └── variables/   # 变量面板
 │   │   ├── types/           # TypeScript 类型定义
 │   │   └── views/
+│   │       ├── HomeView.vue         # 主页面（节点图编辑器）
+│   │       └── ControlPanelView.vue # 独立遥控器页面 (/control)
 │   └── vite.config.ts
 ├── Services/
 │   ├── RuntimeSessionService.cs  # DIVERSession 异步封装 + 日志广播
@@ -306,24 +308,37 @@ dotnet run
     "windowY": 100,
     "gridCols": 12,
     "gridRows": 12,
-    "locked": false,
+    "isLocked": false,
     "widgets": [
       {
         "id": "widget-1",
         "type": "joystick",
-        "gridX": 0,
-        "gridY": 0,
-        "gridW": 5,
-        "gridH": 7,
+        "gridX": 0, "gridY": 0, "gridW": 5, "gridH": 7,
         "config": {
-          "variableX": "speed",
-          "variableY": "direction",
-          "minX": -100,
-          "maxX": 100,
-          "keyUp": "W",
-          "keyDown": "S",
-          "keyLeft": "A",
-          "keyRight": "D"
+          "variableX": "inputA", "variableY": "inputB",
+          "minX": -100, "maxX": 100, "minY": -100, "maxY": 100,
+          "autoReturnX": true, "autoReturnY": true,
+          "keyUp": "W", "keyDown": "S", "keyLeft": "A", "keyRight": "D",
+          "moveSpeed": 100, "returnSpeed": 200
+        }
+      },
+      {
+        "id": "widget-2",
+        "type": "slider",
+        "gridX": 6, "gridY": 0, "gridW": 5, "gridH": 2,
+        "config": {
+          "variable": "throttle",
+          "min": 0, "max": 100, "autoReturn": false,
+          "keyDecrease": "Z", "keyIncrease": "X",
+          "moveSpeed": 100, "returnSpeed": 200
+        }
+      },
+      {
+        "id": "widget-3",
+        "type": "switch",
+        "gridX": 6, "gridY": 3, "gridW": 3, "gridH": 2,
+        "config": {
+          "variable": "enabled", "states": 2, "keyToggle": "C"
         }
       }
     ]
@@ -408,6 +423,12 @@ ControlWindow 提供可拖拽、可调整大小的遥控器窗口，支持三种
 - 自动回弹可单独配置 X/Y 轴
 - 布局持久化到 `projectStore.controlLayout`
 - 字段元信息在页面加载时获取（`/api/variables/meta`），无需 Start 即可配置绑定
+- **触摸设备支持**：自动检测触摸设备，隐藏键盘绑定显示，支持触摸拖动操作
+
+**独立页面** `/control`：
+- 简洁的只读遥控器界面，适合手机/平板使用
+- 顶部状态栏显示运行状态和 Start/Stop 按钮
+- 布局锁定，只能操控不能修改配置
 
 ### 日志面板
 
@@ -484,7 +505,7 @@ interface ControlLayoutConfig {
   windowY: number
   gridCols: number
   gridRows: number
-  locked: boolean
+  isLocked: boolean
   widgets: ControlWidget[]
 }
 ```
@@ -510,12 +531,19 @@ interface ControlLayoutConfig {
 - 检查 SignalR 连接状态
 - LowerIO 字段只读，不能设置
 - 确认节点处于 Running 状态
+- Build 完成后会自动刷新变量列表（删除/修改变量后重新编译即可更新）
 
 ### 日志重复
 
+**节点日志**：
 - 使用 `afterSeq` 参数获取新日志
 - 首次获取时不传 afterSeq
 - logs store 自动管理 lastSeq
+
+**终端/Build 日志**：
+- SignalR 连接使用单例模式，避免多个组件创建重复连接
+- `useSignalR()` composable 的 connection/state 定义在模块级别
+- 如果仍然出现重复，检查浏览器是否打开了多个标签页
 
 ### 节点位置不保存
 

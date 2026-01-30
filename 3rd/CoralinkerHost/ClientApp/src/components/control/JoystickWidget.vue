@@ -12,14 +12,14 @@
 <template>
   <div 
     class="joystick-widget" 
-    :class="{ focused: focused }"
+    :class="{ focused: focused, 'touch-mode': isTouchDevice }"
     tabindex="0" 
     @focus="onFocus" 
     @blur="onBlur"
     @click="focusSelf"
   >
-    <!-- 上键 -->
-    <div class="key-row top">
+    <!-- 上键（触摸设备不显示） -->
+    <div v-if="!isTouchDevice" class="key-row top">
       <span 
         class="key-badge" 
         :class="{ active: pressedKeys.has(config.keyUp || ''), empty: !config.keyUp }"
@@ -29,11 +29,17 @@
     <!-- 中间行：左键 + 摇杆 + 右键 -->
     <div class="middle-row">
       <span 
+        v-if="!isTouchDevice"
         class="key-badge" 
         :class="{ active: pressedKeys.has(config.keyLeft || ''), empty: !config.keyLeft }"
       >{{ formatKey(config.keyLeft) || '←' }}</span>
       
-      <div class="joystick-area" ref="areaRef" @mousedown="startDrag">
+      <div 
+        class="joystick-area" 
+        ref="areaRef" 
+        @mousedown="startDrag"
+        @touchstart.prevent="startTouchDrag"
+      >
         <div class="joystick-crosshair">
           <div class="cross-h"></div>
           <div class="cross-v"></div>
@@ -42,13 +48,14 @@
       </div>
       
       <span 
+        v-if="!isTouchDevice"
         class="key-badge" 
         :class="{ active: pressedKeys.has(config.keyRight || ''), empty: !config.keyRight }"
       >{{ formatKey(config.keyRight) || '→' }}</span>
     </div>
     
-    <!-- 下键 -->
-    <div class="key-row bottom">
+    <!-- 下键（触摸设备不显示） -->
+    <div v-if="!isTouchDevice" class="key-row bottom">
       <span 
         class="key-badge" 
         :class="{ active: pressedKeys.has(config.keyDown || ''), empty: !config.keyDown }"
@@ -69,6 +76,12 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+
+// 检测是否是触摸设备
+const isTouchDevice = ref(false)
+if (typeof window !== 'undefined') {
+  isTouchDevice.value = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+}
 
 interface JoystickConfig {
   variableX?: string
@@ -97,7 +110,7 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{
-  (e: 'change', value: { x: number; y: number }): void
+  (e: 'change', value: { x?: number; y?: number }): void
 }>()
 
 const INTEGER_TYPE_IDS = [0, 1, 2, 3, 4, 5, 6, 7]
@@ -259,14 +272,14 @@ function animationLoop(currentTime: number) {
 
 function startDrag(event: MouseEvent) {
   dragging.value = true
-  updatePosition(event)
+  updatePositionFromMouse(event)
   document.addEventListener('mousemove', onDrag)
   document.addEventListener('mouseup', stopDrag)
 }
 
 function onDrag(event: MouseEvent) {
   if (!dragging.value) return
-  updatePosition(event)
+  updatePositionFromMouse(event)
 }
 
 function stopDrag() {
@@ -279,11 +292,46 @@ function stopDrag() {
   }
 }
 
-function updatePosition(event: MouseEvent) {
+// 触摸事件处理
+function startTouchDrag(event: TouchEvent) {
+  dragging.value = true
+  updatePositionFromTouch(event)
+  document.addEventListener('touchmove', onTouchDrag, { passive: false })
+  document.addEventListener('touchend', stopTouchDrag)
+  document.addEventListener('touchcancel', stopTouchDrag)
+}
+
+function onTouchDrag(event: TouchEvent) {
+  if (!dragging.value) return
+  event.preventDefault()
+  updatePositionFromTouch(event)
+}
+
+function stopTouchDrag() {
+  dragging.value = false
+  document.removeEventListener('touchmove', onTouchDrag)
+  document.removeEventListener('touchend', stopTouchDrag)
+  document.removeEventListener('touchcancel', stopTouchDrag)
+  
+  if (autoReturnX.value || autoReturnY.value) {
+    startAnimationLoop()
+  }
+}
+
+function updatePositionFromMouse(event: MouseEvent) {
   if (!areaRef.value) return
   const rect = areaRef.value.getBoundingClientRect()
   posX.value = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
   posY.value = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))
+  emitChangeIfNeeded()
+}
+
+function updatePositionFromTouch(event: TouchEvent) {
+  const touch = event.touches[0]
+  if (!areaRef.value || !touch) return
+  const rect = areaRef.value.getBoundingClientRect()
+  posX.value = Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width))
+  posY.value = Math.max(0, Math.min(1, (touch.clientY - rect.top) / rect.height))
   emitChangeIfNeeded()
 }
 
@@ -316,6 +364,9 @@ onUnmounted(() => {
   document.removeEventListener('keyup', onKeyUp)
   document.removeEventListener('mousemove', onDrag)
   document.removeEventListener('mouseup', stopDrag)
+  document.removeEventListener('touchmove', onTouchDrag)
+  document.removeEventListener('touchend', stopTouchDrag)
+  document.removeEventListener('touchcancel', stopTouchDrag)
   stopAnimationLoop()
 })
 </script>
@@ -332,10 +383,21 @@ onUnmounted(() => {
   border-radius: var(--radius);
   transition: box-shadow 0.15s;
   gap: 2px;
+  touch-action: none; /* 禁止浏览器默认触摸行为 */
 }
 
 .joystick-widget.focused {
   box-shadow: inset 0 0 0 2px var(--primary);
+}
+
+/* 触摸模式：摇杆区域更大，无按键显示 */
+.joystick-widget.touch-mode .middle-row {
+  flex: 1;
+}
+
+.joystick-widget.touch-mode .joystick-area {
+  width: 100%;
+  height: 100%;
 }
 
 /* 上下按键行 */
@@ -417,14 +479,24 @@ onUnmounted(() => {
 
 .joystick-handle {
   position: absolute;
-  width: 20px;
-  height: 20px;
-  background: radial-gradient(circle at 30% 30%, var(--primary-hover), var(--primary));
-  border: 2px solid white;
+  width: 28px;
+  height: 28px;
+  background: 
+    radial-gradient(circle at 35% 35%, rgba(255,255,255,0.8) 0%, transparent 40%),
+    radial-gradient(circle at 50% 50%, var(--primary) 0%, var(--primary-hover) 100%);
+  border: 3px solid rgba(255,255,255,0.9);
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  box-shadow: 
+    0 3px 8px rgba(0,0,0,0.4),
+    0 1px 2px rgba(0,0,0,0.2),
+    inset 0 -2px 4px rgba(0,0,0,0.15);
   pointer-events: none;
+  transition: transform 0.05s ease-out;
+}
+
+.joystick-widget:active .joystick-handle {
+  transform: translate(-50%, -50%) scale(0.95);
 }
 
 /* 变量显示行 */
