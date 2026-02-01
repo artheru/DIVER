@@ -1,263 +1,318 @@
 # DIVER (Dotnet Integrated Vehicle Embedded Runtime)
 
-DIVER is a specialized runtime and compiler system that enables running C# code on microcontroller units (MCUs), especially for automotive applications.
-The typical use is there is a host system running .NET application, and a MCU running DIVER, and they exchange data through serial port/ethernet, host system is typically a PC/Server or very powerful embedded system like Nvidia Orin, etc.
-DIVER give a robust "terminal nerve" like architecture,  
+DIVER is a specialized runtime and compiler system that enables running C# code on microcontroller units (MCUs), especially for automotive and robotics applications.
+
+The typical deployment consists of a host system (PC/Server or powerful embedded system like Nvidia Orin) running a .NET application, communicating with one or more MCUs running the DIVER runtime via serial port or ethernet. DIVER provides a robust "terminal nerve" architecture where MCUs handle real-time IO while the host handles complex logic.
 
 ## Features
 
-- C# to MCU bytecode compilation, makes embedding programming for vehicles super easy.
-- RTOS-like runtime.
+- **C# to MCU Bytecode Compilation** - Write MCU logic in familiar C# syntax
+- **RTOS-like Runtime** - Deterministic execution with configurable scan intervals
+- **Bidirectional Data Exchange** - UpperIO (Host→MCU) and LowerIO (MCU→Host)
+- **Hardware IO Abstraction** - CAN, Serial, GPIO, Modbus support
+- **Debug Source Maps** - Map runtime errors back to C# source locations
+- **Web-based Control Panel** - CoralinkerHost provides visual node management
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Host System (.NET)                              │
+│  ┌───────────────────────┐    ┌───────────────────────┐                     │
+│  │   DIVERVehicle        │    │   LadderLogic<T>      │                     │
+│  │   - IO Variables      │    │   - Operation()       │ ─── DiverCompiler ──┼──> .bin
+│  │   - SetMCUProgram()   │    │   - cart reference    │                     │
+│  │   - SendUpperData()   │    └───────────────────────┘                     │
+│  │   - NotifyLowerData() │                                                  │
+│  └───────────┬───────────┘                                                  │
+│              │ Serial/Ethernet                                              │
+└──────────────┼──────────────────────────────────────────────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              MCU (DIVER Runtime)                             │
+│  ┌───────────────────────┐    ┌───────────────────────┐                     │
+│  │   vm_run(iteration)   │    │   Hardware IO         │                     │
+│  │   - Execute bytecode  │    │   - CAN, Serial, GPIO │                     │
+│  │   - Process UpperIO   │    │   - Event/Stream/     │                     │
+│  │   - Generate LowerIO  │    │     Snapshot buffers  │                     │
+│  └───────────────────────┘    └───────────────────────┘                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ## Core Principles
 
-1. **Separation of Concerns**
-   - MCU: Handles all real-time IO and basic control
-   - Host: Handles compute-intensive operations
-   - Clear boundary between real-time and non-real-time tasks
+### 1. Separation of Concerns
+- **MCU**: Real-time IO handling, basic control loops, deterministic timing
+- **Host**: Complex logic, data logging, user interfaces, machine learning
+- Clear boundary prevents timing issues from affecting real-time operations
 
-2. **Data Flow Architecture**
-   ```
-   Host System                    MCU
-   +-----------+                +-----------+
-   |  Complex  |  Upper IO     |           |
-   |  Logic    | ----------->  |  Real-time|
-   |           |               |   Control  |
-   |           |  Lower IO     |           |
-   |           | <-----------  |           |
-   +-----------+                +-----------+
-   ```
+### 2. Data Flow (UpperIO / LowerIO)
 
-3. **IO Management**
-   - All hardware IO (CAN, Modbus, GPIO) handled by MCU
-   - Event, Stream, and Snapshot. event: like CAN, Modbus, etc. stream: like RS232, etc. snapshot: like GPIO state, analog input/output, etc.
+| Direction | Attribute | Description | Example |
+|-----------|-----------|-------------|---------|
+| Host → MCU | `[AsUpperIO]` | Control commands, setpoints | `motorSpeed`, `targetPosition` |
+| MCU → Host | `[AsLowerIO]` | Sensor data, status | `actualSpeed`, `temperature` |
+| Bidirectional | (none) | Mutual exchange | `sharedCounter` |
 
-4. **Data Exchange Pattern**
-   - **Lower IO (`[AsLowerIO]`)**
-     - MCU → Host direction
-     - Read-only from host perspective
-     - Represents sensor data, status information
-     - Example:
-```csharp
-[AsLowerIO] public int SensorValue; // MCU sends sensor readings to host
+### 3. Execution Cycle
+
+Each scan interval (e.g., 50ms):
 ```
-   - **Upper IO (`[AsUpperIO]`)**
-     - Host → MCU direction
-     - Control commands, parameters
-     - Wire format: `[typeid:1B][value:NB]` per field in cart definition order
-     - See `MCURuntime/mcu_runtime.c` (`vm_put_upper_memory`) for detailed format
-     - Example:
-```csharp
-[AsUpperIO] public int motorSpeed; // Host sends motor speed command to MCU
+1. MCU collects hardware IO (GPIO, CAN, Serial)
+2. MCU receives UpperIO from host
+3. DIVER runtime executes Operation(iteration)
+4. MCU sends LowerIO back to host (includes iteration counter)
+5. Repeat
 ```
-
-5. **Execution Cycle**
-   ```
-   1. MCU collects all IO data (GPIO, CAN, Modbus)
-   2. MCU caches data including Upper IO from host
-   3. DIVER runtime executes logic (interruptible by ISRs)
-   4. MCU buffers output data
-   5. Exchange data with host.
-   ```
 
 ## Project Structure
 
-- **DiverCompiler**: Main compiler that transforms C# code into MCU bytecode
-- **MCURuntime**: C/C++ implementation of the runtime system for MCUs
-- **DiverTest**: Sample implementations and test cases
+```
+DIVER/
+├── DiverCompiler/          # C# to MCU bytecode compiler (Fody weaver)
+│   ├── Processor.cs        # Main compilation logic
+│   └── Processor.Builtin.cs # Builtin method handling
+├── MCURuntime/             # C runtime for MCU execution
+│   ├── mcu_runtime.c       # VM interpreter, IO handling
+│   └── mcu_runtime.h       # Public API
+├── DiverTest/              # Test harness and examples
+│   ├── DIVER/
+│   │   └── DIVERInterface.cs  # DIVERVehicle, LocalDebugDIVERVehicle
+│   ├── TestLogic.cs        # Example MCU logic
+│   └── RunOnMCU.cs         # MCU API stubs (ReadEvent, WriteStream, etc.)
+├── MCUSerialBridge/        # Serial communication bridge (C + C# wrapper)
+│   ├── c_core/             # Native C implementation
+│   ├── mcu/                # MCU firmware using the bridge
+│   └── wrapper/            # C# P/Invoke wrapper
+└── 3rd/
+    ├── CoralinkerHost/     # Web-based control panel (ASP.NET + Vue 3)
+    └── CoralinkerSDK/      # DIVERSession for multi-node management
+```
+
+## Class Hierarchy
+
+```
+CartDefinition (abstract)
+    └── DIVERVehicle (abstract) - Communication interface
+            │   SetMCUProgram(mcuUri, program)   // Download program to MCU
+            │   SendUpperData(mcuUri, data)      // Send UpperIO to MCU
+            │   NotifyLowerData(mcuUri, data)    // Process LowerIO from MCU
+            │
+            └── LocalDebugDIVERVehicle (abstract) - PC-based testing
+                    │   Uses MCUTestRunner (native DLL) to simulate MCU
+                    │   No real hardware required
+                    │
+                    └── YourVehicle : LocalDebugDIVERVehicle
+                            [AsLowerIO] sensorValue
+                            [AsUpperIO] motorSpeed
+
+LadderLogic<T> where T : CartDefinition
+    └── YourLogic : LadderLogic<YourVehicle>
+            cart     // Reference to vehicle instance
+            Operation(int iteration)  // Called each scan cycle
+```
 
 ## Getting Started
-
-### Model of control
-
 
 ### Prerequisites
 
 - Visual Studio 2022
 - .NET 8.0 SDK
-- ARM GCC Toolchain (for MCU builds)
+- ARM GCC Toolchain (for real MCU builds)
 
 ### Building
 
 1. Clone the repository
-2. Open the solution in Visual Studio
-3. Build the DiverCompiler project first
-4. Build the MCURuntime project
-5. Run tests using the DiverTest project
+2. Open `DIVER.sln` in Visual Studio
+3. Build DiverCompiler first
+4. Build DiverTest (this compiles MCURuntime as a DLL for testing)
+5. Run DiverTest to verify everything works
 
-### Basic Usage
+### Quick Start: Local Debug Mode
 
-2. Implement communiation and define Vehicle IO variable abstraction:
+For testing without real hardware, use `LocalDebugDIVERVehicle`:
+
+**1. Define your vehicle (IO variables):**
 ```csharp
-public class MyVehicle : DIVERVehicle {
-    public void SetMCUProgram(string mcu_device_url, byte[] program){
-        new Thread(()=>{
-            // 1> send program bytes to MCU.
-            while(true){
-                // 2> read communication bytes from host, then call NotifyLowerData to let DIVER runtime know there is new data.
-                NotifyLowerData(mcu_device_url, buffer); // this will also call SendUpperData to send exchange data to MCU.
-            }
-        }).Start();
-    }
-    public void SendUpperData(string mcu_device_url, byte[] data){
-        // implement this method to send exchange data to MCU.
-    }
-
-    // IO variables
-    [AsLowerIO] public int MotorActualSpeed;
-    [AsUpperIO] public int MotorRequiredSpeed;
+public class MyVehicle : LocalDebugDIVERVehicle
+{
+    [AsLowerIO] public int sensorValue;    // MCU → Host
+    [AsUpperIO] public int motorSpeed;     // Host → MCU
 }
 ```
 
-1. Create a class inheriting from `LadderLogic<T>`, for example, a motor speed control logic:
+**2. Create MCU logic:**
 ```csharp
-[LogicRunOnMCU(scanInterval = 50)]
-public class MyMCURoutine : LadderLogic<MyVehicle>
+[LogicRunOnMCU(scanInterval = 50)]  // 50ms scan interval
+public class MyLogic : LadderLogic<MyVehicle>
 {
     public override void Operation(int iteration)
     {
-        // Your MCU logic here
-        RunOnMCU.WriteEvent([MotorRequiredSpeed && 0xff, MotorRequiredSpeed >> 8], 0x123, 0x456);
-        var actual_speed_packet = RunOnMCU.ReadEvent(0x123, 0x789);
-        if (actual_speed_packet != null){
-            cart.MotorActualSpeed = actual_speed_packet[0] | (actual_speed_packet[1] << 8);
-        }
+        // Read sensor, apply control logic
+        if (cart.sensorValue > 100)
+            cart.motorSpeed = 0;
+        else
+            cart.motorSpeed = 50;
+        
+        Console.WriteLine($"Iteration {iteration}: sensor={cart.sensorValue}");
     }
 }
 ```
 
-3. To run DIVER on read device, we need to implement host program and MCU program.
-implement main host program like this:
-```csharp  
-static void Main(string[] args)
+**3. Run the host:**
+```csharp
+static void Main()
 {
-    new MyVehicle().Start(Assembly.GetAssembly(typeof(Program))); // start DIVER runtime on host system.
+    var vehicle = new MyVehicle();
+    vehicle.Start(Assembly.GetExecutingAssembly());
 }
 ```
 
-implement MCU program like this:
+### Real Hardware Deployment
+
+For real MCU deployment, implement `DIVERVehicle` directly:
+
+**Host side:**
+```csharp
+public class RealVehicle : DIVERVehicle
+{
+    private SerialPort _port;
+    
+    public override void SetMCUProgram(string mcuUri, byte[] program)
+    {
+        // Send program bytes to MCU via serial
+        _port.Write(program, 0, program.Length);
+    }
+    
+    public override void SendUpperData(string mcuUri, byte[] data)
+    {
+        // Send UpperIO data to MCU
+        _port.Write(data, 0, data.Length);
+    }
+    
+    // Call NotifyLowerData() when receiving data from MCU
+}
+```
+
+**MCU side (C):**
 ```c
-void host_comm_ISR()
-{
-    upper_buffer = buffer; upper_size=size; //cache the communication buffer.
-}
-void CAN_Modbus_comm_ISR()
-{
-    vm_put_event_buffer(...);
-}
-void Serial_comm_ISR()
-{
-    vm_put_stream_buffer(...);
-}
 void main()
 {
-    // read program from host system
-    vm_set_program(program);
-
-	int i=0;
-    while(true)
+    vm_set_program(program_from_host);
+    
+    int iteration = 0;
+    while (1)
     {
-        if (wait_for_host_data(timeout))
-			vm_put_event_buffer(...) // an internally defined watchdog event.
-        vm_put_snapshot_buffer(do_GPIO_scan()...)
-		vm_put_upper_memory(upper_buffer, upper_size);
-        vm_run(i++);
-        upload_to_host(vm_get_lower_memory(), vm_get_lower_memory_size());
+        // Collect hardware IO
+        vm_put_snapshot_buffer(gpio_states, gpio_size);
+        vm_put_event_buffer(can_messages, can_size);
+        
+        // Receive UpperIO from host
+        vm_put_upper_memory(upper_buffer, upper_size);
+        
+        // Execute one iteration
+        vm_run(iteration++);
+        
+        // Send LowerIO to host
+        send_to_host(vm_get_lower_memory(), vm_get_lower_memory_size());
     }
 }
 ```
 
-## Custom functions.
-1. Create ExtraMethods.cs
-First, create a file called ExtraMethods.cs with your method declarations. The methods should be in a static class and marked with NotImplementedException since the actual implementation will be on the MCU side.
+## Hardware IO Types
+
+| Type | API | Use Case |
+|------|-----|----------|
+| **Event** | `ReadEvent(port, id)` / `WriteEvent(data, port, id)` | CAN messages, Modbus frames |
+| **Stream** | `ReadStream(port)` / `WriteStream(data, port)` | Serial UART data |
+| **Snapshot** | `ReadSnapshot()` / `WriteSnapshot(data)` | GPIO states, analog values |
+
+## Custom Builtin Functions
+
+To add native C functions callable from C#:
+
+**1. Declare stub in C#:**
 ```csharp
-namespace TEST
+// ExtraMethods.cs
+public static class MyBuiltins
 {
-    public static class TESTCls
+    public static int FastCalculation(int a, int b)
     {
-        public static int MyCustomMethod(int value1, float value2)
-        {
-            // Implementation will be on MCU side
-            throw new NotImplementedException();
-        }
+        throw new NotImplementedException(); // Implemented in C
     }
 }
 ```
 
-2. Generate Builtin Header
-Run the DiverCompiler with -g flag to generate the builtin header template. Looking at the DiverTest project structure, this is done in the PreBuild event:
-```xml
-	<Target Name="PreBuild" BeforeTargets="PreBuildEvent">
-	  <Exec Command="DiverCompiler.exe -g" />
-	  <Exec Command="build_cpp.bat" EnvironmentVariables="OutputPath=$(OutputPath)" />
-	</Target>
+**2. Generate header:**
+```bash
+DiverCompiler.exe -g
 ```
 
-3. Implement the Method
-Edit the generated additional_builtins.h to implement your custom method. The header will contain helpful comments about how to implement builtin functions. Here's an example implementation:
+**3. Implement in C:**
 ```c
-// Auto-generated header with implementation
-void builtin_MyCustomMethod(uchar** reptr) {
-    // Arguments are popped in reverse order
-    float value2 = pop_float(reptr);
-    int value1 = pop_int(reptr);
-    
-    // Your implementation here
-    int result = value1 + (int)(value2 * 100);
-    
-    // Push result back to stack
+// additional_builtins.h
+void builtin_FastCalculation(uchar** reptr)
+{
+    int b = pop_int(reptr);  // Arguments in reverse order!
+    int a = pop_int(reptr);
+    int result = a * b + (a >> 2);
     push_int(reptr, result);
 }
 ```
 
-4. Use in MCU logic:
+**4. Use in logic:**
 ```csharp
-[LogicRunOnMCU(scanInterval = 50)]
-public class MyMCURoutine : LadderLogic<MyVehicle>
+public override void Operation(int iteration)
 {
-    public override void Operation(int iteration)
-    {
-        // Call your custom method
-        int result = TESTCls.MyCustomMethod(10, 20.5f);
-        cart.someValue = result;
-    }
+    int result = MyBuiltins.FastCalculation(10, 20);
+    cart.outputValue = result;
 }
 ```
 
-Important Notes: Arguments are popped from stack in reverse order.
-
 ## Debug Source Map (`*.diver.map.json`)
 
-When the DiverCompiler compiles C# code to MCU bytecode, it generates a source map file (`{LogicName}.diver.map.json`) that maps IL (Intermediate Language) offsets to source code locations. This is essential for debugging MCU runtime errors.
+The compiler generates source maps for debugging MCU errors:
 
-### Map Format
+| Field | Description |
+|-------|-------------|
+| `ilOffset` | Byte offset in compiled program |
+| `methodIndex` | Method index in output |
+| `diverLine` | Line in `.diver` disassembly |
+| `methodName` | Fully qualified method name |
+| `sourceFile` | Original C# filename |
+| `sourceLine` | Line in C# source |
 
-The map is a JSON array where each entry contains:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `ilOffset` | number | Absolute byte offset in the generated program |
-| `methodIndex` | number | Index of the method in the compiled output |
-| `diverLine` | number | Line number in the `.diver` disassembly file |
-| `methodName` | string | Fully qualified method name (e.g., `Namespace.Class.Method(Args)`) |
-| `sourceFile` | string | Original C# source file name (e.g., `TestLogic.cs`) |
-| `sourceLine` | number | Line number in the original C# source file |
-
-### Example
-
+**Example:**
 ```json
 [
-  {"ilOffset":239,"methodIndex":0,"diverLine":1,"methodName":"DiverTest.TestLogic.Operation(Int32)","sourceFile":"TestLogic.cs","sourceLine":15},
-  {"ilOffset":242,"methodIndex":0,"diverLine":2,"methodName":"DiverTest.TestLogic.Operation(Int32)","sourceFile":"TestLogic.cs","sourceLine":16}
+  {"ilOffset":239,"methodIndex":0,"diverLine":1,"methodName":"MyLogic.Operation(Int32)","sourceFile":"MyLogic.cs","sourceLine":15}
 ]
 ```
 
-### Usage for Error Handling
+When an MCU fatal error occurs, find the entry with the largest `ilOffset <= error.ilOffset` to locate the C# source.
 
-When an MCU fatal error occurs (ASSERT failure or HardFault), the error payload contains an `ilOffset` value. To find the corresponding source location:
+## CoralinkerHost (Web Control Panel)
 
-1. Load the `{LogicName}.diver.map.json` file
-2. Find the entry with the largest `ilOffset` that is less than or equal to the error's `ilOffset`
-3. The `sourceFile` and `sourceLine` fields indicate the original C# code location
+The `3rd/CoralinkerHost` project provides a web interface for:
 
-This is used by the CoralinkerHost frontend to provide click-to-jump functionality from error dialogs to source code.
+- **Node Management**: Add/remove/configure MCU nodes
+- **Visual Programming**: Vue-flow based node graph
+- **Variable Inspector**: Real-time UpperIO/LowerIO monitoring
+- **Build System**: Compile C# logic and deploy to nodes
+- **Error Handling**: Fatal error dialogs with source jump
+
+See `3rd/CoralinkerHost/README.md` for details.
+
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Missing `extra_methods.txt` | Run `DiverCompiler.exe -g` |
+| "Unknown cart descriptor" | Check field type in vehicle class |
+| Host crash on builtin call | Verify pop/push order in C (reversed!) |
+| MCU HardFault | Check source map, enable `_VERBOSE` in runtime |
+
+## License
+
+[Your license here]
