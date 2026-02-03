@@ -1,3 +1,7 @@
 SConscript('c_core/SConscript')
 # SConscript('wrapper/SConscript')
-SConscript('mcu/SConscript')
+
+# mcu/SConscript requires arm-none-eabi-gcc toolchain
+# Use BUILD_MCU=1 to enable (e.g. scons BUILD_MCU=1 PDN=xxx)
+if ARGUMENTS.get('BUILD_MCU', '0') == '1':
+    SConscript('mcu/SConscript')

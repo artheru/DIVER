@@ -32,6 +32,8 @@ bld/
 [Oo]ut/
 [Ll]og/
 [Ll]ogs/
+# But keep Vue component logs folder
+!3rd/CoralinkerHost/ClientApp/src/components/logs/
 
 # Visual Studio 2015/2017 cache/options directory
 .vs/
