@@ -101,6 +101,12 @@ function onBlur() {
 }
 
 function onKeyDown(event: KeyboardEvent) {
+  // 如果焦点在输入框中，不处理键盘事件
+  const activeEl = document.activeElement
+  if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
+    return
+  }
+  
   if (event.key === props.config.keyToggle && props.config.keyToggle) {
     event.preventDefault()
     if (!isKeyPressed.value) {

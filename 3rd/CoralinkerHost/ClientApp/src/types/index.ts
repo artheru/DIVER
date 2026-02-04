@@ -37,7 +37,7 @@ export interface ControlLayoutConfig {
 /** 遥控器控件 */
 export interface ControlWidget {
   id: string
-  type: 'joystick' | 'slider' | 'switch'
+  type: 'joystick' | 'slider' | 'switch' | 'gauge' | 'lamp'
   gridX: number
   gridY: number
   gridW: number
@@ -82,6 +82,7 @@ export interface PortDescriptor {
  */
 export interface PortConfig {
   type: string
+  name?: string
   baud: number
   receiveFrameMs?: number
   retryTimeMs?: number
@@ -166,6 +167,7 @@ export interface NodeSettingsRequest {
 export interface NodeExportData {
   mcuUri: string
   nodeName: string
+  layout?: LayoutInfo
   portConfigs?: PortConfig[]
   programBase64?: string
   metaJson?: string
@@ -264,6 +266,65 @@ export interface SetVariableRequest {
   name: string
   value: unknown
   typeHint?: string
+}
+
+// ============================================
+// WireTap 相关类型
+// ============================================
+
+/**
+ * WireTap 标志
+ */
+export enum WireTapFlags {
+  None = 0x00,
+  RX = 0x01,
+  TX = 0x02,
+  Both = 0x03
+}
+
+/**
+ * WireTap 端口配置
+ */
+export interface WireTapPortConfig {
+  portIndex: number
+  flags: WireTapFlags
+}
+
+/**
+ * WireTap 数据事件
+ */
+export interface WireTapDataEvent {
+  uuid: string
+  nodeName: string
+  portIndex: number
+  direction: number  // 0=RX, 1=TX
+  portType: string   // 'Serial' | 'CAN'
+  rawData: number[]  // byte array
+  canMessage?: CANMessageData
+  timestamp: string
+}
+
+/**
+ * CAN 消息数据
+ */
+export interface CANMessageData {
+  id: number
+  dlc: number
+  rtr: boolean
+  data: number[]
+}
+
+/**
+ * WireTap 日志条目
+ */
+export interface WireTapLogEntry {
+  timestamp: string
+  direction: 'TX' | 'RX'
+  hexData: string
+  rawBytes: number[]  // 原始字节数据（用于 Inspect）
+  dataLength: number  // 原始数据长度
+  textData?: string  // Unicode 解码尝试
+  canMessage?: CANMessageData
 }
 
 // ============================================

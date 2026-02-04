@@ -11,23 +11,117 @@
 #include "mcu_runtime.h"
 #endif
 
+/* ===============================
+ * 内部辅助函数
+ * =============================== */
+
 /**
- * @brief 检查是否应该上报端口数据到 PC
- *
- * - Bridge 模式：总是上报
- * - DIVER 模式：仅当 wire_tap 启用时上报
- *
+ * @brief 检查是否应该上报 RX 数据到 PC
+ * @param port_index 端口索引
  * @return true 需要上报, false 不上报
  */
-static inline bool should_upload_port_data(void)
+static inline bool should_upload_rx(uint32_t port_index)
 {
     // Bridge 模式：总是上报
     if (g_mcu_state.mode == MCU_Mode_Bridge) {
         return true;
     }
-    // DIVER 模式：仅当 wire_tap 启用时上报
-    return g_wire_tap_enabled;
+    // DIVER 模式：检查该端口的 RX WireTap 标志
+    if (port_index < PACKET_MAX_PORTS_NUM) {
+        return WIRETAP_RX_ENABLED(port_index);
+    }
+    return false;
 }
+
+/**
+ * @brief 检查是否应该上报 TX 数据到 PC
+ * @param port_index 端口索引
+ * @return true 需要上报, false 不上报
+ */
+static inline bool should_upload_tx(uint32_t port_index)
+{
+    // Bridge 模式：不上报 TX（只有 DIVER 模式有 TX WireTap）
+    if (g_mcu_state.mode == MCU_Mode_Bridge) {
+        return false;
+    }
+    // DIVER 模式：检查该端口的 TX WireTap 标志
+    if (port_index < PACKET_MAX_PORTS_NUM) {
+        return WIRETAP_TX_ENABLED(port_index);
+    }
+    return false;
+}
+
+/**
+ * @brief 上报端口数据到 PC（内部函数）
+ * @param port_index_with_dir 端口索引（bit7 = 方向：0=RX, 1=TX）
+ * @param data 数据指针
+ * @param length 数据长度
+ */
+static void upload_port_data(
+        uint8_t port_index_with_dir,
+        const void* data,
+        uint32_t length)
+{
+    PayloadHeader header = {
+            .command = CommandUploadPort,
+            .sequence = 0,
+            .error_code = 0,
+            .timestamp_ms = 0,
+    };
+
+    if (length > PACKET_MAX_DATALEN) {
+        length = PACKET_MAX_DATALEN;
+    }
+
+    uint8_t other_data[PACKET_MAX_PAYLOAD_LEN];
+    DataPacket* pkt = (void*)other_data;
+    pkt->port_index = port_index_with_dir;
+    pkt->data_len = length;
+    memcpy(pkt->data, data, length);
+
+    packet_send(&header, other_data, sizeof(DataPacket) + length);
+}
+
+/**
+ * @brief 上报 CAN 端口数据到 PC（内部函数）
+ * @param port_index_with_dir 端口索引（bit7 = 方向：0=RX, 1=TX）
+ * @param id_info CAN ID 信息
+ * @param data_0_3 数据字节 0-3
+ * @param data_4_7 数据字节 4-7
+ */
+static void upload_can_port_data(
+        uint8_t port_index_with_dir,
+        CANIDInfo id_info,
+        uint32_t data_0_3,
+        uint32_t data_4_7)
+{
+    PayloadHeader header = {
+            .command = CommandUploadPort,
+            .sequence = 0,
+            .error_code = 0,
+            .timestamp_ms = 0,
+    };
+
+    if (id_info.dlc > 8) {
+        id_info.dlc = 8;
+    }
+
+    uint8_t other_data[sizeof(CANData) + sizeof(DataPacket)];
+    DataPacket* pkt = (void*)other_data;
+
+    pkt->port_index = port_index_with_dir;
+    pkt->data_len = sizeof(CANData) - 8 + id_info.dlc;
+    CANData* can_data = (CANData*)pkt->data;
+    memcpy(&can_data->info, &id_info, 2);
+    memcpy(can_data->data, &data_0_3, 4);
+    memcpy(can_data->data + 4, &data_4_7, 4);
+
+    packet_send(&header, other_data, sizeof(other_data) - 8 + id_info.dlc);
+}
+
+/* ===============================
+ * Console 上传缓冲区
+ * =============================== */
 
 CCM_RAM uint8_t upload_console_writeline_buffer[PACKET_MAX_DATALEN];
 CCM_RAM uint32_t upload_console_writeline_buffer_length;
@@ -42,12 +136,15 @@ void init_upload(void)
     
     // 直接写入
     upload_console_writeline_buffer_length = 0;
-
     
     memset(upload_console_writeline_buffer, 0, sizeof(upload_console_writeline_buffer));
 }
 
-void upload_serial_packet(
+/* ===============================
+ * HAL 接收回调
+ * =============================== */
+
+void on_hal_receive_serial(
         const void* data,
         uint32_t length,
         uint32_t port_index)
@@ -66,32 +163,16 @@ void upload_serial_packet(
     }
 #endif
 
-    // 检查是否应该上报到 PC
-    if (!should_upload_port_data()) {
+    // 检查是否应该上报 RX 到 PC
+    if (!should_upload_rx(port_index)) {
         return;
     }
 
-    PayloadHeader header = {
-            .command = CommandUploadPort,
-            .sequence = 0,
-            .error_code = 0,
-            .timestamp_ms = 0,
-    };
-
-    if (length > PACKET_MAX_DATALEN) {
-        length = PACKET_MAX_DATALEN;
-    }
-
-    uint8_t other_data[PACKET_MAX_PAYLOAD_LEN];
-    DataPacket* pkt = (void*)other_data;
-    pkt->port_index = port_index;
-    pkt->data_len = length;
-    memcpy(pkt->data, data, length);
-
-    packet_send(&header, other_data, sizeof(DataPacket) + length);
+    // 上报 RX 数据（port_index 不带 0x80 标志）
+    upload_port_data((uint8_t)port_index, data, length);
 }
 
-void upload_can_packet(
+void on_hal_receive_can(
         CANIDInfo id_info,
         uint32_t data_0_3,
         uint32_t data_4_7,
@@ -112,46 +193,65 @@ void upload_can_packet(
         memcpy(can_msg.data, &data_0_3, 4);
         memcpy(can_msg.data + 4, &data_4_7, 4);
         
-        uint8_t dlc = id_info.dlc > 8 ? 8 : id_info.dlc;
+        uint8_t dlc_clamped = id_info.dlc > 8 ? 8 : id_info.dlc;
         vm_put_event_buffer(
                 (int)port_index,
                 (int)id_info.id,  // eventID = CAN Standard ID
                 (uchar*)&can_msg,
-                (int)(sizeof(can_msg.info) + dlc));  // size = info(2) + payload(dlc)
+                (int)(sizeof(can_msg.info) + dlc_clamped));  // size = info(2) + payload(dlc)
     }
 #endif
 
-    // 检查是否应该上报到 PC
-    if (!should_upload_port_data()) {
+    // 检查是否应该上报 RX 到 PC
+    if (!should_upload_rx(port_index)) {
         return;
     }
 
-    PayloadHeader header = {
-            .command = CommandUploadPort,
-            .sequence = 0,
-            .error_code = 0,
-            .timestamp_ms = 0,
-    };
+    // 上报 RX 数据（port_index 不带 0x80 标志）
+    upload_can_port_data((uint8_t)port_index, id_info, data_0_3, data_4_7);
+}
 
-    // console_printf_do(
-    //         "ID %u DLC %u RTR %u\n", id_info.id, id_info.dlc, id_info.rtr);
+/* ===============================
+ * WireTap TX 上报
+ * =============================== */
 
-    if (id_info.dlc > 8) {
-        id_info.dlc = 8;
+void report_wiretap_transmit_serial(
+        const void* data,
+        uint32_t length,
+        uint32_t port_index)
+{
+    // 检查是否应该上报 TX 到 PC
+    if (!should_upload_tx(port_index)) {
+        return;
     }
 
-    uint8_t other_data[sizeof(CANData) + sizeof(DataPacket)];
-    DataPacket* pkt = (void*)other_data;
+    console_printf_do("WIRETAP TX SERIAL %u, len %u\n", port_index, length);
 
-    pkt->port_index = port_index;
-    pkt->data_len = sizeof(CANData) - 8 + id_info.dlc;
-    CANData* can_data = (CANData*)pkt->data;
-    memcpy(&can_data->info, &id_info, 2);
-    memcpy(can_data->data, &data_0_3, 4);
-    memcpy(can_data->data + 4, &data_4_7, 4);
-
-    packet_send(&header, other_data, sizeof(other_data) - 8 + id_info.dlc);
+    // 上报 TX 数据（port_index | 0x80 表示 TX 方向）
+    upload_port_data((uint8_t)(port_index | PORT_DIRECTION_TX_MASK), data, length);
 }
+
+void report_wiretap_transmit_can(
+        CANIDInfo id_info,
+        uint32_t data_0_3,
+        uint32_t data_4_7,
+        uint32_t port_index)
+{
+    // 检查是否应该上报 TX 到 PC
+    if (!should_upload_tx(port_index)) {
+        return;
+    }
+
+    console_printf_do("WIRETAP TX CAN %d\n", port_index);
+
+    // 上报 TX 数据（port_index | 0x80 表示 TX 方向）
+    upload_can_port_data((uint8_t)(port_index | PORT_DIRECTION_TX_MASK), 
+                         id_info, data_0_3, data_4_7);
+}
+
+/* ===============================
+ * Console 日志上传
+ * =============================== */
 
 void upload_console_writeline()
 {

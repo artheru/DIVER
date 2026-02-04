@@ -130,6 +130,18 @@ export const useLogStore = defineStore('logs', () => {
   }
   
   /**
+   * 生成短格式时间戳（HH:MM:SS.mmm）
+   */
+  function getShortTimestamp(): string {
+    const now = new Date()
+    const HH = String(now.getHours()).padStart(2, '0')
+    const mm = String(now.getMinutes()).padStart(2, '0')
+    const ss = String(now.getSeconds()).padStart(2, '0')
+    const ms = String(now.getMilliseconds()).padStart(3, '0')
+    return `${HH}:${mm}:${ss}.${ms}`
+  }
+  
+  /**
    * 添加节点日志行（由 SignalR 调用）
    * @param uuid 节点 UUID
    * @param line 日志内容
@@ -145,7 +157,9 @@ export const useLogStore = defineStore('logs', () => {
       nodeLogs.value.set(uuid, logs)
     }
     
-    logs.push(line)
+    // 添加时间戳
+    const timestamp = getShortTimestamp()
+    logs.push(`[${timestamp}] ${line}`)
     
     // 限制日志数量
     if (logs.length > MAX_LOG_LINES) {

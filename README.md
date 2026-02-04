@@ -301,6 +301,10 @@ The `3rd/CoralinkerHost` project provides a web interface for:
 - **Variable Inspector**: Real-time UpperIO/LowerIO monitoring
 - **Build System**: Compile C# logic and deploy to nodes
 - **Error Handling**: Fatal error dialogs with source jump
+- **WireTap Port Monitor**: Real-time Serial/CAN data monitoring with protocol parsing
+  - MODBUS RTU: Function codes, CRC validation, register values
+  - CANOpen: NMT, SDO, PDO, Heartbeat, Emergency messages
+  - CiA 301/402: Object dictionary lookup with protocol source identification
 
 See `3rd/CoralinkerHost/README.md` for details.
 

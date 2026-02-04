@@ -39,6 +39,36 @@ public sealed class RuntimeSessionService
                 Console.WriteLine($"[RuntimeSessionService] Error broadcasting fatal error: {ex.Message}");
             }
         };
+
+        // 订阅 WireTap 数据事件，广播到 SignalR
+        _session.OnWireTapData += async (args) =>
+        {
+            try
+            {
+                var data = new
+                {
+                    uuid = args.UUID,
+                    nodeName = args.NodeName,
+                    portIndex = args.PortIndex,
+                    direction = args.Direction,
+                    portType = args.PortType.ToString(),
+                    rawData = args.RawData,
+                    canMessage = args.CANMessage != null ? new
+                    {
+                        id = args.CANMessage.ID,
+                        dlc = args.CANMessage.DLC,
+                        rtr = args.CANMessage.RTR,
+                        data = args.CANMessage.Payload
+                    } : null,
+                    timestamp = DateTime.Now.ToString("O")
+                };
+                await _terminal.WireTapDataAsync(data);
+            }
+            catch
+            {
+                // ignore broadcast errors
+            }
+        };
     }
 
     /// <summary>

@@ -82,7 +82,7 @@ public record LayoutInfoSnapshot(
 public record PortDescriptorSnapshot(string Type, string Name);
 
 /// <summary>端口配置快照</summary>
-public record PortConfigSnapshot(string Type, uint Baud, uint? ReceiveFrameMs, uint? RetryTimeMs);
+public record PortConfigSnapshot(string Type, string? Name, uint Baud, uint? ReceiveFrameMs, uint? RetryTimeMs);
 
 /// <summary>Cart字段快照</summary>
 public record CartFieldSnapshot(
@@ -99,6 +99,7 @@ public record NodeExportData
 {
     public string McuUri { get; init; } = "";
     public string NodeName { get; init; } = "";
+    public LayoutInfoSnapshot? Layout { get; init; }
     public PortConfigSnapshot[]? PortConfigs { get; init; }
     public string? ProgramBase64 { get; init; }
     public string? MetaJson { get; init; }
@@ -156,6 +157,8 @@ internal class NodeEntry : IDisposable
     public string McuUri { get; set; } = "";
     public VersionInfo? Version { get; set; }
     public LayoutInfo? Layout { get; set; }
+    /// <summary>导入时恢复的 Layout 快照（当 Layout 为 null 时使用）</summary>
+    public LayoutInfoSnapshot? ImportedLayoutSnapshot { get; set; }
 
     // === 用户设置（变量）===
     public string NodeName { get; set; } = "";
@@ -172,6 +175,9 @@ internal class NodeEntry : IDisposable
     public MCUNode? Handle { get; set; }
     public MCUState? State { get; set; }
     public RuntimeStats? Stats { get; set; }
+    
+    /// <summary>最后一次运行的统计数据（Stop后保留，用于显示TX/RX计数）</summary>
+    public RuntimeStats? LastStats { get; set; }
 
     // === 日志 ===
     public NodeLogBuffer LogBuffer { get; } = new(10000);
@@ -270,6 +276,54 @@ internal class NodeLogBuffer
 #endregion
 
 /// <summary>
+/// WireTap 标志（SDK 层定义，与底层 MCUSerialBridgeCLR.WireTapFlags 值一致）
+/// </summary>
+[Flags]
+public enum WireTapFlags
+{
+    /// <summary>禁用</summary>
+    None = 0x00,
+    /// <summary>监听接收数据</summary>
+    RX = 0x01,
+    /// <summary>监听发送数据</summary>
+    TX = 0x02,
+    /// <summary>同时监听收发</summary>
+    Both = RX | TX
+}
+
+/// <summary>
+/// WireTap 端口配置
+/// </summary>
+public record WireTapPortConfig(byte PortIndex, WireTapFlags Flags);
+
+/// <summary>
+/// WireTap 数据事件参数
+/// </summary>
+public record WireTapDataEventArgs(
+    string UUID,
+    string NodeName,
+    byte PortIndex,
+    byte Direction,  // 0=RX, 1=TX
+    PortType PortType,
+    byte[] RawData,
+    CANMessage? CANMessage  // 仅 CAN 端口有值
+);
+
+/// <summary>
+/// WireTap 日志条目（存储在内存中）
+/// </summary>
+public record WireTapLogEntry(
+    string UUID,
+    string NodeName,
+    byte PortIndex,
+    byte Direction,  // 0=RX, 1=TX
+    string PortType,  // "Serial" | "CAN"
+    byte[] RawData,
+    CANMessage? CANMessage,
+    DateTime Timestamp
+);
+
+/// <summary>
 /// DIVER 运行时会话管理器（单例）
 /// 负责管理所有 MCU 节点的生命周期和数据交换
 /// 设计为独立于网页Host，可被任意终端使用
@@ -281,6 +335,16 @@ public sealed class DIVERSession : IDisposable
     private readonly ConcurrentDictionary<string, NodeEntry> _nodes = new();
     private readonly ConcurrentDictionary<string, object?> _variables = new();
     private readonly object _stateLock = new();
+    
+    // WireTap 配置存储（独立于 PortConfig，可在 Start 前后修改）
+    // Key: UUID, Value: 每端口的 WireTap 标志数组
+    private readonly ConcurrentDictionary<string, WireTapFlags[]> _wireTapConfigs = new();
+    
+    // WireTap 日志存储（内存中，刷新后可恢复）
+    // Key: UUID, Value: 该节点的日志列表
+    private readonly ConcurrentDictionary<string, List<WireTapLogEntry>> _wireTapLogs = new();
+    private readonly object _wireTapLogLock = new();
+    private const int MaxWireTapLogEntries = 10000;
 
     // 后台线程
     private CancellationTokenSource? _workerCts;
@@ -311,6 +375,9 @@ public sealed class DIVERSession : IDisposable
 
     /// <summary>节点致命错误事件（MCU HardFault 或 ASSERT 失败），参数为 JSON 字符串</summary>
     public event Action<string, string>? OnFatalError;
+
+    /// <summary>WireTap 数据事件（端口收发数据透视）</summary>
+    public event Action<WireTapDataEventArgs>? OnWireTapData;
 
     private DIVERSession() { }
 
@@ -436,6 +503,7 @@ public sealed class DIVERSession : IDisposable
         if (_nodes.TryRemove(uuid, out var entry))
         {
             entry.Dispose();
+            _wireTapConfigs.TryRemove(uuid, out _);  // 清理 WireTap 配置
             Console.WriteLine($"[DIVERSession] Removed node {entry.NodeName}");
             return true;
         }
@@ -455,6 +523,7 @@ public sealed class DIVERSession : IDisposable
         }
         _nodes.Clear();
         _variables.Clear();
+        _wireTapConfigs.Clear();  // 清理 WireTap 配置
         _nodeIndex = 0;
         Console.WriteLine("[DIVERSession] Removed all nodes");
     }
@@ -489,6 +558,184 @@ public sealed class DIVERSession : IDisposable
         Console.WriteLine($"[DIVERSession] Configured node {entry.NodeName}");
         return true;
     }
+
+    #endregion
+
+    #region WireTap 配置接口（可在 Idle 和 Running 状态调用）
+
+    /// <summary>
+    /// 设置节点的 WireTap 配置（可在 Start 前预设，也可在 Running 时动态修改）
+    /// </summary>
+    /// <param name="uuid">节点 UUID</param>
+    /// <param name="portIndex">端口索引，0xFF = 全部端口</param>
+    /// <param name="flags">WireTap 标志</param>
+    /// <returns>是否成功</returns>
+    public bool SetNodeWireTap(string uuid, byte portIndex, WireTapFlags flags)
+    {
+        if (!_nodes.TryGetValue(uuid, out var entry))
+        {
+            Console.WriteLine($"[DIVERSession] SetNodeWireTap: Node not found: {uuid}");
+            return false;
+        }
+
+        // 确保有配置数组
+        var configArray = _wireTapConfigs.GetOrAdd(uuid, _ => new WireTapFlags[16]);
+
+        if (portIndex == 0xFF)
+        {
+            // 设置所有端口
+            for (int i = 0; i < configArray.Length; i++)
+            {
+                configArray[i] = flags;
+            }
+            Console.WriteLine($"[DIVERSession] SetNodeWireTap {entry.NodeName}: ALL ports = {flags}");
+        }
+        else if (portIndex < configArray.Length)
+        {
+            configArray[portIndex] = flags;
+            Console.WriteLine($"[DIVERSession] SetNodeWireTap {entry.NodeName}: Port[{portIndex}] = {flags}");
+        }
+        else
+        {
+            Console.WriteLine($"[DIVERSession] SetNodeWireTap: Invalid port index {portIndex}");
+            return false;
+        }
+
+        // 如果已经在运行，立即应用到 MCU
+        if (State == DIVERSessionState.Running && entry.Handle?.IsConnected == true)
+        {
+            var result = entry.Handle.SetWireTap(portIndex, flags);
+            if (!result)
+            {
+                Console.WriteLine($"[DIVERSession] SetNodeWireTap: Failed to apply to MCU: {entry.Handle.LastError}");
+                // 不返回 false，配置已保存，只是 MCU 应用失败
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// 获取节点的 WireTap 配置
+    /// </summary>
+    /// <param name="uuid">节点 UUID</param>
+    /// <returns>每端口的 WireTap 标志数组，或 null（如果节点不存在）</returns>
+    public WireTapFlags[]? GetNodeWireTapConfig(string uuid)
+    {
+        if (!_nodes.ContainsKey(uuid))
+            return null;
+        
+        return _wireTapConfigs.TryGetValue(uuid, out var config) ? config : null;
+    }
+
+    /// <summary>
+    /// 获取所有节点的 WireTap 配置摘要
+    /// </summary>
+    public Dictionary<string, WireTapPortConfig[]> GetAllWireTapConfigs()
+    {
+        var result = new Dictionary<string, WireTapPortConfig[]>();
+        
+        foreach (var kv in _wireTapConfigs)
+        {
+            if (!_nodes.ContainsKey(kv.Key))
+                continue;
+            
+            var configs = new List<WireTapPortConfig>();
+            for (byte i = 0; i < kv.Value.Length; i++)
+            {
+                if (kv.Value[i] != WireTapFlags.None)
+                {
+                    configs.Add(new WireTapPortConfig(i, kv.Value[i]));
+                }
+            }
+            
+            if (configs.Count > 0)
+            {
+                result[kv.Key] = configs.ToArray();
+            }
+        }
+        
+        return result;
+    }
+    
+    /// <summary>
+    /// 获取节点的 WireTap 日志
+    /// </summary>
+    /// <param name="uuid">节点 UUID</param>
+    /// <param name="afterIndex">可选，只返回此索引之后的日志</param>
+    /// <param name="maxCount">最大返回数量</param>
+    /// <returns>日志条目数组和最新索引</returns>
+    public (WireTapLogEntry[] Entries, int LatestIndex) GetNodeWireTapLogs(string uuid, int? afterIndex = null, int maxCount = 1000)
+    {
+        if (!_wireTapLogs.TryGetValue(uuid, out var logs))
+            return (Array.Empty<WireTapLogEntry>(), 0);
+        
+        lock (_wireTapLogLock)
+        {
+            var startIndex = afterIndex.HasValue ? afterIndex.Value + 1 : 0;
+            var count = Math.Min(maxCount, logs.Count - startIndex);
+            
+            if (count <= 0)
+                return (Array.Empty<WireTapLogEntry>(), logs.Count - 1);
+            
+            var entries = logs.Skip(startIndex).Take(count).ToArray();
+            return (entries, logs.Count - 1);
+        }
+    }
+    
+    /// <summary>
+    /// 获取所有节点的 WireTap 日志
+    /// </summary>
+    public Dictionary<string, WireTapLogEntry[]> GetAllWireTapLogs()
+    {
+        var result = new Dictionary<string, WireTapLogEntry[]>();
+        
+        lock (_wireTapLogLock)
+        {
+            foreach (var kv in _wireTapLogs)
+            {
+                if (kv.Value.Count > 0)
+                {
+                    result[kv.Key] = kv.Value.ToArray();
+                }
+            }
+        }
+        
+        return result;
+    }
+    
+    /// <summary>
+    /// 清空所有 WireTap 日志（在 Start 时调用）
+    /// </summary>
+    public void ClearAllWireTapLogs()
+    {
+        lock (_wireTapLogLock)
+        {
+            foreach (var kv in _wireTapLogs)
+            {
+                kv.Value.Clear();
+            }
+        }
+        Console.WriteLine("[DIVERSession] Cleared all WireTap logs");
+    }
+    
+    /// <summary>
+    /// 清空指定节点的 WireTap 日志
+    /// </summary>
+    public void ClearNodeWireTapLogs(string uuid)
+    {
+        if (_wireTapLogs.TryGetValue(uuid, out var logs))
+        {
+            lock (_wireTapLogLock)
+            {
+                logs.Clear();
+            }
+        }
+    }
+
+    #endregion
+
+    #region 节点代码管理接口（只能在 Idle 状态调用）
 
     /// <summary>
     /// 设置节点代码（只存储，不下发）
@@ -577,11 +824,13 @@ public sealed class DIVERSession : IDisposable
         foreach (var kv in _nodes)
         {
             var entry = kv.Value;
+            var portNames = entry.Layout?.GetValidPorts().Select(p => p.Name).ToArray() ?? Array.Empty<string>();
             result[kv.Key] = new NodeExportData
             {
                 McuUri = entry.McuUri,
                 NodeName = entry.NodeName,
-                PortConfigs = entry.PortConfigs.Select(p => BuildPortConfigSnapshot(p)).ToArray(),
+                Layout = BuildLayoutSnapshot(entry.Layout),
+                PortConfigs = entry.PortConfigs.Select((p, i) => BuildPortConfigSnapshot(p, i < portNames.Length ? portNames[i] : null)).ToArray(),
                 ProgramBase64 =
                     entry.ProgramBytes.Length > 0
                         ? Convert.ToBase64String(entry.ProgramBytes)
@@ -608,6 +857,7 @@ public sealed class DIVERSession : IDisposable
         }
         _nodes.Clear();
         _variables.Clear();
+        _wireTapConfigs.Clear();  // 清理 WireTap 配置
 
         // 导入新节点
         foreach (var kv in data)
@@ -620,6 +870,7 @@ public sealed class DIVERSession : IDisposable
                 UUID = uuid,
                 McuUri = d.McuUri,
                 NodeName = d.NodeName,
+                ImportedLayoutSnapshot = d.Layout,  // 恢复导入的 Layout 快照
                 PortConfigs =
                     d.PortConfigs?.Select(p => ParsePortConfig(p)).ToArray()
                     ?? Array.Empty<PortConfig>(),
@@ -671,6 +922,15 @@ public sealed class DIVERSession : IDisposable
     public StartResult Start()
     {
         EnsureIdle("Start");
+        
+        // 清空上一次运行的 WireTap 日志
+        ClearAllWireTapLogs();
+        
+        // 清空上一次运行的统计数据
+        foreach (var entry in _nodes.Values)
+        {
+            entry.LastStats = null;
+        }
 
         var errors = new List<NodeStartError>();
         var successCount = 0;
@@ -745,6 +1005,12 @@ public sealed class DIVERSession : IDisposable
         {
             try
             {
+                // 保存最后的统计数据（用于 Stop 后仍能显示 TX/RX 计数）
+                if (entry.Stats != null)
+                {
+                    entry.LastStats = entry.Stats;
+                }
+                
                 entry.Handle?.Stop();
                 entry.Handle?.Disconnect();
                 entry.Handle?.Dispose();
@@ -801,6 +1067,12 @@ public sealed class DIVERSession : IDisposable
                 handle.Dispose();
                 return $"Program failed: {handle.LastError}";
             }
+
+            // 在 Start 之前应用预配置的 WireTap 设置（确保捕获启动时的数据）
+            ApplyWireTapConfig(entry.UUID, handle);
+
+            // 注册 WireTap 端口回调
+            RegisterWireTapCallbacks(entry, handle);
 
             // Start
             if (!handle.Start())
@@ -1153,6 +1425,172 @@ public sealed class DIVERSession : IDisposable
     }
 
     /// <summary>
+    /// 应用预配置的 WireTap 设置到 MCU
+    /// </summary>
+    private void ApplyWireTapConfig(string uuid, MCUNode handle)
+    {
+        if (!_wireTapConfigs.TryGetValue(uuid, out var config))
+            return;
+
+        // 检查是否有任何端口启用了 WireTap
+        bool hasAnyEnabled = false;
+        for (int i = 0; i < config.Length; i++)
+        {
+            if (config[i] != WireTapFlags.None)
+            {
+                hasAnyEnabled = true;
+                break;
+            }
+        }
+
+        if (!hasAnyEnabled)
+            return;
+
+        // 检查是否所有端口配置相同（可以用一次调用设置全部）
+        var firstFlags = config[0];
+        bool allSame = true;
+        for (int i = 1; i < config.Length; i++)
+        {
+            if (config[i] != firstFlags)
+            {
+                allSame = false;
+                break;
+            }
+        }
+
+        if (allSame && firstFlags != WireTapFlags.None)
+        {
+            // 全部端口相同，一次设置
+            handle.SetWireTap(0xFF, firstFlags);
+            Console.WriteLine($"[DIVERSession] Applied WireTap to all ports: {firstFlags}");
+        }
+        else
+        {
+            // 逐个端口设置
+            for (byte i = 0; i < config.Length; i++)
+            {
+                if (config[i] != WireTapFlags.None)
+                {
+                    handle.SetWireTap(i, config[i]);
+                    Console.WriteLine($"[DIVERSession] Applied WireTap to port[{i}]: {config[i]}");
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// 注册 WireTap 端口数据回调
+    /// </summary>
+    private void RegisterWireTapCallbacks(NodeEntry entry, MCUNode handle)
+    {
+        // 获取端口布局信息
+        var validPorts = handle.Layout?.GetValidPorts() ?? Array.Empty<PortDescriptor>();
+        
+        for (byte portIndex = 0; portIndex < validPorts.Length; portIndex++)
+        {
+            var port = validPorts[portIndex];
+            var capturedPortIndex = portIndex; // 闭包捕获
+            
+            if (port.Type == MCUSerialBridgeCLR.PortType.CAN)
+            {
+                // CAN 端口回调
+                handle.RegisterCANPortCallback(portIndex, (pi, direction, canMsg) =>
+                {
+                    HandleWireTapCANData(entry.UUID, pi, direction, canMsg);
+                });
+            }
+            else
+            {
+                // Serial 端口回调
+                handle.RegisterSerialPortCallback(portIndex, (pi, direction, data) =>
+                {
+                    HandleWireTapSerialData(entry.UUID, pi, direction, data);
+                });
+            }
+        }
+        
+        Console.WriteLine($"[DIVERSession] Registered WireTap callbacks for {validPorts.Length} ports on {entry.NodeName}");
+    }
+
+    /// <summary>
+    /// 处理 WireTap 串口数据
+    /// </summary>
+    private void HandleWireTapSerialData(string uuid, byte portIndex, byte direction, byte[] data)
+    {
+        if (!_nodes.TryGetValue(uuid, out var entry))
+            return;
+
+        var args = new WireTapDataEventArgs(
+            UUID: uuid,
+            NodeName: entry.NodeName,
+            PortIndex: portIndex,
+            Direction: direction,
+            PortType: MCUSerialBridgeCLR.PortType.Serial,
+            RawData: data,
+            CANMessage: null
+        );
+
+        // 存储日志
+        StoreWireTapLog(uuid, entry.NodeName, portIndex, direction, "Serial", data, null);
+
+        OnWireTapData?.Invoke(args);
+    }
+
+    /// <summary>
+    /// 处理 WireTap CAN 数据
+    /// </summary>
+    private void HandleWireTapCANData(string uuid, byte portIndex, byte direction, CANMessage canMsg)
+    {
+        if (!_nodes.TryGetValue(uuid, out var entry))
+            return;
+
+        var args = new WireTapDataEventArgs(
+            UUID: uuid,
+            NodeName: entry.NodeName,
+            PortIndex: portIndex,
+            Direction: direction,
+            PortType: MCUSerialBridgeCLR.PortType.CAN,
+            RawData: canMsg.ToBytes(),
+            CANMessage: canMsg
+        );
+
+        // 存储日志
+        StoreWireTapLog(uuid, entry.NodeName, portIndex, direction, "CAN", canMsg.ToBytes(), canMsg);
+
+        OnWireTapData?.Invoke(args);
+    }
+    
+    /// <summary>
+    /// 存储 WireTap 日志条目
+    /// </summary>
+    private void StoreWireTapLog(string uuid, string nodeName, byte portIndex, byte direction, string portType, byte[] rawData, CANMessage? canMessage)
+    {
+        var logEntry = new WireTapLogEntry(
+            UUID: uuid,
+            NodeName: nodeName,
+            PortIndex: portIndex,
+            Direction: direction,
+            PortType: portType,
+            RawData: rawData,
+            CANMessage: canMessage,
+            Timestamp: DateTime.Now
+        );
+        
+        var logs = _wireTapLogs.GetOrAdd(uuid, _ => new List<WireTapLogEntry>());
+        
+        lock (_wireTapLogLock)
+        {
+            logs.Add(logEntry);
+            
+            // 限制日志数量
+            if (logs.Count > MaxWireTapLogEntries)
+            {
+                logs.RemoveRange(0, logs.Count - MaxWireTapLogEntries);
+            }
+        }
+    }
+
+    /// <summary>
     /// 发生致命错误后断开节点连接
     /// </summary>
     private void DisconnectNodeOnFatalError(NodeEntry entry)
@@ -1410,11 +1848,13 @@ public sealed class DIVERSession : IDisposable
         {
             if (port.Type == PortType.CAN)
             {
-                configs.Add(new CANPortConfig(500000, 10));
+                // CAN: 默认 1000000 波特率, 10ms 重发
+                configs.Add(new CANPortConfig(1000000, 10));
             }
             else
             {
-                configs.Add(new SerialPortConfig(9600, 20));
+                // Serial: 默认 115200 波特率, 0ms 帧间隔
+                configs.Add(new SerialPortConfig(115200, 0));
             }
         }
         return configs.ToArray();
@@ -1434,13 +1874,15 @@ public sealed class DIVERSession : IDisposable
         }
 
         RuntimeStatsSnapshot? statsSnapshot = null;
-        if (entry.Stats != null)
+        // 使用当前统计，如果为空则使用最后一次运行的统计（Stop 后保留 TX/RX 计数）
+        var statsSource = entry.Stats ?? entry.LastStats;
+        if (statsSource != null)
         {
-            var validPorts = entry.Stats.Value.GetValidPorts();
+            var validPorts = statsSource.Value.GetValidPorts();
             statsSnapshot = new RuntimeStatsSnapshot(
-                entry.Stats.Value.UptimeMs,
-                entry.Stats.Value.DigitalInputs,
-                entry.Stats.Value.DigitalOutputs,
+                statsSource.Value.UptimeMs,
+                statsSource.Value.DigitalInputs,
+                statsSource.Value.DigitalOutputs,
                 validPorts
                     .Select(
                         (p, i) =>
@@ -1475,27 +1917,21 @@ public sealed class DIVERSession : IDisposable
             );
         }
 
-        LayoutInfoSnapshot? layoutSnapshot = null;
-        if (entry.Layout != null)
-        {
-            var validPorts = entry.Layout.Value.GetValidPorts();
-            layoutSnapshot = new LayoutInfoSnapshot(
-                (int)entry.Layout.Value.DigitalInputCount,
-                (int)entry.Layout.Value.DigitalOutputCount,
-                (int)entry.Layout.Value.PortCount,
-                validPorts
-                    .Select(p => new PortDescriptorSnapshot(p.Type.ToString(), p.Name))
-                    .ToArray()
-            );
-        }
+        // 优先使用实际 Layout，否则使用导入的 Layout 快照
+        var layoutSnapshot = BuildLayoutSnapshot(entry.Layout) ?? entry.ImportedLayoutSnapshot;
 
+        // 从 Layout 或导入的快照获取端口名称
+        var portNames = entry.Layout?.GetValidPorts().Select(p => p.Name).ToArray()
+            ?? entry.ImportedLayoutSnapshot?.Ports.Select(p => p.Name).ToArray()
+            ?? Array.Empty<string>();
+        
         return new NodeFullInfo(
             entry.UUID,
             entry.McuUri,
             entry.NodeName,
             versionSnapshot,
             layoutSnapshot,
-            entry.PortConfigs.Select(p => BuildPortConfigSnapshot(p)).ToArray(),
+            entry.PortConfigs.Select((p, i) => BuildPortConfigSnapshot(p, i < portNames.Length ? portNames[i] : null)).ToArray(),
             entry.ProgramBytes.Length > 0,
             entry.ProgramBytes.Length,
             entry.LogicName,
@@ -1513,13 +1949,13 @@ public sealed class DIVERSession : IDisposable
         );
     }
 
-    private static PortConfigSnapshot BuildPortConfigSnapshot(PortConfig p)
+    private static PortConfigSnapshot BuildPortConfigSnapshot(PortConfig p, string? name)
     {
         return p switch
         {
-            SerialPortConfig s => new PortConfigSnapshot("Serial", s.Baud, s.ReceiveFrameMs, null),
-            CANPortConfig c => new PortConfigSnapshot("CAN", c.Baud, null, c.RetryTimeMs),
-            _ => new PortConfigSnapshot("Unknown", 0, null, null),
+            SerialPortConfig s => new PortConfigSnapshot("Serial", name, s.Baud, s.ReceiveFrameMs, null),
+            CANPortConfig c => new PortConfigSnapshot("CAN", name, c.Baud, null, c.RetryTimeMs),
+            _ => new PortConfigSnapshot("Unknown", name, 0, null, null),
         };
     }
 
@@ -1530,6 +1966,21 @@ public sealed class DIVERSession : IDisposable
             return new CANPortConfig(p.Baud, p.RetryTimeMs ?? 10);
         }
         return new SerialPortConfig(p.Baud, p.ReceiveFrameMs ?? 0);
+    }
+
+    private static LayoutInfoSnapshot? BuildLayoutSnapshot(LayoutInfo? layout)
+    {
+        if (layout == null) return null;
+        
+        var validPorts = layout.Value.GetValidPorts();
+        return new LayoutInfoSnapshot(
+            (int)layout.Value.DigitalInputCount,
+            (int)layout.Value.DigitalOutputCount,
+            (int)layout.Value.PortCount,
+            validPorts
+                .Select(p => new PortDescriptorSnapshot(p.Type.ToString(), p.Name))
+                .ToArray()
+        );
     }
 
     #endregion

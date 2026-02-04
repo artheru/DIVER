@@ -11,7 +11,7 @@ namespace MCUTestDIVER
     /// <summary>
     /// DIVER 模式测试程序
     /// 测试流程: Open → Reset → GetVersion → GetState → Configure → Program → GetState → Start → GetState
-    /// 主循环: MemoryUpperIO → GetState → Sleep(1s) → (循环3次后) EnableWireTap
+    /// 主循环: MemoryUpperIO → GetState → Sleep(1s) → (循环3次后) SetWireTap
     /// </summary>
     class Program
     {
@@ -353,19 +353,19 @@ namespace MCUTestDIVER
                         Log("GetState OK: {0}", state.ToString());
                     }
 
-                    // 循环 3 次后启用 WireTap
+                    // 循环 3 次后启用 WireTap（全部端口，RX + TX）
                     if (loopCount == 3 && !wireTapEnabled)
                     {
-                        Log("=== Enabling WireTap ===");
-                        err = bridge.EnableWireTap(TIMEOUT_MS);
+                        Log("=== Setting WireTap (All Ports, RX+TX) ===");
+                        err = bridge.SetWireTap(0xFF, WireTapFlags.Both, TIMEOUT_MS);
                         if (err != MCUSerialBridgeError.OK)
                         {
-                            Log("EnableWireTap FAILED: {0}", err.ToDescription());
+                            Log("SetWireTap FAILED: {0}", err.ToDescription());
                         }
                         else
                         {
                             Log(
-                                "EnableWireTap OK - Port data will now be uploaded even in DIVER mode"
+                                "SetWireTap OK - Port RX/TX data will now be uploaded even in DIVER mode"
                             );
                             wireTapEnabled = true;
                         }

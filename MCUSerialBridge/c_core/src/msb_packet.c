@@ -165,11 +165,15 @@ void msb_parse_upload_data(msb_handle* handle, const DataPacket* data_packet)
     if (!handle || !handle->is_open || !data_packet)
         return;
 
-    int8_t port_index = data_packet->port_index;
+    // 解析 port_index 和 direction
+    // bit7 = direction (0=RX, 1=TX), bit0-6 = port_index
+    uint8_t raw_port = (uint8_t)data_packet->port_index;
+    uint8_t port_index = raw_port & PORT_INDEX_MASK;
+    uint8_t direction = (raw_port & PORT_DIRECTION_TX_MASK) ? 1 : 0;
     uint16_t data_len = data_packet->data_len;
 
     /* ---------- Port index 校验 ---------- */
-    if (port_index < 0 || port_index >= PACKET_MAX_PORTS_NUM) {
+    if (port_index >= PACKET_MAX_PORTS_NUM) {
         DBG_PRINT("UploadData: Invalid port index Port[%u]", port_index);
         return;
     }
@@ -177,14 +181,17 @@ void msb_parse_upload_data(msb_handle* handle, const DataPacket* data_packet)
     /* ---------- Payload 长度校验 ---------- */
     if (data_len == 0 || data_len > PACKET_MAX_DATALEN) {
         DBG_PRINT(
-                "UploadData: Received Port[%u], invalid data length=%u",
+                "UploadData: Received Port[%u] dir=%u, invalid data length=%u",
                 port_index,
+                direction,
                 data_len);
         return;
     }
 
     if (handle->port_data_callback[port_index]) {
         handle->port_data_callback[port_index](
+                port_index,
+                direction,
                 data_packet->data,
                 data_packet->data_len,
                 handle->port_data_callback_ctx[port_index]);

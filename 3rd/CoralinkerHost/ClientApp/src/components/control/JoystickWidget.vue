@@ -88,6 +88,8 @@ interface JoystickConfig {
   variableY?: string
   autoReturnX?: boolean
   autoReturnY?: boolean
+  returnToX?: number  // X轴自动回退目标位置（百分比 0-100，默认 50）
+  returnToY?: number  // Y轴自动回退目标位置（百分比 0-100，默认 50）
   minX?: number
   maxX?: number
   minY?: number
@@ -139,6 +141,20 @@ const returnSpeed = computed(() => (props.config.returnSpeed ?? 200) / 100)
 const autoReturnX = computed(() => props.config.autoReturnX !== false)
 const autoReturnY = computed(() => props.config.autoReturnY !== false)
 
+// X轴回退目标位置（ratio 0-1，默认 0.5 即 50%）
+const returnToRatioX = computed(() => {
+  const percent = props.config.returnToX ?? 50
+  return Math.max(0, Math.min(1, percent / 100))
+})
+
+// Y轴回退目标位置（ratio 0-1，默认 0.5 即 50%）
+// 注意：Y轴 posY 是反转的（top=0, bottom=1），但百分比是直观的（0%=min, 100%=max）
+const returnToRatioY = computed(() => {
+  const percent = props.config.returnToY ?? 50
+  // 反转：百分比转为 posY（100% 对应 posY=0，0% 对应 posY=1）
+  return Math.max(0, Math.min(1, 1 - percent / 100))
+})
+
 const valueX = computed(() => minX.value + posX.value * (maxX.value - minX.value))
 const valueY = computed(() => {
   const invertedPos = 1 - posY.value
@@ -185,6 +201,12 @@ function onBlur() {
 }
 
 function onKeyDown(event: KeyboardEvent) {
+  // 如果焦点在输入框中，不处理键盘事件
+  const activeEl = document.activeElement
+  if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
+    return
+  }
+  
   const key = event.key
   const { keyUp, keyDown, keyLeft, keyRight } = props.config
   
@@ -233,6 +255,8 @@ function animationLoop(currentTime: number) {
   
   const speed = moveSpeed.value * deltaTime
   const retSpeed = returnSpeed.value * deltaTime
+  const targetX = returnToRatioX.value
+  const targetY = returnToRatioY.value
   
   // X 轴
   if (isLeft && !isRight) {
@@ -240,8 +264,8 @@ function animationLoop(currentTime: number) {
   } else if (isRight && !isLeft) {
     posX.value = Math.min(1, posX.value + speed)
   } else if (!dragging.value && autoReturnX.value && !isLeft && !isRight) {
-    if (Math.abs(posX.value - 0.5) > 0.001) {
-      posX.value += posX.value < 0.5 ? Math.min(retSpeed, 0.5 - posX.value) : -Math.min(retSpeed, posX.value - 0.5)
+    if (Math.abs(posX.value - targetX) > 0.001) {
+      posX.value += posX.value < targetX ? Math.min(retSpeed, targetX - posX.value) : -Math.min(retSpeed, posX.value - targetX)
     }
   }
   
@@ -251,8 +275,8 @@ function animationLoop(currentTime: number) {
   } else if (isDown && !isUp) {
     posY.value = Math.min(1, posY.value + speed)
   } else if (!dragging.value && autoReturnY.value && !isUp && !isDown) {
-    if (Math.abs(posY.value - 0.5) > 0.001) {
-      posY.value += posY.value < 0.5 ? Math.min(retSpeed, 0.5 - posY.value) : -Math.min(retSpeed, posY.value - 0.5)
+    if (Math.abs(posY.value - targetY) > 0.001) {
+      posY.value += posY.value < targetY ? Math.min(retSpeed, targetY - posY.value) : -Math.min(retSpeed, posY.value - targetY)
     }
   }
   
@@ -260,8 +284,8 @@ function animationLoop(currentTime: number) {
   emitChangeIfNeeded()
   
   const hasActiveKeys = pressedKeys.value.size > 0
-  const needReturnX = autoReturnX.value && Math.abs(posX.value - 0.5) > 0.001
-  const needReturnY = autoReturnY.value && Math.abs(posY.value - 0.5) > 0.001
+  const needReturnX = autoReturnX.value && Math.abs(posX.value - targetX) > 0.001
+  const needReturnY = autoReturnY.value && Math.abs(posY.value - targetY) > 0.001
   
   if (hasActiveKeys || needReturnX || needReturnY) {
     animationFrameId = requestAnimationFrame(animationLoop)
@@ -355,6 +379,9 @@ function emitChangeIfNeeded() {
 }
 
 onMounted(() => {
+  // 初始值设为回退目标位置
+  posX.value = returnToRatioX.value
+  posY.value = returnToRatioY.value
   document.addEventListener('keydown', onKeyDown)
   document.addEventListener('keyup', onKeyUp)
 })

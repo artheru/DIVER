@@ -56,8 +56,50 @@
                   <span class="tab-close" @click.stop="closeTab(tab.id)">×</span>
                 </div>
                 
-                <!-- Graph 工具按钮 -->
+                <!-- 工具按钮 -->
                 <div class="tab-spacer"></div>
+                
+                <!-- 运行控制组（始终显示） -->
+                <div class="runtime-controls">
+                  <!-- 状态指示 -->
+                  <div class="runtime-status">
+                    <span class="status-dot" :class="statusClass"></span>
+                    <span class="status-label">{{ sessionType }}</span>
+                    <span class="status-text">{{ statusText }}</span>
+                  </div>
+                  
+                  <button 
+                    class="toolbar-btn build" 
+                    :disabled="!hasInputFiles || isBuilding || isRunning || isStarting"
+                    @click="handleBuild" 
+                    :title="isRunning || isStarting ? 'Stop session before building' : 'Compile .cs files in inputs folder'"
+                  >
+                    <span class="btn-icon">⚙</span>
+                    <span class="btn-text">{{ isBuilding ? 'Building...' : 'Build' }}</span>
+                  </button>
+                  <button 
+                    class="toolbar-btn start" 
+                    :disabled="!canStart || isStarting || isBuilding"
+                    @click="handleStart" 
+                    title="Connect, Configure, Program, and Start execution"
+                  >
+                    <span class="btn-icon">▶</span>
+                    <span class="btn-text">{{ isStarting ? 'Starting...' : 'Start' }}</span>
+                  </button>
+                  <button 
+                    class="toolbar-btn stop" 
+                    :disabled="!canStop || isStopping"
+                    @click="handleStop" 
+                    title="Stop execution"
+                  >
+                    <span class="btn-icon">■</span>
+                    <span class="btn-text">{{ isStopping ? 'Stopping...' : 'Stop' }}</span>
+                  </button>
+                </div>
+                
+                <div class="toolbar-divider"></div>
+                
+                <!-- Graph 工具按钮 -->
                 <div class="graph-toolbar" v-show="viewMode === 'graph'">
                   <button 
                     class="toolbar-btn" 
@@ -198,7 +240,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { NButton, NModal, NCard, NInput } from 'naive-ui'
 import { storeToRefs } from 'pinia'
 import { Splitpanes, Pane } from 'splitpanes'
@@ -206,6 +248,7 @@ import 'splitpanes/dist/splitpanes.css'
 import { useFilesStore, useUiStore, useProjectStore, useLogStore, useRuntimeStore } from '@/stores'
 import { useAutoSave } from '@/composables'
 import * as projectApi from '@/api/project'
+import { programNode } from '@/api/device'
 
 // 子组件
 import GraphCanvas from '@/components/graph/GraphCanvas.vue'
@@ -228,9 +271,9 @@ const projectStore = useProjectStore()
 const logStore = useLogStore()
 const runtimeStore = useRuntimeStore()
 
-const { tabs, activeTabId, activeTab } = storeToRefs(filesStore)
+const { tabs, activeTabId, activeTab, fileTree } = storeToRefs(filesStore)
 const { viewMode, sourceJumpRequest } = storeToRefs(uiStore)
-const { canEdit } = storeToRefs(runtimeStore)
+const { canEdit, isRunning, isBackendAvailable, sessionType, canStart, canStop } = storeToRefs(runtimeStore)
 
 // 自动保存
 useAutoSave()
@@ -246,6 +289,34 @@ const codeEditorRef = ref<InstanceType<typeof CodeEditor> | null>(null)
 const importFileRef = ref<HTMLInputElement | null>(null)
 const showAddNodeDialog = ref(false)
 const showControlWindow = ref(false)
+
+// 运行控制状态
+const isBuilding = ref(false)
+const isStarting = ref(false)
+const isStopping = ref(false)
+
+// 状态样式类
+const statusClass = computed(() => {
+  if (isRunning.value) return 'running'
+  if (isBackendAvailable.value) return 'idle'
+  return 'offline'
+})
+
+// 状态文本
+const statusText = computed(() => {
+  if (isRunning.value) return 'Running'
+  if (isBackendAvailable.value) return 'Idle'
+  return 'Offline'
+})
+
+// 检查 inputs 目录是否有 .cs 文件
+const hasInputFiles = computed(() => {
+  const inputsFolder = fileTree.value.find(node => node.name === 'inputs')
+  if (!inputsFolder || !inputsFolder.children) return false
+  return inputsFolder.children.some(child => 
+    child.kind === 'file' && child.name.endsWith('.cs')
+  )
+})
 
 // ============================================
 // 源码跳转处理
@@ -554,6 +625,9 @@ async function handleNewProject() {
   try {
     await projectStore.createNew()
     
+    // 清空 runtime store 中的节点数据
+    runtimeStore.clearNodeData()
+    
     // 重新加载 Graph
     if (graphCanvasRef.value) {
       graphCanvasRef.value.clearGraph()
@@ -643,7 +717,7 @@ function handleAddNode() {
  * 节点已经在 AddNodeDialog 中通过 addNode API 添加到后端
  * 这里只需要在前端画布上添加节点
  */
-function handleAddNodeConfirm(data: AddNodeResult) {
+async function handleAddNodeConfirm(data: AddNodeResult) {
   if (graphCanvasRef.value) {
     graphCanvasRef.value.addNode({
       uuid: data.uuid,  // 使用后端分配的 UUID
@@ -654,6 +728,126 @@ function handleAddNodeConfirm(data: AddNodeResult) {
       ports: data.ports  // 传递端口配置
     })
     logStore.logUI(`Node added: ${data.nodeName} (${data.version?.productionName || 'Unknown'}) at ${data.mcuUri}`)
+    
+    // 节点数据由 DIVERSession 管理，需要立即保存到磁盘
+    await projectStore.saveProject({ silent: true })
+  }
+}
+
+// ============================================
+// 运行控制方法
+// ============================================
+
+/**
+ * 执行构建
+ */
+async function handleBuild() {
+  if (isBuilding.value) return
+  
+  isBuilding.value = true
+  
+  // 先清空前端 Build 日志，再切换标签
+  logStore.clearBuild()
+  logStore.switchTab('build')
+  
+  try {
+    const result = await projectStore.build()
+    if (result.ok) {
+      uiStore.success('Build Success', `Build ID: ${result.buildId}`)
+      await filesStore.loadFileTree()
+      filesStore.notifyBuildComplete()
+      await filesStore.refreshOpenTabs()
+      await runtimeStore.refreshVariables()
+      await runtimeStore.refreshFieldMetas()
+      await reprogramAllNodes()
+    } else {
+      uiStore.error('Build Failed', result.error || 'Unknown error')
+    }
+  } catch (error) {
+    uiStore.error('Build Failed', String(error))
+  } finally {
+    isBuilding.value = false
+  }
+}
+
+/**
+ * 重新编程所有已选择 Logic 的节点
+ */
+async function reprogramAllNodes() {
+  await runtimeStore.refreshNodes()
+  const nodeInfoList = runtimeStore.nodeInfoList
+  const nodesToProgram = nodeInfoList.filter(node => node.logicName)
+  
+  if (nodesToProgram.length === 0) {
+    logStore.logUI('[Build] No nodes with Logic selected')
+    return
+  }
+  
+  logStore.logUI(`[Build] Re-programming ${nodesToProgram.length} node(s)...`)
+  
+  for (const node of nodesToProgram) {
+    try {
+      logStore.logUI(`[Build] Programming ${node.nodeName} with ${node.logicName}...`)
+      const result = await programNode(node.uuid, node.logicName!)
+      if (result.ok) {
+        logStore.logUI(`[Build] \x1b[32m✓\x1b[0m ${node.nodeName} programmed (${result.programSize} bytes)`)
+      } else {
+        logStore.logUI(`[Build] \x1b[31m✗\x1b[0m ${node.nodeName} failed to program`)
+      }
+    } catch (error) {
+      logStore.logUI(`[Build] \x1b[31m✗\x1b[0m ${node.nodeName} error: ${error}`)
+    }
+  }
+  
+  await runtimeStore.refreshNodes()
+  await projectStore.saveProject({ silent: true })
+}
+
+/**
+ * 启动执行
+ */
+async function handleStart() {
+  if (isStarting.value || !canStart.value) return
+  
+  isStarting.value = true
+  logStore.switchTab('terminal')
+  logStore.logUI('Starting execution sequence (Connect → Configure → Program → Start)...')
+  
+  try {
+    const result = await runtimeStore.start()
+    if (result.ok) {
+      logStore.logUI('\x1b[32mExecution started\x1b[0m')
+      uiStore.success('Started', 'Execution started')
+    } else {
+      logStore.logUI(`[Start] \x1b[31mERROR:\x1b[0m ${(result as { error?: string }).error || 'Start failed'}`)
+      uiStore.error('Start Failed', (result as { error?: string }).error || 'Start failed')
+    }
+  } catch (error) {
+    logStore.logUI(`[Start] \x1b[31mERROR:\x1b[0m ${String(error)}`)
+    uiStore.error('Start Failed', String(error))
+  } finally {
+    isStarting.value = false
+  }
+}
+
+/**
+ * 停止执行
+ */
+async function handleStop() {
+  if (isStopping.value || !canStop.value) return
+  
+  isStopping.value = true
+  logStore.logUI('Stopping execution...')
+  
+  try {
+    await runtimeStore.stop()
+    logStore.logUI('\x1b[33mExecution stopped\x1b[0m')
+    uiStore.success('Stopped', 'Execution stopped')
+  } catch (error) {
+    logStore.logUI(`[Stop] \x1b[31mERROR:\x1b[0m ${String(error)}`)
+    uiStore.error('Stop Failed', String(error))
+  } finally {
+    isStopping.value = false
   }
 }
 </script>
@@ -795,6 +989,76 @@ function handleAddNodeConfirm(data: AddNodeResult) {
   height: 20px;
   background: var(--border-color);
   margin: 0 6px;
+}
+
+/* 运行控制组 */
+.runtime-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 运行时状态指示 */
+.runtime-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-sm);
+  margin-right: 8px;
+}
+
+.runtime-status .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.runtime-status .status-dot.idle {
+  background: var(--warning);
+}
+
+.runtime-status .status-dot.offline {
+  background: var(--text-muted);
+}
+
+.runtime-status .status-dot.running {
+  background: var(--success);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.runtime-status .status-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.runtime-status .status-text {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* 特殊按钮颜色 */
+.toolbar-btn.build:hover:not(:disabled) {
+  background: rgba(79, 140, 255, 0.15);
+  color: var(--primary);
+}
+
+.toolbar-btn.start:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--success);
+}
+
+.toolbar-btn.stop:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
 }
 
 /* Tab wrapper for grouped tab elements */

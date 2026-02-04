@@ -22,6 +22,9 @@
       :snap-grid="[20, 20]"
       :connection-line-style="{ stroke: '#4f8cff', strokeWidth: 2 }"
       :default-edge-options="defaultEdgeOptions"
+      :nodes-draggable="!isRunning"
+      :nodes-connectable="!isRunning"
+      :elements-selectable="!isRunning"
       fit-view-on-init
       @nodes-change="onNodesChange"
       @edges-change="onEdgesChange"
@@ -48,6 +51,7 @@
 import { ref, watch, onMounted, onUnmounted, markRaw } from 'vue'
 import { 
   VueFlow, 
+  useVueFlow,
   type Node, 
   type Edge,
   type Connection,
@@ -76,6 +80,12 @@ import '@vue-flow/minimap/dist/style.css'
 const logStore = useLogStore()
 const runtimeStore = useRuntimeStore()
 const { nodeStates, isRunning } = storeToRefs(runtimeStore)
+
+// ============================================
+// vue-flow 交互控制
+// ============================================
+
+const { setInteractive } = useVueFlow()
 
 // ============================================
 // vue-flow 配置
@@ -602,16 +612,20 @@ onUnmounted(() => {
   positionSaveTimers.clear()
 })
 
-// 监听运行状态变化，控制轮询
+// 监听运行状态变化，控制轮询和交互
 watch(isRunning, (running) => {
   if (running) {
     // 运行中时停止独立轮询（由 runtime store 通过 SignalR 管理）
     stopNodeStatePolling()
+    // 锁定图交互（同步 Controls 组件的锁按钮状态）
+    setInteractive(false)
   } else {
     // 停止运行后恢复独立轮询
     startNodeStatePolling()
+    // 解锁图交互
+    setInteractive(true)
   }
-})
+}, { immediate: true })
 
 // ============================================
 // 刷新节点

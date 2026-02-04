@@ -10,6 +10,7 @@
 #include "hal/systick.h"
 #include "msb_error_c.h"
 #include "msb_protocol.h"
+#include "util/async.h"
 #include "util/console.h"
 #include "util/mempool.h"
 
@@ -65,7 +66,7 @@ typedef struct {
 Handles g_handles[PACKET_MAX_PORTS_NUM];
 
 volatile MCUStateC g_mcu_state = {.raw = 0};  // Bridge, Idle, not configured
-volatile bool g_wire_tap_enabled = false;
+volatile uint8_t g_wire_tap_flags[PACKET_MAX_PORTS_NUM] = {0};
 
 // 端口统计数据
 volatile PortStatsC g_port_stats[PACKET_MAX_PORTS_NUM] = {0};
@@ -532,6 +533,9 @@ MCUSerialBridgeError control_vm_write_port(
         // 累加 TX 统计
         control_stats_add_tx(port_index, data_length);
 
+        // TX WireTap 上报
+        report_wiretap_transmit_serial(data, data_length, port_index);
+
         return MSB_Error_OK;
     }
 
@@ -571,6 +575,20 @@ MCUSerialBridgeError control_vm_write_port(
         // 累加 TX 统计（CAN 帧大小 = header(2) + payload(dlc)）
         control_stats_add_tx(port_index, 2 + id_info.dlc);
 
+        // TX WireTap 上报
+        {
+            uint32_t data_0_3 = 0, data_4_7 = 0;
+            if (id_info.dlc >= 4) {
+                memcpy(&data_0_3, can_data, 4);
+            } else if (id_info.dlc > 0) {
+                memcpy(&data_0_3, can_data, id_info.dlc);
+            }
+            if (id_info.dlc > 4) {
+                memcpy(&data_4_7, can_data + 4, id_info.dlc - 4);
+            }
+            report_wiretap_transmit_can(id_info, data_0_3, data_4_7, port_index);
+        }
+
         return MSB_Error_OK;
     }
 
@@ -579,11 +597,66 @@ MCUSerialBridgeError control_vm_write_port(
     }
 }
 
+// 前向声明
+static void control_vm_flush_serial_complete(uint32_t port_index);
+
+/**
+ * @brief 启动下一个分段发送（非 ISR 上下文）
+ *
+ * 由 async_timeout 调度调用，在主循环中执行。
+ * 检查队列中是否有待发送的分段，如果有则启动发送。
+ */
+static void control_vm_send_next_segment(uint32_t port_index)
+{
+    DIVERSerialSendBuffer* buf =
+            (DIVERSerialSendBuffer*)g_handles[port_index].diver_send_buffer;
+
+    if (!buf) {
+        return;
+    }
+
+    hal_nvic_critical_section_enter();
+
+    // 检查队列中是否还有分段要发送
+    if (!DIVER_SENDBUF_IS_EMPTY(buf)) {
+        // 还有分段，启动发送
+        DIVERSerialSendBufferSegment* seg = &buf->segments[buf->head];
+
+        buf->sending = true;
+        VMTXBUF_LOG(
+                "TX next port=%u start=%u len=%u head=%u tail=%u\n",
+                port_index,
+                seg->start,
+                seg->len,
+                buf->head,
+                buf->tail);
+
+        hal_nvic_critical_section_quit();
+
+        hal_usart_send(
+                g_handles[port_index].serial,
+                buf->buffer + seg->start,
+                seg->len,
+                (AsyncCallback)control_vm_flush_serial_complete,
+                1,
+                port_index);
+    } else {
+        // 队列已空，保持 sending = false
+        VMTXBUF_LOG("TX idle port=%u (queue empty)\n", port_index);
+        hal_nvic_critical_section_quit();
+    }
+}
+
 /**
  * @brief 发送完成回调（ISR 上下文）
  *
- * 当一个分段发送完成后被调用。消费当前分段，如果队列中还有分段则继续发送。
- * 注意：此回调已在 ISR 中运行，中断已禁用，无需额外临界区。
+ * 当一个分段发送完成后被调用。消费当前分段，并通过 async_timeout
+ * 调度下一个分段的发送（如果有的话）。
+ *
+ * 注意：
+ * - 此回调在 ISR 中运行
+ * - 不在 ISR 中直接启动下一个发送，而是通过 async_timeout 调度
+ * - 这样可以保证帧之间有足够的间隔，让接收端正确识别帧边界
  */
 static void control_vm_flush_serial_complete(uint32_t port_index)
 {
@@ -608,29 +681,31 @@ static void control_vm_flush_serial_complete(uint32_t port_index)
                 buf->tail);
     }
 
+    // 标记当前发送完成
+    buf->sending = false;
+
     // 检查队列中是否还有分段要发送
     if (!DIVER_SENDBUF_IS_EMPTY(buf)) {
-        // 还有分段，继续发送下一个
-        DIVERSerialSendBufferSegment* seg = &buf->segments[buf->head];
+        // 还有分段，通过 async_timeout 调度下一个发送
+        // 使用帧间隔参数作为延迟，确保接收端能正确识别帧边界
+        const SerialPortConfigC* serial_cfg =
+                (const SerialPortConfigC*)&g_handles[port_index].config;
+        uint32_t frame_interval_ms = serial_cfg->receive_frame_ms;
+        if (frame_interval_ms == 0) {
+            frame_interval_ms = 1;  // 最小 1ms 间隔
+        }
 
         VMTXBUF_LOG(
-                "TX next port=%u start=%u len=%u head=%u tail=%u\n",
+                "TX schedule next port=%u delay=%ums\n",
                 port_index,
-                seg->start,
-                seg->len,
-                buf->head,
-                buf->tail);
-        hal_usart_send(
-                g_handles[port_index].serial,
-                buf->buffer + seg->start,
-                seg->len,
-                (AsyncCallback)control_vm_flush_serial_complete,
+                frame_interval_ms);
+        async_timeout(
+                frame_interval_ms,
+                (AsyncCallback)control_vm_send_next_segment,
                 1,
                 port_index);
     } else {
-        // 队列已空，标记发送完成
-        // 注意：不在这里重置 buf_write，由生产者在队列为空时自动重置到 0
-        buf->sending = false;
+        // 队列已空
         VMTXBUF_LOG("TX idle port=%u (queue empty) sending=0\n", port_index);
     }
 }
@@ -759,7 +834,7 @@ MCUSerialBridgeError control_on_start(const uint8_t* data, uint32_t data_length)
             const SerialPortConfigC* serial_cfg = (const SerialPortConfigC*)cfg;
             hal_usart_register_receive(
                     g_handles[port_index].serial,
-                    (DataReceiveCallback)upload_serial_packet,
+                    (DataReceiveCallback)on_hal_receive_serial,
                     serial_cfg->receive_frame_ms,
                     1,
                     port_index);
@@ -787,7 +862,7 @@ MCUSerialBridgeError control_on_start(const uint8_t* data, uint32_t data_length)
         case PortType_CAN:
             hal_direct_can_register_receive(
                     g_handles[port_index].can,
-                    (DirectCANMessageReceiveCallback)upload_can_packet,
+                    (DirectCANMessageReceiveCallback)on_hal_receive_can,
                     1,
                     port_index);
             console_printf_do(
@@ -839,12 +914,36 @@ MCUSerialBridgeError control_on_start(const uint8_t* data, uint32_t data_length)
     return MSB_Error_OK;
 }
 
-MCUSerialBridgeError control_on_enable_wire_tap(
+MCUSerialBridgeError control_on_set_wire_tap(
         const uint8_t* data,
         uint32_t data_length)
 {
-    console_printf_do("CONTROL: ENABLE WIRE TAP\n");
-    g_wire_tap_enabled = true;
+    // 解析 WireTapConfigC 结构
+    if (data_length >= sizeof(WireTapConfigC)) {
+        const WireTapConfigC* config = (const WireTapConfigC*)data;
+        uint8_t port_index = config->port_index;
+        uint8_t flags = config->flags;
+        
+        if (port_index == 0xFF) {
+            // 设置所有端口
+            console_printf_do("CONTROL: SET WIRE TAP ALL PORTS flags=0x%02X\n", flags);
+            for (uint32_t i = 0; i < PACKET_MAX_PORTS_NUM; i++) {
+                g_wire_tap_flags[i] = flags;
+            }
+        } else if (port_index < PACKET_MAX_PORTS_NUM) {
+            // 设置指定端口
+            console_printf_do("CONTROL: SET WIRE TAP PORT %d flags=0x%02X\n", port_index, flags);
+            g_wire_tap_flags[port_index] = flags;
+        } else {
+            return MSB_Error_Config_PortNumOver;
+        }
+    } else {
+        // 向后兼容：无参数时默认全部端口启用 RX
+        console_printf_do("CONTROL: SET WIRE TAP (legacy) ALL RX\n");
+        for (uint32_t i = 0; i < PACKET_MAX_PORTS_NUM; i++) {
+            g_wire_tap_flags[i] = WireTapFlag_RX;
+        }
+    }
     return MSB_Error_OK;
 }
 

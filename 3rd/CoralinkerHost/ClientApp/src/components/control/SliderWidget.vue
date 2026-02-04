@@ -63,6 +63,7 @@ interface SliderConfig {
   min?: number
   max?: number
   autoReturn?: boolean
+  returnTo?: number  // 自动回退目标位置（百分比 0-100，默认 50）
   logarithmic?: boolean
   keyIncrease?: string
   keyDecrease?: string
@@ -99,6 +100,13 @@ const min = computed(() => props.config.min ?? 0)
 const max = computed(() => props.config.max ?? 1)
 const moveSpeed = computed(() => (props.config.moveSpeed ?? 100) / 100)
 const returnSpeed = computed(() => (props.config.returnSpeed ?? 200) / 100)
+
+// 回退目标位置（ratio 0-1，默认 0.5 即 50%）
+const returnToRatio = computed(() => {
+  // returnTo 是百分比 0-100，转换为 ratio 0-1
+  const percent = props.config.returnTo ?? 50
+  return Math.max(0, Math.min(1, percent / 100))
+})
 
 const currentValue = computed(() => {
   const range = max.value - min.value
@@ -152,6 +160,12 @@ function onBlur() {
 }
 
 function onKeyDown(event: KeyboardEvent) {
+  // 如果焦点在输入框中，不处理键盘事件
+  const activeEl = document.activeElement
+  if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
+    return
+  }
+  
   const key = event.key
   const { keyIncrease, keyDecrease } = props.config
   
@@ -198,15 +212,17 @@ function animationLoop(currentTime: number) {
   const speed = moveSpeed.value * deltaTime
   const retSpeed = returnSpeed.value * deltaTime
   
+  const targetRatio = returnToRatio.value
+  
   if (isIncrease && !isDecrease) {
     currentRatio.value = Math.min(1, currentRatio.value + speed)
   } else if (isDecrease && !isIncrease) {
     currentRatio.value = Math.max(0, currentRatio.value - speed)
   } else if (!dragging.value && autoReturn && !isIncrease && !isDecrease) {
-    if (Math.abs(currentRatio.value - 0.5) > 0.001) {
-      currentRatio.value += currentRatio.value < 0.5 
-        ? Math.min(retSpeed, 0.5 - currentRatio.value) 
-        : -Math.min(retSpeed, currentRatio.value - 0.5)
+    if (Math.abs(currentRatio.value - targetRatio) > 0.001) {
+      currentRatio.value += currentRatio.value < targetRatio 
+        ? Math.min(retSpeed, targetRatio - currentRatio.value) 
+        : -Math.min(retSpeed, currentRatio.value - targetRatio)
     }
   }
   
@@ -214,7 +230,7 @@ function animationLoop(currentTime: number) {
   emitChangeIfNeeded()
   
   const hasActiveKeys = pressedKeys.value.size > 0
-  const needReturn = autoReturn && Math.abs(currentRatio.value - 0.5) > 0.001
+  const needReturn = autoReturn && Math.abs(currentRatio.value - targetRatio) > 0.001
   
   if (hasActiveKeys || needReturn) {
     animationFrameId = requestAnimationFrame(animationLoop)
@@ -313,7 +329,8 @@ function emitChangeIfNeeded() {
 }
 
 onMounted(() => {
-  currentRatio.value = 0.5
+  // 初始值设为回退目标位置
+  currentRatio.value = returnToRatio.value
   document.addEventListener('keydown', onKeyDown)
   document.addEventListener('keyup', onKeyUp)
 })

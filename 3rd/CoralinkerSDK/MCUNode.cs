@@ -357,6 +357,94 @@ public class MCUNode : IDisposable
     }
 
     /// <summary>
+    /// 设置 WireTap 模式
+    /// 配置指定端口的 WireTap 监视功能（RX/TX）。
+    /// 启用后，即使在 DIVER 模式下，端口的收发数据也会上报给 PC
+    /// </summary>
+    /// <param name="portIndex">端口索引，0xFF = 全部端口</param>
+    /// <param name="flags">WireTap 标志（RX, TX, Both）</param>
+    /// <param name="timeoutMs">超时时间（毫秒）</param>
+    /// <returns>是否成功</returns>
+    public bool SetWireTap(byte portIndex, WireTapFlags flags, uint timeoutMs = 200)
+    {
+        if (_bridge == null || !_bridge.IsOpen)
+        {
+            LastError = "Not connected";
+            return false;
+        }
+
+        // 转换为底层类型
+        var clrFlags = (MCUSerialBridgeCLR.WireTapFlags)(int)flags;
+        var err = _bridge.SetWireTap(portIndex, clrFlags, timeoutMs);
+        if (err != MCUSerialBridgeError.OK)
+        {
+            LastError = $"SetWireTap failed: {err.ToDescription()}";
+            return false;
+        }
+
+        LastError = null;
+        return true;
+    }
+
+    /// <summary>
+    /// 注册串口数据回调（用于 WireTap 或 Bridge 模式）
+    /// </summary>
+    /// <param name="portIndex">端口索引</param>
+    /// <param name="callback">回调函数：(portIndex, direction, data)
+    /// - portIndex: 端口索引
+    /// - direction: 0=RX(接收), 1=TX(发送/WireTap)
+    /// - data: 原始数据
+    /// </param>
+    /// <returns>是否成功</returns>
+    public bool RegisterSerialPortCallback(byte portIndex, Action<byte, byte, byte[]> callback)
+    {
+        if (_bridge == null || !_bridge.IsOpen)
+        {
+            LastError = "Not connected";
+            return false;
+        }
+
+        var err = _bridge.RegisterSerialPortCallback(portIndex, callback);
+        if (err != MCUSerialBridgeError.OK)
+        {
+            LastError = $"RegisterSerialPortCallback failed: {err.ToDescription()}";
+            return false;
+        }
+
+        LastError = null;
+        return true;
+    }
+
+    /// <summary>
+    /// 注册 CAN 数据回调（用于 WireTap 或 Bridge 模式）
+    /// </summary>
+    /// <param name="portIndex">端口索引</param>
+    /// <param name="callback">回调函数：(portIndex, direction, msg)
+    /// - portIndex: 端口索引
+    /// - direction: 0=RX(接收), 1=TX(发送/WireTap)
+    /// - msg: CANMessage
+    /// </param>
+    /// <returns>是否成功</returns>
+    public bool RegisterCANPortCallback(byte portIndex, Action<byte, byte, CANMessage> callback)
+    {
+        if (_bridge == null || !_bridge.IsOpen)
+        {
+            LastError = "Not connected";
+            return false;
+        }
+
+        var err = _bridge.RegisterCANPortCallback(portIndex, callback);
+        if (err != MCUSerialBridgeError.OK)
+        {
+            LastError = $"RegisterCANPortCallback failed: {err.ToDescription()}";
+            return false;
+        }
+
+        LastError = null;
+        return true;
+    }
+
+    /// <summary>
     /// 刷新 MCU 状态
     /// </summary>
     public void RefreshState()

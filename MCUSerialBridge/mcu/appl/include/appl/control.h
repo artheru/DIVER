@@ -12,8 +12,14 @@ extern volatile MCUStateC g_mcu_state;
 /** @brief 各端口的统计数据（TX/RX 帧数和字节数） */
 extern volatile PortStatsC g_port_stats[PACKET_MAX_PORTS_NUM];
 
-/** @brief Wire Tap 模式标志，启用后即使在 DIVER 模式下也会上报端口数据 */
-extern volatile bool g_wire_tap_enabled;
+/** @brief 每端口 WireTap 标志数组，启用后即使在 DIVER 模式下也会上报端口数据 */
+extern volatile uint8_t g_wire_tap_flags[PACKET_MAX_PORTS_NUM];
+
+/** @brief 检查指定端口的 RX WireTap 是否启用 */
+#define WIRETAP_RX_ENABLED(port) (g_wire_tap_flags[port] & WireTapFlag_RX)
+
+/** @brief 检查指定端口的 TX WireTap 是否启用 */
+#define WIRETAP_TX_ENABLED(port) (g_wire_tap_flags[port] & WireTapFlag_TX)
 
 /** @brief 程序缓冲区指针（DIVER 模式） */
 extern uint8_t* g_program_buffer;
@@ -119,10 +125,13 @@ MCUSerialBridgeError control_on_start(
         uint32_t data_length);
 
 /**
- * @brief 处理启用 Wire Tap 命令
- * 启用后即使在 DIVER 模式下，端口收到的数据也会上报给 PC
+ * @brief 处理设置 Wire Tap 命令
+ * 配置指定端口的 WireTap 监视功能（RX/TX）。
+ * 启用后即使在 DIVER 模式下，端口的收发数据也会上报给 PC
+ * @param data WireTapConfigC 结构数据
+ * @param data_length 数据长度
  */
-MCUSerialBridgeError control_on_enable_wire_tap(
+MCUSerialBridgeError control_on_set_wire_tap(
         const uint8_t* data,
         uint32_t data_length);
 

@@ -29,7 +29,8 @@
           
           <div class="port-config">
             <!-- Baud Rate - 根据端口类型显示不同选项 -->
-            <n-form-item label="Baud Rate" label-placement="left" :show-feedback="false">
+            <div class="config-field">
+              <span class="field-label">Baud</span>
               <n-select
                 :value="port.baud"
                 @update:value="(v) => port.baud = parseBaudValue(v)"
@@ -37,42 +38,34 @@
                 filterable
                 tag
                 :filter="baudFilter"
-                style="width: 150px"
-                placeholder="Select or input"
+                size="small"
+                style="width: 120px"
+                placeholder="Select"
               />
-            </n-form-item>
+            </div>
             
             <!-- Serial specific: ReceiveFrameMs -->
-            <n-form-item
-              v-if="port.type === 'Serial'"
-              label="Frame Ms"
-              label-placement="left"
-              :show-feedback="false"
-            >
+            <div class="config-field">
+              <span class="field-label">{{ port.type === 'Serial' ? 'Frame Ms' : 'Retry Ms' }}</span>
               <n-input-number
+                v-if="port.type === 'Serial'"
                 v-model:value="port.receiveFrameMs"
                 :min="0"
                 :max="1000"
                 :step="1"
-                style="width: 100px"
+                size="small"
+                style="width: 80px"
               />
-            </n-form-item>
-            
-            <!-- CAN specific: RetryTimeMs -->
-            <n-form-item
-              v-if="port.type === 'CAN'"
-              label="Retry Ms"
-              label-placement="left"
-              :show-feedback="false"
-            >
               <n-input-number
+                v-else
                 v-model:value="port.retryTimeMs"
                 :min="0"
                 :max="1000"
                 :step="1"
-                style="width: 100px"
+                size="small"
+                style="width: 80px"
               />
-            </n-form-item>
+            </div>
           </div>
         </div>
       </div>
@@ -91,7 +84,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
-import { NModal, NCard, NButton, NFormItem, NSelect, NInputNumber } from 'naive-ui'
+import { NModal, NCard, NButton, NSelect, NInputNumber } from 'naive-ui'
 import type { PortDescriptor, PortConfig } from '@/types'
 
 // Props
@@ -204,10 +197,10 @@ function initEditablePorts() {
   }
   
   editablePorts.value = props.ports.map((pd, index) => ({
-    index: pd.index ?? index,
-    type: pd.type || 'Unknown',
+    index,
+    type: (pd.type as 'Serial' | 'CAN' | 'Unknown') || 'Unknown',
     name: pd.name || `Port${index}`,
-    baud: pd.type === 'CAN' ? 1000000 : 115200,
+    baud: pd.type?.toLowerCase() === 'can' ? 1000000 : 115200,
     receiveFrameMs: 0,
     retryTimeMs: 10
   }))
@@ -321,18 +314,20 @@ onMounted(async () => {
 
 .port-config {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+  gap: 16px;
   align-items: center;
 }
 
-.port-config :deep(.n-form-item) {
-  margin-bottom: 0;
+.config-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.port-config :deep(.n-form-item-label) {
+.field-label {
   font-size: 12px;
   color: var(--text-muted);
+  min-width: 60px;
 }
 
 .dialog-footer {

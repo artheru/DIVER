@@ -164,4 +164,12 @@ public sealed class TerminalBroadcaster
         var errorData = System.Text.Json.JsonSerializer.Deserialize<object>(errorJson);
         return _hub.Clients.All.SendAsync("fatalError", errorData, ct);
     }
+
+    /// <summary>
+    /// 推送 WireTap 数据事件
+    /// </summary>
+    public Task WireTapDataAsync(object data, CancellationToken ct = default)
+    {
+        return _hub.Clients.All.SendAsync("wireTapData", data, ct);
+    }
 }

@@ -64,6 +64,7 @@
 
       <!-- 添加控件菜单（只读模式下不显示） -->
       <div v-if="showAddWidgetMenu && !readonly" class="dropdown-menu add-widget-menu">
+        <div class="menu-section-title">可控控件</div>
         <button @click="addWidget('joystick')">
           <span class="menu-icon">✛</span>
           <span>Joystick (双轴)</span>
@@ -75,6 +76,16 @@
         <button @click="addWidget('switch')">
           <span class="menu-icon">◉</span>
           <span>Switch (开关)</span>
+        </button>
+        <div class="menu-divider"></div>
+        <div class="menu-section-title">只读显示</div>
+        <button @click="addWidget('gauge')">
+          <span class="menu-icon">📊</span>
+          <span>Gauge (数显/仪表)</span>
+        </button>
+        <button @click="addWidget('lamp')">
+          <span class="menu-icon">💡</span>
+          <span>Lamp (LED指示灯)</span>
         </button>
       </div>
 
@@ -153,6 +164,14 @@
               v-else-if="widget.type === 'switch'"
               :config="widget.config"
               @change="(v) => handleSwitchChange(widget, v)"
+            />
+            <GaugeWidget 
+              v-else-if="widget.type === 'gauge'"
+              :config="widget.config"
+            />
+            <LampWidget 
+              v-else-if="widget.type === 'lamp'"
+              :config="widget.config"
             />
           </div>
 
@@ -234,6 +253,11 @@
                     </button>
                   </div>
                 </div>
+                <div v-if="editingWidget.config.autoReturnX" class="config-row">
+                  <label>Return To</label>
+                  <input type="number" v-model.number="editingWidget.config.returnToX" min="0" max="100" class="small-input" />
+                  <span class="unit">%</span>
+                </div>
               </div>
               
               <!-- Y Axis -->
@@ -265,6 +289,11 @@
                       <span class="toggle-slider"></span>
                     </button>
                   </div>
+                </div>
+                <div v-if="editingWidget.config.autoReturnY" class="config-row">
+                  <label>Return To</label>
+                  <input type="number" v-model.number="editingWidget.config.returnToY" min="0" max="100" class="small-input" />
+                  <span class="unit">%</span>
                 </div>
               </div>
               
@@ -339,6 +368,11 @@
                       <span class="toggle-slider"></span>
                     </button>
                   </div>
+                </div>
+                <div v-if="editingWidget.config.autoReturn" class="config-row">
+                  <label>Return To</label>
+                  <input type="number" v-model.number="editingWidget.config.returnTo" min="0" max="100" class="small-input" />
+                  <span class="unit">%</span>
                 </div>
                 <div class="config-row">
                   <label>Orientation</label>
@@ -429,6 +463,115 @@
                 </div>
               </div>
             </template>
+
+            <!-- Gauge 配置 -->
+            <template v-else-if="editingWidget.type === 'gauge'">
+              <div class="config-section">
+                <h4>Variable</h4>
+                <div class="config-row">
+                  <label>Variable</label>
+                  <select v-model="editingWidget.config.variable" class="var-select-mixed">
+                    <option value="">-- None --</option>
+                    <option 
+                      v-for="v in allVarList" 
+                      :key="v.name" 
+                      :value="v.name"
+                      :class="v.isControllable ? 'var-controllable' : 'var-readonly'"
+                    >
+                      {{ v.isControllable ? '✎' : '👁' }} {{ v.name }} ({{ v.type }})
+                    </option>
+                  </select>
+                </div>
+              </div>
+              
+              <div class="config-section">
+                <h4>Display Style</h4>
+                <div class="config-row">
+                  <label>Style</label>
+                  <select v-model="editingWidget.config.style">
+                    <option value="number">Number (数值)</option>
+                    <option value="text">Text (文本)</option>
+                    <option value="bar-h">Bar Horizontal (水平进度条)</option>
+                    <option value="bar-v">Bar Vertical (垂直进度条)</option>
+                    <option value="gauge">Gauge (仪表盘)</option>
+                  </select>
+                </div>
+              </div>
+              
+              <div class="config-section" v-if="editingWidget.config.style !== 'text'">
+                <h4>Range &amp; Format</h4>
+                <div class="config-row-inline">
+                  <div class="range-field">
+                    <label>Range</label>
+                    <input type="number" v-model.number="editingWidget.config.min" step="any" />
+                    <span class="range-sep">→</span>
+                    <input type="number" v-model.number="editingWidget.config.max" step="any" />
+                  </div>
+                </div>
+                <div class="config-row">
+                  <label>Unit</label>
+                  <input type="text" v-model="editingWidget.config.unit" placeholder="e.g. %, °C, rpm" class="text-input" />
+                </div>
+                <div class="config-row">
+                  <label>Decimals</label>
+                  <input type="number" v-model.number="editingWidget.config.decimals" min="0" max="6" class="small-input" />
+                </div>
+              </div>
+            </template>
+
+            <!-- Lamp 配置 -->
+            <template v-else-if="editingWidget.type === 'lamp'">
+              <div class="config-section">
+                <h4>Variable</h4>
+                <div class="config-row">
+                  <label>Variable</label>
+                  <select v-model="editingWidget.config.variable" class="var-select-mixed">
+                    <option value="">-- None --</option>
+                    <option 
+                      v-for="v in allVarList" 
+                      :key="v.name" 
+                      :value="v.name"
+                      :class="v.isControllable ? 'var-controllable' : 'var-readonly'"
+                    >
+                      {{ v.isControllable ? '✎' : '👁' }} {{ v.name }} ({{ v.type }})
+                    </option>
+                  </select>
+                </div>
+              </div>
+              
+              <div class="config-section">
+                <h4>LED Settings</h4>
+                <div class="config-row">
+                  <label>Bits</label>
+                  <input type="number" v-model.number="editingWidget.config.bits" min="1" max="32" class="small-input" />
+                  <span class="hint">(1-32)</span>
+                </div>
+                <div class="config-row">
+                  <label>Layout</label>
+                  <select v-model="editingWidget.config.layout">
+                    <option value="horizontal">Horizontal (横排)</option>
+                    <option value="vertical">Vertical (竖排)</option>
+                  </select>
+                </div>
+                <div class="config-row">
+                  <label>Color</label>
+                  <div class="color-picker">
+                    <input type="color" v-model="editingWidget.config.color" class="color-input" />
+                    <span class="color-value">{{ editingWidget.config.color }}</span>
+                  </div>
+                </div>
+                <div class="config-row">
+                  <label>Show Index</label>
+                  <button 
+                    class="toggle-switch" 
+                    :class="{ on: editingWidget.config.showBitIndex }"
+                    @click="editingWidget.config.showBitIndex = !editingWidget.config.showBitIndex"
+                  >
+                    <span class="toggle-slider"></span>
+                  </button>
+                </div>
+              </div>
+            </template>
           </div>
           <div class="config-dialog-footer">
             <button class="btn" @click="closeConfigDialog">Cancel</button>
@@ -447,6 +590,8 @@ import { useRuntimeStore, useProjectStore } from '@/stores'
 import JoystickWidget from './JoystickWidget.vue'
 import SliderWidget from './SliderWidget.vue'
 import SwitchWidget from './SwitchWidget.vue'
+import GaugeWidget from './GaugeWidget.vue'
+import LampWidget from './LampWidget.vue'
 
 // ============================================
 // Props 和 Emits
@@ -478,7 +623,7 @@ const projectStore = useProjectStore()
 
 interface GridWidget {
   id: string
-  type: 'joystick' | 'slider' | 'switch'
+  type: 'joystick' | 'slider' | 'switch' | 'gauge' | 'lamp'
   gridX: number  // 网格 X 位置
   gridY: number  // 网格 Y 位置
   gridW: number  // 占用网格宽度
@@ -606,6 +751,24 @@ const controllableVarList = computed<BindableVariable[]>(() => {
     }))
 })
 
+// 所有变量列表（用于只读 Gauge 控件，混合显示可控和只读）
+interface AllVariable extends BindableVariable {
+  isControllable: boolean  // 是否可控（用于颜色区分）
+}
+
+const allVarList = computed<AllVariable[]>(() => {
+  // 从 fieldMetas 获取所有可绑定类型的变量
+  return fieldMetas.value
+    .filter(f => BINDABLE_TYPE_IDS.includes(f.typeId))
+    .map(f => ({
+      name: f.name,
+      type: f.type,
+      typeId: f.typeId,
+      isInteger: INTEGER_TYPE_IDS.includes(f.typeId),
+      isControllable: !f.isLowerIO  // LowerIO = 只读
+    }))
+})
+
 // 根据变量名获取类型信息
 function getVarTypeId(varName: string): number {
   const v = variableList.value.find(v => v.name === varName)
@@ -689,7 +852,7 @@ function stopDrag() {
 // 控件管理
 // ============================================
 
-function addWidget(type: 'joystick' | 'slider' | 'switch') {
+function addWidget(type: 'joystick' | 'slider' | 'switch' | 'gauge' | 'lamp') {
   const id = `widget-${Date.now()}`
   
   // 默认配置（float: -1~1, int: -100~100）
@@ -716,6 +879,26 @@ function addWidget(type: 'joystick' | 'slider' | 'switch') {
     switch: { 
       gridW: 3, gridH: 2, 
       config: { variable: '', states: 2, keyToggle: '' } 
+    },
+    gauge: {
+      gridW: 3, gridH: 2,
+      config: { 
+        variable: '', 
+        style: 'number',  // number | text | bar-h | bar-v | gauge
+        min: 0, max: 100, 
+        unit: '',
+        decimals: 2
+      }
+    },
+    lamp: {
+      gridW: 3, gridH: 2,
+      config: {
+        variable: '',
+        bits: 1,           // 显示的位数（1-32）
+        layout: 'horizontal',  // horizontal | vertical
+        color: '#00ff00',  // LED 颜色
+        showBitIndex: true // 默认开启（单个 bit 时自动隐藏）
+      }
     }
   }
   
@@ -1745,5 +1928,94 @@ onUnmounted(() => {
 
 .btn.primary:hover {
   background: var(--primary-hover);
+}
+
+/* 添加控件菜单样式 */
+.menu-section-title {
+  padding: 6px 12px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.menu-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 0;
+}
+
+/* 变量选择器样式 */
+.var-select-mixed option.var-controllable {
+  background: rgba(79, 140, 255, 0.15);
+}
+
+.var-select-mixed option.var-readonly {
+  background: rgba(255, 193, 7, 0.15);
+}
+
+/* 文本输入框 */
+.text-input {
+  flex: 1;
+  padding: 6px 10px;
+  background: var(--body-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-color);
+  font-size: 13px;
+}
+
+/* 小输入框 */
+.small-input {
+  width: 60px;
+  padding: 6px 10px;
+  background: var(--body-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-color);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* 提示文字 */
+.hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 8px;
+}
+
+/* 颜色选择器 */
+.color-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.color-input {
+  width: 40px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: transparent;
+}
+
+.color-input::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.color-input::-webkit-color-swatch {
+  border-radius: 2px;
+  border: none;
+}
+
+.color-value {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  text-transform: uppercase;
 }
 </style>
