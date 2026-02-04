@@ -60,7 +60,8 @@ public sealed class RuntimeSessionService
                         rtr = args.CANMessage.RTR,
                         data = args.CANMessage.Payload
                     } : null,
-                    timestamp = DateTime.Now.ToString("O")
+                    // 使用后端记录的时间戳，而不是广播时的时间
+                    timestamp = args.Timestamp.ToString("O")
                 };
                 await _terminal.WireTapDataAsync(data);
             }

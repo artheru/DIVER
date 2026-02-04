@@ -74,7 +74,28 @@
       @clear-console="clearCurrent"
     />
     
-    <!-- 普通日志视图 -->
+    <!-- 节点日志视图（无 WireTap 时，样式与 WireTap 的 Console 列一致） -->
+    <div v-else-if="isNodeTab" class="console-only-view">
+      <div class="console-column">
+        <div class="column-header">
+          <span class="column-title">Console</span>
+        </div>
+        <div class="column-content" ref="contentRef" @click="handleLogClick">
+          <div 
+            v-for="(parsed, idx) in parsedNodeLines" 
+            :key="idx" 
+            class="log-entry console-entry"
+            :class="{ 'error-entry': isErrorLine(parsed.raw), 'warning-entry': isWarningLine(parsed.raw) }"
+          >
+            <span v-if="parsed.time" class="entry-time">{{ parsed.time }}</span>
+            <span v-html="formatLine(parsed.message)"></span>
+          </div>
+          <div v-if="parsedNodeLines.length === 0" class="empty-log">No logs yet</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Terminal/Build 日志视图 -->
     <div v-else class="terminal-content" ref="contentRef" @click="handleLogClick">
       <div 
         v-for="(line, idx) in currentLines" 
@@ -134,6 +155,37 @@ const currentNodeHasWireTap = computed(() => {
 const currentNodeInfo = computed(() => {
   const info = nodeTabs.value.find(n => n.uuid === activeTab.value)
   return info || { uuid: activeTab.value, nodeName: activeTab.value.slice(0, 8) }
+})
+
+// 当前 Tab 是否是节点 Tab（非 terminal/build）
+const isNodeTab = computed(() => {
+  return activeTab.value !== 'terminal' && activeTab.value !== 'build'
+})
+
+// 解析后的节点日志行（分离时间戳和消息）
+interface ParsedLogLine {
+  time: string | null
+  message: string
+  raw: string
+}
+
+const parsedNodeLines = computed((): ParsedLogLine[] => {
+  return currentLines.value.map(line => {
+    // 尝试匹配时间戳格式: [HH:MM:SS.mmm] 或 [HH:MM:SS]
+    const timeMatch = line.match(/^\[(\d{2}:\d{2}:\d{2}(?:\.\d{3})?)\]\s*/)
+    if (timeMatch && timeMatch[1]) {
+      return {
+        time: timeMatch[1],
+        message: line.slice(timeMatch[0].length),
+        raw: line
+      }
+    }
+    return {
+      time: null,
+      message: line,
+      raw: line
+    }
+  })
 })
 
 // ============================================
@@ -424,5 +476,100 @@ watch(currentLines, () => {
   font-size: 10px;
   font-weight: 600;
   border-radius: 8px;
+}
+
+/* ================================
+   节点 Console 视图（无 WireTap 时）
+   样式与 WireTapLogView 的 Console 列一致
+   ================================ */
+
+.console-only-view {
+  flex: 1;
+  display: flex;
+  background: #0a0e14;
+  overflow: hidden;
+}
+
+.console-only-view .console-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.console-only-view .column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--panel-color-2);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.console-only-view .column-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.console-only-view .column-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Console 日志条目 */
+.console-only-view .log-entry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.console-only-view .console-entry {
+  display: flex;
+  gap: 6px;
+  padding: 2px 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-color);
+}
+
+.console-only-view .console-entry .entry-time {
+  flex-shrink: 0;
+  color: #64748b;
+  font-size: 10px;
+}
+
+.console-only-view .empty-log {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 20px;
+  font-style: italic;
+}
+
+/* 错误/警告条目高亮 */
+.console-only-view .log-entry.error-entry {
+  background: rgba(239, 68, 68, 0.1);
+  border-left: 3px solid #ef4444;
+  padding-left: 8px;
+  margin-left: -8px;
+  border-radius: 0;
+}
+
+.console-only-view .log-entry.warning-entry {
+  background: rgba(245, 158, 11, 0.1);
+  border-left: 3px solid #f59e0b;
+  padding-left: 8px;
+  margin-left: -8px;
+  border-radius: 0;
 }
 </style>

@@ -157,9 +157,17 @@ export const useLogStore = defineStore('logs', () => {
       nodeLogs.value.set(uuid, logs)
     }
     
-    // 添加时间戳
-    const timestamp = getShortTimestamp()
-    logs.push(`[${timestamp}] ${line}`)
+    // 检查消息是否已有时间戳（后端已添加）
+    // 格式: [HH:MM:SS.mmm] 或 [HH:MM:SS]
+    const hasTimestamp = /^\[\d{2}:\d{2}:\d{2}(?:\.\d{3})?\]/.test(line)
+    
+    if (hasTimestamp) {
+      logs.push(line)
+    } else {
+      // 兼容旧消息：添加时间戳
+      const timestamp = getShortTimestamp()
+      logs.push(`[${timestamp}] ${line}`)
+    }
     
     // 限制日志数量
     if (logs.length > MAX_LOG_LINES) {
@@ -353,6 +361,15 @@ export const useLogStore = defineStore('logs', () => {
   }
   
   /**
+   * 清空所有节点日志（用于 Start 时清空上一次运行的日志）
+   */
+  function clearAllNodeLogs() {
+    nodeLogs.value.forEach(logs => logs.length = 0)
+    nodeInfos.value.forEach(info => info.lastSeq = 0)
+    console.log('[Logs] Cleared all node logs for new run')
+  }
+  
+  /**
    * 同步节点标签与节点列表
    * @param nodes 节点列表 [{uuid, nodeName}, ...]
    */
@@ -410,6 +427,7 @@ export const useLogStore = defineStore('logs', () => {
     clearCurrent,
     clearTerminal,
     clearAll,
+    clearAllNodeLogs,
     syncNodeTabs
   }
 })

@@ -14,6 +14,7 @@ import * as runtimeApi from '@/api/runtime'
 import * as deviceApi from '@/api/device'
 import type { NodeStateSnapshot, NodeFullInfo, CartFieldMeta, VariableValue } from '@/types'
 import { useWireTapStore } from './wiretap'
+import { useLogStore } from './logs'
 
 /**
  * 应用状态枚举
@@ -219,9 +220,13 @@ export const useRuntimeStore = defineStore('runtime', () => {
       appState.value = 'starting'
       console.log('[Runtime] Starting session...')
       
-      // 清空 WireTap 日志（后端也会清空）
+      // 清空上一次运行的日志（后端也会清空）
       const wireTapStore = useWireTapStore()
       wireTapStore.clearAllLogs()
+      
+      // 清空节点日志
+      const logStore = useLogStore()
+      logStore.clearAllNodeLogs()
       
       const result = await runtimeApi.start()
       

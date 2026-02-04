@@ -306,7 +306,8 @@ public record WireTapDataEventArgs(
     byte Direction,  // 0=RX, 1=TX
     PortType PortType,
     byte[] RawData,
-    CANMessage? CANMessage  // 仅 CAN 端口有值
+    CANMessage? CANMessage,  // 仅 CAN 端口有值
+    DateTime Timestamp  // 数据接收时间（后端时间戳）
 );
 
 /// <summary>
@@ -926,9 +927,10 @@ public sealed class DIVERSession : IDisposable
         // 清空上一次运行的 WireTap 日志
         ClearAllWireTapLogs();
         
-        // 清空上一次运行的统计数据
+        // 清空上一次运行的节点日志和统计数据
         foreach (var entry in _nodes.Values)
         {
+            entry.LogBuffer.Clear();
             entry.LastStats = null;
         }
 
@@ -1325,19 +1327,44 @@ public sealed class DIVERSession : IDisposable
     {
         while (!token.IsCancellationRequested)
         {
-            foreach (var entry in _nodes.Values)
+            try
             {
-                if (entry.Handle?.IsConnected == true)
+                // 取快照避免迭代时集合被修改
+                var nodes = _nodes.Values.ToArray();
+                
+                foreach (var entry in nodes)
                 {
-                    entry.Handle.RefreshState();
-                    entry.State = entry.Handle.State;
-
-                    if (entry.Handle.IsRunning)
+                    if (token.IsCancellationRequested)
+                        break;
+                    
+                    try
                     {
-                        entry.Handle.RefreshStats();
-                        entry.Stats = entry.Handle.Stats;
+                        var handle = entry.Handle;
+                        if (handle?.IsConnected == true)
+                        {
+                            handle.RefreshState();
+                            entry.State = handle.State;
+
+                            if (handle.IsRunning)
+                            {
+                                handle.RefreshStats();
+                                entry.Stats = handle.Stats;
+                            }
+                        }
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // Handle 已被释放，忽略
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[DIVERSession] State poll error for {entry.NodeName}: {ex.Message}");
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DIVERSession] State polling loop error: {ex.Message}");
             }
 
             token.WaitHandle.WaitOne(500);
@@ -1359,13 +1386,26 @@ public sealed class DIVERSession : IDisposable
 
                 if (!_nodes.TryGetValue(kv.Key, out var entry))
                     continue;
-                if (entry.Handle == null || !entry.Handle.IsRunning)
-                    continue;
+                
+                try
+                {
+                    var handle = entry.Handle;
+                    if (handle == null || !handle.IsRunning)
+                        continue;
 
-                _upperIOPending[kv.Key] = 0;
+                    _upperIOPending[kv.Key] = 0;
 
-                var upper = SerializeUpperIO(entry);
-                entry.Handle.SendUpperIO(upper, 20);
+                    var upper = SerializeUpperIO(entry);
+                    handle.SendUpperIO(upper, 20);
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Handle 已被释放，忽略
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[DIVERSession] UpperIO error for {entry.NodeName}: {ex.Message}");
+                }
             }
         }
     }
@@ -1395,8 +1435,20 @@ public sealed class DIVERSession : IDisposable
         if (!_nodes.TryGetValue(uuid, out var entry))
             return;
 
-        entry.LogBuffer.Add(message);
-        OnNodeLog?.Invoke(uuid, message);
+        LogToNode(entry, message);
+    }
+    
+    /// <summary>
+    /// 向节点日志添加一条消息（自动添加时间戳）
+    /// </summary>
+    private void LogToNode(NodeEntry entry, string message)
+    {
+        // 添加时间戳到消息（在后端添加，而不是前端，避免批量消息时间戳相同）
+        var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+        var timestampedMessage = $"[{timestamp}] {message}";
+        
+        entry.LogBuffer.Add(timestampedMessage);
+        OnNodeLog?.Invoke(entry.UUID, timestampedMessage);
     }
 
     private void HandleFatalError(string uuid, ErrorPayload payload)
@@ -1409,8 +1461,7 @@ public sealed class DIVERSession : IDisposable
             ? $"FATAL ERROR: {payload.GetErrorString()}"
             : $"FATAL ERROR: HardFault at IL={payload.DebugInfo.ILOffset}";
         
-        entry.LogBuffer.Add(errorMsg);
-        OnNodeLog?.Invoke(uuid, errorMsg);
+        LogToNode(entry, errorMsg);
 
         // 格式化错误信息为 JSON
         var errorJson = FormatFatalErrorJson(uuid, entry, payload);
@@ -1520,6 +1571,9 @@ public sealed class DIVERSession : IDisposable
         if (!_nodes.TryGetValue(uuid, out var entry))
             return;
 
+        // 记录接收时间（在回调被触发时立即记录）
+        var timestamp = DateTime.Now;
+
         var args = new WireTapDataEventArgs(
             UUID: uuid,
             NodeName: entry.NodeName,
@@ -1527,11 +1581,12 @@ public sealed class DIVERSession : IDisposable
             Direction: direction,
             PortType: MCUSerialBridgeCLR.PortType.Serial,
             RawData: data,
-            CANMessage: null
+            CANMessage: null,
+            Timestamp: timestamp
         );
 
         // 存储日志
-        StoreWireTapLog(uuid, entry.NodeName, portIndex, direction, "Serial", data, null);
+        StoreWireTapLog(uuid, entry.NodeName, portIndex, direction, "Serial", data, null, timestamp);
 
         OnWireTapData?.Invoke(args);
     }
@@ -1544,6 +1599,9 @@ public sealed class DIVERSession : IDisposable
         if (!_nodes.TryGetValue(uuid, out var entry))
             return;
 
+        // 记录接收时间（在回调被触发时立即记录）
+        var timestamp = DateTime.Now;
+
         var args = new WireTapDataEventArgs(
             UUID: uuid,
             NodeName: entry.NodeName,
@@ -1551,11 +1609,12 @@ public sealed class DIVERSession : IDisposable
             Direction: direction,
             PortType: MCUSerialBridgeCLR.PortType.CAN,
             RawData: canMsg.ToBytes(),
-            CANMessage: canMsg
+            CANMessage: canMsg,
+            Timestamp: timestamp
         );
 
         // 存储日志
-        StoreWireTapLog(uuid, entry.NodeName, portIndex, direction, "CAN", canMsg.ToBytes(), canMsg);
+        StoreWireTapLog(uuid, entry.NodeName, portIndex, direction, "CAN", canMsg.ToBytes(), canMsg, timestamp);
 
         OnWireTapData?.Invoke(args);
     }
@@ -1563,7 +1622,7 @@ public sealed class DIVERSession : IDisposable
     /// <summary>
     /// 存储 WireTap 日志条目
     /// </summary>
-    private void StoreWireTapLog(string uuid, string nodeName, byte portIndex, byte direction, string portType, byte[] rawData, CANMessage? canMessage)
+    private void StoreWireTapLog(string uuid, string nodeName, byte portIndex, byte direction, string portType, byte[] rawData, CANMessage? canMessage, DateTime timestamp)
     {
         var logEntry = new WireTapLogEntry(
             UUID: uuid,
@@ -1573,7 +1632,7 @@ public sealed class DIVERSession : IDisposable
             PortType: portType,
             RawData: rawData,
             CANMessage: canMessage,
-            Timestamp: DateTime.Now
+            Timestamp: timestamp
         );
         
         var logs = _wireTapLogs.GetOrAdd(uuid, _ => new List<WireTapLogEntry>());
@@ -1595,28 +1654,37 @@ public sealed class DIVERSession : IDisposable
     /// </summary>
     private void DisconnectNodeOnFatalError(NodeEntry entry)
     {
-        try
+        // 先标记状态为离线，防止其他线程继续使用
+        entry.State = null;
+        entry.Stats = null;
+        
+        var handle = entry.Handle;
+        if (handle == null)
+            return;
+        
+        // 先清除引用，防止其他线程访问
+        entry.Handle = null;
+        
+        LogToNode(entry, "Disconnecting node due to fatal error...");
+        
+        // 延迟释放：在后台线程等待一小段时间再 Dispose
+        // 这是因为 fatal error 回调可能仍在 native 代码中执行，
+        // 立即 Dispose 会导致访问违规 (0xc0000005)
+        Task.Run(async () =>
         {
-            if (entry.Handle != null)
+            try
             {
-                entry.LogBuffer.Add("Disconnecting node due to fatal error...");
-                OnNodeLog?.Invoke(entry.UUID, "Disconnecting node due to fatal error...");
-
-                // 关闭连接（Dispose会断开）
-                entry.Handle.Dispose();
-                entry.Handle = null;
-
-                // 清除运行时状态
-                entry.State = null;
-                entry.Stats = null;
-
+                // 等待 native 代码完成回调处理
+                await Task.Delay(200);
+                
+                handle.Dispose();
                 Console.WriteLine($"[DIVERSession] Node {entry.NodeName} disconnected due to fatal error");
             }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[DIVERSession] Error disconnecting node {entry.NodeName}: {ex.Message}");
-        }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DIVERSession] Error disconnecting node {entry.NodeName}: {ex.Message}");
+            }
+        });
     }
 
     private string FormatFatalErrorJson(string uuid, NodeEntry entry, ErrorPayload payload)
