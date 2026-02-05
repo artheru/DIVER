@@ -62,7 +62,7 @@ public class PortDemo : LadderLogic<CartDefinition>
         request[6] = (byte)(crc & 0xFF);
         request[7] = (byte)(crc >> 8);
         
-        WriteStream(request, 0);  // Port 0
+        RunOnMCU.WriteStream(request, 0);  // Port 0
     }
     
     /// <summary>
@@ -94,7 +94,7 @@ public class PortDemo : LadderLogic<CartDefinition>
         response[23] = (byte)(crc & 0xFF);
         response[24] = (byte)(crc >> 8);
         
-        WriteStream(response, 0);  // Port 0
+        RunOnMCU.WriteStream(response, 0);  // Port 0
     }
     
     // ============================================
@@ -108,14 +108,13 @@ public class PortDemo : LadderLogic<CartDefinition>
     /// </summary>
     private void SendCANopenSDOReadStatusword()
     {
-        byte[] sdo = new byte[8];
-        sdo[0] = 0x40;  // 命令字: Initiate Upload Request
-        sdo[1] = 0x41;  // Index 低字节 (0x6041)
-        sdo[2] = 0x60;  // Index 高字节
-        sdo[3] = 0x00;  // SubIndex
-        // 字节 4-7 保留
-        
-        WriteEvent(sdo, 4, 0x601);  // Port 4, COB-ID 0x601
+        // SDO Upload Request: 命令字 0x40, Index 0x6041, SubIndex 0x00
+        RunOnMCU.WriteCANMessage(4, new CANMessage
+        {
+            ID = 0x601,
+            RTR = false,
+            Payload = new byte[] { 0x40, 0x41, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00 }
+        });
     }
     
     /// <summary>
@@ -125,14 +124,13 @@ public class PortDemo : LadderLogic<CartDefinition>
     /// </summary>
     private void SendCANopenSDOReadHeartbeatTime()
     {
-        byte[] sdo = new byte[8];
-        sdo[0] = 0x40;  // 命令字: Initiate Upload Request
-        sdo[1] = 0x17;  // Index 低字节 (0x1017)
-        sdo[2] = 0x10;  // Index 高字节
-        sdo[3] = 0x00;  // SubIndex
-        // 字节 4-7 保留
-        
-        WriteEvent(sdo, 4, 0x601);  // Port 4, COB-ID 0x601
+        // SDO Upload Request: 命令字 0x40, Index 0x1017, SubIndex 0x00
+        RunOnMCU.WriteCANMessage(4, new CANMessage
+        {
+            ID = 0x601,
+            RTR = false,
+            Payload = new byte[] { 0x40, 0x17, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00 }
+        });
     }
     
     /// <summary>
@@ -142,11 +140,13 @@ public class PortDemo : LadderLogic<CartDefinition>
     /// </summary>
     private void SendCANopenNMT()
     {
-        byte[] nmt = new byte[2];
-        nmt[0] = 0x01;  // 命令: Start Remote Node
-        nmt[1] = 0x01;  // 目标节点 ID (节点1, 0x00表示所有节点)
-        
-        WriteEvent(nmt, 4, 0x000);  // Port 4, COB-ID 0x000
+        // NMT: 0x01 = Start Remote Node, 0x01 = 目标节点 ID
+        RunOnMCU.WriteCANMessage(4, new CANMessage
+        {
+            ID = 0x000,
+            RTR = false,
+            Payload = new byte[] { 0x01, 0x01 }
+        });
     }
     
     /// <summary>
@@ -156,10 +156,13 @@ public class PortDemo : LadderLogic<CartDefinition>
     /// </summary>
     private void SendCANopenHeartbeat()
     {
-        byte[] heartbeat = new byte[1];
-        heartbeat[0] = 0x05;  // 状态: Operational
-        
-        WriteEvent(heartbeat, 4, 0x701);  // Port 4, COB-ID 0x701
+        // Heartbeat: 0x05 = Operational 状态
+        RunOnMCU.WriteCANMessage(4, new CANMessage
+        {
+            ID = 0x701,
+            RTR = false,
+            Payload = new byte[] { 0x05 }
+        });
     }
     
     // ============================================
