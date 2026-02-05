@@ -18,12 +18,19 @@
       <div class="col-action"></div>
     </div>
     
+    <!-- 颜色图例 -->
+    <div class="color-legend">
+      <span class="legend-item upper"><span class="legend-dot"></span>UpperIO</span>
+      <span class="legend-item lower"><span class="legend-dot"></span>LowerIO</span>
+    </div>
+    
     <!-- 变量列表 -->
     <div class="variable-list">
       <div 
         v-for="variable in variableList" 
         :key="variable.name"
         class="variable-row"
+        :class="{ 'upper-io': isControllable(variable.name), 'lower-io': !isControllable(variable.name) }"
       >
         <!-- 类型 -->
         <div class="col-type" :title="variable.type">
@@ -250,6 +257,36 @@ async function confirmEdit(variable: VariableValue) {
   letter-spacing: 0.5px;
 }
 
+/* 颜色图例 */
+.color-legend {
+  display: flex;
+  gap: 12px;
+  padding: 4px 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.legend-item.upper .legend-dot {
+  background: rgba(34, 197, 94, 0.6);
+}
+
+.legend-item.lower .legend-dot {
+  background: rgba(251, 146, 60, 0.6);
+}
+
 /* 变量列表 */
 .variable-list {
   flex: 1;
@@ -267,7 +304,25 @@ async function confirmEdit(variable: VariableValue) {
 }
 
 .variable-row:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* UpperIO (可写) - 绿色背景 */
+.variable-row.upper-io {
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.variable-row.upper-io:hover {
+  background: rgba(34, 197, 94, 0.25);
+}
+
+/* LowerIO (只读) - 橙色背景 */
+.variable-row.lower-io {
+  background: rgba(251, 146, 60, 0.15);
+}
+
+.variable-row.lower-io:hover {
+  background: rgba(251, 146, 60, 0.25);
 }
 
 /* 列样式 */

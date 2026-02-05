@@ -757,9 +757,11 @@ async function handleBuild() {
       await filesStore.loadFileTree()
       filesStore.notifyBuildComplete()
       await filesStore.refreshOpenTabs()
+      // 先重新编程所有节点，然后再刷新变量和字段元信息
+      // 否则会获取到旧的字段定义
+      await reprogramAllNodes()
       await runtimeStore.refreshVariables()
       await runtimeStore.refreshFieldMetas()
-      await reprogramAllNodes()
     } else {
       uiStore.error('Build Failed', result.error || 'Unknown error')
     }

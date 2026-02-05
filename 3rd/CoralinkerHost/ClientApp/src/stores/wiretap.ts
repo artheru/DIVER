@@ -9,7 +9,7 @@
  */
 
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, triggerRef } from 'vue'
 import { WireTapFlags, type WireTapDataEvent, type WireTapLogEntry, type CANMessageData } from '@/types'
 import * as deviceApi from '@/api/device'
 
@@ -88,6 +88,7 @@ export const useWireTapStore = defineStore('wiretap', () => {
         portLogs: new Map()
       }
       nodeStates.value.set(uuid, state)
+      triggerRef(nodeStates)
     } else if (nodeName) {
       state.nodeName = nodeName
     }
@@ -194,6 +195,9 @@ export const useWireTapStore = defineStore('wiretap', () => {
             if (portName) existingLog.portName = portName
           }
         }
+        
+        // 触发 Vue 响应式更新（Map 内部修改不会自动触发）
+        triggerRef(nodeStates)
       }
       
       return result.ok
@@ -243,6 +247,7 @@ export const useWireTapStore = defineStore('wiretap', () => {
     
     // 确保端口日志存在
     let portLog = state.portLogs.get(event.portIndex)
+    let newPortLog = false
     if (!portLog) {
       portLog = {
         portIndex: event.portIndex,
@@ -251,6 +256,7 @@ export const useWireTapStore = defineStore('wiretap', () => {
         entries: []
       }
       state.portLogs.set(event.portIndex, portLog)
+      newPortLog = true
     }
     
     // 处理 CAN 消息（解码 data 字段）
@@ -282,6 +288,11 @@ export const useWireTapStore = defineStore('wiretap', () => {
     // 限制日志数量
     if (portLog.entries.length > MAX_LOG_ENTRIES) {
       portLog.entries.splice(0, portLog.entries.length - MAX_LOG_ENTRIES)
+    }
+    
+    // 触发响应式更新
+    if (newPortLog) {
+      triggerRef(nodeStates)
     }
   }
   
@@ -325,6 +336,7 @@ export const useWireTapStore = defineStore('wiretap', () => {
    */
   function removeNode(uuid: string) {
     nodeStates.value.delete(uuid)
+    triggerRef(nodeStates)
   }
   
   /**
@@ -340,10 +352,15 @@ export const useWireTapStore = defineStore('wiretap', () => {
     }
     
     // 移除不存在的节点
+    let removed = false
     for (const uuid of nodeStates.value.keys()) {
       if (!currentUuids.has(uuid)) {
         nodeStates.value.delete(uuid)
+        removed = true
       }
+    }
+    if (removed) {
+      triggerRef(nodeStates)
     }
   }
   
@@ -479,6 +496,9 @@ export const useWireTapStore = defineStore('wiretap', () => {
         }
         console.log(`[WireTap] Loaded ${totalLogs} log entries from backend`)
       }
+      
+      // 触发响应式更新
+      triggerRef(nodeStates)
     } catch (error) {
       console.error('[WireTap] Failed to load configs from backend:', error)
     }
@@ -489,6 +509,7 @@ export const useWireTapStore = defineStore('wiretap', () => {
    */
   function reset() {
     nodeStates.value.clear()
+    triggerRef(nodeStates)
   }
   
   return {

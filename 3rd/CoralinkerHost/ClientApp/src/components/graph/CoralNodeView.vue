@@ -446,7 +446,8 @@ async function updateLogicName(newLogic: string) {
       console.log(`[CoralNode] Programmed ${props.id} with ${newLogic}, size: ${result.programSize}`)
       // 更新 isProgrammed 状态
       updateNodeData(props.id, { isProgrammed: true })
-      // 刷新字段元信息，更新遥控器绑定的可用变量列表
+      // 刷新变量列表和字段元信息，更新遥控器绑定的可用变量列表
+      await runtimeStore.refreshVariables()
       await runtimeStore.refreshFieldMetas()
       // 持久化到磁盘（保存 logicName 和编译后的程序）
       await projectStore.saveProject({ silent: true })
