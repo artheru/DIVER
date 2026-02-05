@@ -5,7 +5,7 @@ namespace CoralinkerHost.Services;
 
 /// <summary>
 /// 变量和节点状态推送服务
-/// 每 200ms 推送变量快照，每 1000ms 推送节点状态
+/// 每 200ms 推送变量快照，每 500ms 推送节点状态（与下位机轮询频率一致）
 /// </summary>
 public sealed class VariableInspectorPushService : BackgroundService
 {
@@ -38,8 +38,8 @@ public sealed class VariableInspectorPushService : BackgroundService
                 // ignore polling errors
             }
 
-            // 每 1000ms 推送节点状态
-            if ((DateTime.UtcNow - lastNodePush).TotalMilliseconds >= 1000)
+            // 每 500ms 推送节点状态（与下位机轮询频率一致）
+            if ((DateTime.UtcNow - lastNodePush).TotalMilliseconds >= 500)
             {
                 try
                 {

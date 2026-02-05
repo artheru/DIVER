@@ -2,7 +2,7 @@
 setlocal
 
 set PDN=CORAL-NODE-V2.0
-set SCONS_OPTS=PDN=%PDN% ENABLE_DIVER_RUNTIME=1 -j 12 debug=1
+set SCONS_OPTS=PDN=%PDN% BUILD_MCU=1 ENABLE_DIVER_RUNTIME=1 -j 12 debug=1
 set TESTDIVER_EXE=.\build\TestDIVER.exe
 set TESTCS_EXE=.\build\TestCS.exe
 set TESTBL_EXE=.\build\TestBL.exe

@@ -9,7 +9,7 @@
 <template>
   <div 
     class="switch-widget" 
-    :class="{ focused: focused }"
+    :class="{ focused: focused, 'touch-mode': isTouchDevice }"
     tabindex="0" 
     @focus="onFocus" 
     @blur="onBlur"
@@ -29,12 +29,15 @@
         </template>
       </div>
       
-      <span 
-        v-if="config.keyToggle"
-        class="key-badge" 
-        :class="{ active: isKeyPressed }"
-      >{{ formatKey(config.keyToggle) }}</span>
-      <span v-else class="key-badge empty">·</span>
+      <!-- 按键绑定（触摸设备不显示） -->
+      <template v-if="!isTouchDevice">
+        <span 
+          v-if="config.keyToggle"
+          class="key-badge" 
+          :class="{ active: isKeyPressed }"
+        >{{ formatKey(config.keyToggle) }}</span>
+        <span v-else class="key-badge empty">·</span>
+      </template>
     </div>
     
     <!-- 变量显示 -->
@@ -47,6 +50,12 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+
+// 检测是否是触摸设备
+const isTouchDevice = ref(false)
+if (typeof window !== 'undefined') {
+  isTouchDevice.value = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+}
 
 interface SwitchConfig {
   variable?: string
@@ -92,6 +101,12 @@ function onBlur() {
 }
 
 function onKeyDown(event: KeyboardEvent) {
+  // 如果焦点在输入框中，不处理键盘事件
+  const activeEl = document.activeElement
+  if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
+    return
+  }
+  
   if (event.key === props.config.keyToggle && props.config.keyToggle) {
     event.preventDefault()
     if (!isKeyPressed.value) {

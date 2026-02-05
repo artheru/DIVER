@@ -13,6 +13,8 @@ import { ref, computed } from 'vue'
 import * as runtimeApi from '@/api/runtime'
 import * as deviceApi from '@/api/device'
 import type { NodeStateSnapshot, NodeFullInfo, CartFieldMeta, VariableValue } from '@/types'
+import { useWireTapStore } from './wiretap'
+import { useLogStore } from './logs'
 
 /**
  * 应用状态枚举
@@ -218,6 +220,14 @@ export const useRuntimeStore = defineStore('runtime', () => {
       appState.value = 'starting'
       console.log('[Runtime] Starting session...')
       
+      // 清空上一次运行的日志（后端也会清空）
+      const wireTapStore = useWireTapStore()
+      wireTapStore.clearAllLogs()
+      
+      // 清空节点日志
+      const logStore = useLogStore()
+      logStore.clearAllNodeLogs()
+      
       const result = await runtimeApi.start()
       
       if (result.ok) {
@@ -228,8 +238,8 @@ export const useRuntimeStore = defineStore('runtime', () => {
         // 刷新变量列表
         await refreshVariables()
         
-        // 启动状态轮询
-        startStatePolling()
+        // 运行时不需要启动 HTTP 轮询，SignalR 会推送节点状态（每 1 秒）和变量（每 200ms）
+        // startStatePolling() - 已移除，改用 SignalR 推送
         
         console.log(`[Runtime] Started: ${result.successNodes}/${result.totalNodes} nodes`)
         return { ok: true }
@@ -267,8 +277,8 @@ export const useRuntimeStore = defineStore('runtime', () => {
       appState.value = 'stopping'
       console.log('[Runtime] Stopping session...')
       
-      // 停止状态轮询
-      stopStatePolling()
+      // 运行时使用 SignalR 推送，不需要停止 HTTP 轮询
+      // stopStatePolling() - 已移除
       
       await runtimeApi.stop()
       
@@ -316,6 +326,10 @@ export const useRuntimeStore = defineStore('runtime', () => {
     try {
       const result = await runtimeApi.getAllVariables()
       if (result.ok) {
+        // 清除旧变量，完全替换（避免节点重命名后旧变量残留）
+        variables.value.clear()
+        variableControllable.value.clear()
+        
         for (const v of result.variables) {
           variables.value.set(v.name, {
             name: v.name,
@@ -476,6 +490,20 @@ export const useRuntimeStore = defineStore('runtime', () => {
     editingVarName.value = null
   }
   
+  /**
+   * 清空节点数据（用于新建项目后）
+   * 保持连接状态，只清空节点相关数据
+   */
+  function clearNodeData() {
+    nodeStates.value.clear()
+    nodeInfos.value.clear()
+    variables.value.clear()
+    variableControllable.value.clear()
+    fieldMetas.value = []
+    editingVarName.value = null
+    console.log('[Runtime] Node data cleared')
+  }
+  
   return {
     // 状态
     appState,
@@ -516,6 +544,7 @@ export const useRuntimeStore = defineStore('runtime', () => {
     setEditingVar,
     startStatePolling,
     stopStatePolling,
-    reset
+    reset,
+    clearNodeData
   }
 })

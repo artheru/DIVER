@@ -458,6 +458,108 @@ public static class ApiRoutes
         });
 
         // ============================================
+        // WireTap API
+        // ============================================
+
+        // 设置节点的 WireTap 配置
+        app.MapPost("/api/node/{uuid}/wiretap", async (string uuid, HttpRequest req, CancellationToken ct) =>
+        {
+            var payload = await req.ReadFromJsonAsync<WireTapSetRequest>(cancellationToken: ct);
+            if (payload == null)
+                return Results.BadRequest(new { ok = false, error = "Invalid request" });
+
+            var result = DIVERSession.Instance.SetNodeWireTap(uuid, payload.PortIndex, (WireTapFlags)payload.Flags);
+            return JsonHelper.Json(new { ok = result });
+        });
+
+        // 获取节点的 WireTap 配置
+        app.MapGet("/api/node/{uuid}/wiretap", (string uuid) =>
+        {
+            var config = DIVERSession.Instance.GetNodeWireTapConfig(uuid);
+            if (config == null)
+                return Results.NotFound(new { ok = false, error = "Node not found" });
+
+            // 转换为前端格式
+            var portConfigs = new List<object>();
+            for (int i = 0; i < config.Length; i++)
+            {
+                if (config[i] != WireTapFlags.None)
+                {
+                    portConfigs.Add(new { portIndex = i, flags = (int)config[i] });
+                }
+            }
+
+            return JsonHelper.Json(new { ok = true, config = portConfigs });
+        });
+
+        // 获取所有节点的 WireTap 配置
+        app.MapGet("/api/wiretap/configs", () =>
+        {
+            var allConfigs = DIVERSession.Instance.GetAllWireTapConfigs();
+            return JsonHelper.Json(new { ok = true, configs = allConfigs });
+        });
+        
+        // 获取节点的 WireTap 日志
+        app.MapGet("/api/node/{uuid}/wiretap/logs", (string uuid, int? afterIndex, int? maxCount) =>
+        {
+            var (entries, latestIndex) = DIVERSession.Instance.GetNodeWireTapLogs(
+                uuid, 
+                afterIndex, 
+                maxCount ?? 1000
+            );
+            
+            // 转换为前端格式
+            var logs = entries.Select(e => new
+            {
+                uuid = e.UUID,
+                nodeName = e.NodeName,
+                portIndex = e.PortIndex,
+                direction = e.Direction,
+                portType = e.PortType,
+                rawData = e.RawData,
+                canMessage = e.CANMessage != null ? new
+                {
+                    id = e.CANMessage.ID,
+                    dlc = e.CANMessage.DLC,
+                    rtr = e.CANMessage.RTR,
+                    data = e.CANMessage.Payload
+                } : null,
+                timestamp = e.Timestamp.ToString("HH:mm:ss.fff")
+            }).ToArray();
+            
+            return JsonHelper.Json(new { ok = true, entries = logs, latestIndex });
+        });
+        
+        // 获取所有节点的 WireTap 日志
+        app.MapGet("/api/wiretap/logs", () =>
+        {
+            var allLogs = DIVERSession.Instance.GetAllWireTapLogs();
+            
+            var result = allLogs.ToDictionary(
+                kv => kv.Key,
+                kv => kv.Value.Select(e => new
+                {
+                    uuid = e.UUID,
+                    nodeName = e.NodeName,
+                    portIndex = e.PortIndex,
+                    direction = e.Direction,
+                    portType = e.PortType,
+                    rawData = e.RawData,
+                    canMessage = e.CANMessage != null ? new
+                    {
+                        id = e.CANMessage.ID,
+                        dlc = e.CANMessage.DLC,
+                        rtr = e.CANMessage.RTR,
+                        data = e.CANMessage.Payload
+                    } : null,
+                    timestamp = e.Timestamp.ToString("HH:mm:ss.fff")
+                }).ToArray()
+            );
+            
+            return JsonHelper.Json(new { ok = true, logs = result });
+        });
+
+        // ============================================
         // 变量 API
         // ============================================
 
@@ -702,6 +804,9 @@ public static class ApiRoutes
         {
             try
             {
+                // 先保存当前状态到磁盘，确保 controlLayout 等最新数据被导出
+                store.SaveToDisk();
+                
                 var zipPath = Path.Combine(Path.GetTempPath(), $"coralinker-export-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
 
                 using (var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create))
@@ -846,9 +951,10 @@ public sealed record NewInputRequest(string Name, string? Template);
 public sealed record NodeProbeRequest(string McuUri);
 public sealed record NodeConfigureRequest(string? NodeName, PortConfigItem[]? PortConfigs, JsonObject? ExtraInfo);
 public sealed record NodeProgramRequest(string LogicName);
-public sealed record PortConfigItem(string Type, uint Baud, uint? ReceiveFrameMs, uint? RetryTimeMs);
+public sealed record PortConfigItem(string Type, string? Name, uint Baud, uint? ReceiveFrameMs, uint? RetryTimeMs);
 public sealed record SetVariableRequest(string Name, object? Value, string? TypeHint);
 public sealed record NodesImportRequest(Dictionary<string, NodeExportData> Nodes);
+public sealed record WireTapSetRequest(byte PortIndex, int Flags);
 
 internal static class ValueParser
 {

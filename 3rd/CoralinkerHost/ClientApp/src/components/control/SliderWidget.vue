@@ -9,7 +9,7 @@
 <template>
   <div 
     class="slider-widget" 
-    :class="[orientation, { focused: focused }]" 
+    :class="[orientation, { focused: focused, 'touch-mode': isTouchDevice }]" 
     tabindex="0" 
     @focus="onFocus" 
     @blur="onBlur"
@@ -18,16 +18,23 @@
     <!-- 滑块主体 -->
     <div class="slider-body">
       <span 
+        v-if="!isTouchDevice"
         class="key-badge" 
         :class="{ active: pressedKeys.has(config.keyDecrease || ''), empty: !config.keyDecrease }"
       >{{ formatKey(config.keyDecrease) || '-' }}</span>
       
-      <div class="slider-track" ref="trackRef" @mousedown="startDrag">
+      <div 
+        class="slider-track" 
+        ref="trackRef" 
+        @mousedown="startDrag"
+        @touchstart.prevent="startTouchDrag"
+      >
         <div class="slider-fill" :style="fillStyle"></div>
         <div class="slider-thumb" :style="thumbStyle"></div>
       </div>
       
       <span 
+        v-if="!isTouchDevice"
         class="key-badge" 
         :class="{ active: pressedKeys.has(config.keyIncrease || ''), empty: !config.keyIncrease }"
       >{{ formatKey(config.keyIncrease) || '+' }}</span>
@@ -44,12 +51,19 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
+// 检测是否是触摸设备
+const isTouchDevice = ref(false)
+if (typeof window !== 'undefined') {
+  isTouchDevice.value = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+}
+
 interface SliderConfig {
   variable?: string
   orientation?: 'horizontal' | 'vertical'
   min?: number
   max?: number
   autoReturn?: boolean
+  returnTo?: number  // 自动回退目标位置（百分比 0-100，默认 50）
   logarithmic?: boolean
   keyIncrease?: string
   keyDecrease?: string
@@ -86,6 +100,13 @@ const min = computed(() => props.config.min ?? 0)
 const max = computed(() => props.config.max ?? 1)
 const moveSpeed = computed(() => (props.config.moveSpeed ?? 100) / 100)
 const returnSpeed = computed(() => (props.config.returnSpeed ?? 200) / 100)
+
+// 回退目标位置（ratio 0-1，默认 0.5 即 50%）
+const returnToRatio = computed(() => {
+  // returnTo 是百分比 0-100，转换为 ratio 0-1
+  const percent = props.config.returnTo ?? 50
+  return Math.max(0, Math.min(1, percent / 100))
+})
 
 const currentValue = computed(() => {
   const range = max.value - min.value
@@ -139,6 +160,12 @@ function onBlur() {
 }
 
 function onKeyDown(event: KeyboardEvent) {
+  // 如果焦点在输入框中，不处理键盘事件
+  const activeEl = document.activeElement
+  if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
+    return
+  }
+  
   const key = event.key
   const { keyIncrease, keyDecrease } = props.config
   
@@ -185,15 +212,17 @@ function animationLoop(currentTime: number) {
   const speed = moveSpeed.value * deltaTime
   const retSpeed = returnSpeed.value * deltaTime
   
+  const targetRatio = returnToRatio.value
+  
   if (isIncrease && !isDecrease) {
     currentRatio.value = Math.min(1, currentRatio.value + speed)
   } else if (isDecrease && !isIncrease) {
     currentRatio.value = Math.max(0, currentRatio.value - speed)
   } else if (!dragging.value && autoReturn && !isIncrease && !isDecrease) {
-    if (Math.abs(currentRatio.value - 0.5) > 0.001) {
-      currentRatio.value += currentRatio.value < 0.5 
-        ? Math.min(retSpeed, 0.5 - currentRatio.value) 
-        : -Math.min(retSpeed, currentRatio.value - 0.5)
+    if (Math.abs(currentRatio.value - targetRatio) > 0.001) {
+      currentRatio.value += currentRatio.value < targetRatio 
+        ? Math.min(retSpeed, targetRatio - currentRatio.value) 
+        : -Math.min(retSpeed, currentRatio.value - targetRatio)
     }
   }
   
@@ -201,7 +230,7 @@ function animationLoop(currentTime: number) {
   emitChangeIfNeeded()
   
   const hasActiveKeys = pressedKeys.value.size > 0
-  const needReturn = autoReturn && Math.abs(currentRatio.value - 0.5) > 0.001
+  const needReturn = autoReturn && Math.abs(currentRatio.value - targetRatio) > 0.001
   
   if (hasActiveKeys || needReturn) {
     animationFrameId = requestAnimationFrame(animationLoop)
@@ -212,14 +241,14 @@ function animationLoop(currentTime: number) {
 
 function startDrag(event: MouseEvent) {
   dragging.value = true
-  updateValue(event)
+  updateValueFromMouse(event)
   document.addEventListener('mousemove', onDrag)
   document.addEventListener('mouseup', stopDrag)
 }
 
 function onDrag(event: MouseEvent) {
   if (!dragging.value) return
-  updateValue(event)
+  updateValueFromMouse(event)
 }
 
 function stopDrag() {
@@ -232,7 +261,33 @@ function stopDrag() {
   }
 }
 
-function updateValue(event: MouseEvent) {
+// 触摸事件处理
+function startTouchDrag(event: TouchEvent) {
+  dragging.value = true
+  updateValueFromTouch(event)
+  document.addEventListener('touchmove', onTouchDrag, { passive: false })
+  document.addEventListener('touchend', stopTouchDrag)
+  document.addEventListener('touchcancel', stopTouchDrag)
+}
+
+function onTouchDrag(event: TouchEvent) {
+  if (!dragging.value) return
+  event.preventDefault()
+  updateValueFromTouch(event)
+}
+
+function stopTouchDrag() {
+  dragging.value = false
+  document.removeEventListener('touchmove', onTouchDrag)
+  document.removeEventListener('touchend', stopTouchDrag)
+  document.removeEventListener('touchcancel', stopTouchDrag)
+  
+  if (props.config.autoReturn) {
+    startAnimationLoop()
+  }
+}
+
+function updateValueFromMouse(event: MouseEvent) {
   if (!trackRef.value) return
   const rect = trackRef.value.getBoundingClientRect()
   let newRatio: number
@@ -241,6 +296,22 @@ function updateValue(event: MouseEvent) {
     newRatio = (event.clientX - rect.left) / rect.width
   } else {
     newRatio = 1 - (event.clientY - rect.top) / rect.height
+  }
+  
+  currentRatio.value = Math.max(0, Math.min(1, newRatio))
+  emitChangeIfNeeded()
+}
+
+function updateValueFromTouch(event: TouchEvent) {
+  const touch = event.touches[0]
+  if (!trackRef.value || !touch) return
+  const rect = trackRef.value.getBoundingClientRect()
+  let newRatio: number
+  
+  if (orientation.value === 'horizontal') {
+    newRatio = (touch.clientX - rect.left) / rect.width
+  } else {
+    newRatio = 1 - (touch.clientY - rect.top) / rect.height
   }
   
   currentRatio.value = Math.max(0, Math.min(1, newRatio))
@@ -258,7 +329,8 @@ function emitChangeIfNeeded() {
 }
 
 onMounted(() => {
-  currentRatio.value = 0.5
+  // 初始值设为回退目标位置
+  currentRatio.value = returnToRatio.value
   document.addEventListener('keydown', onKeyDown)
   document.addEventListener('keyup', onKeyUp)
 })
@@ -268,12 +340,16 @@ onUnmounted(() => {
   document.removeEventListener('keyup', onKeyUp)
   document.removeEventListener('mousemove', onDrag)
   document.removeEventListener('mouseup', stopDrag)
+  document.removeEventListener('touchmove', onTouchDrag)
+  document.removeEventListener('touchend', stopTouchDrag)
+  document.removeEventListener('touchcancel', stopTouchDrag)
   stopAnimationLoop()
 })
 </script>
 
 <style scoped>
 .slider-widget {
+  touch-action: none; /* 禁止浏览器默认触摸行为 */
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -288,6 +364,11 @@ onUnmounted(() => {
 
 .slider-widget.focused {
   box-shadow: inset 0 0 0 2px var(--primary);
+}
+
+/* 触摸模式：滑轨占满宽度 */
+.slider-widget.touch-mode .slider-track {
+  flex: 1;
 }
 
 /* 滑块主体 */

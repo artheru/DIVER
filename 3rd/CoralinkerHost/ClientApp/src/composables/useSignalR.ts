@@ -18,6 +18,8 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import * as signalR from '@microsoft/signalr'
 import { useLogStore } from '@/stores/logs'
 import { useRuntimeStore } from '@/stores/runtime'
+import { useWireTapStore } from '@/stores/wiretap'
+import type { WireTapDataEvent } from '@/types'
 
 /** SignalR 连接状态 */
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
@@ -94,6 +96,9 @@ const error = ref<string | null>(null)
 /** 是否已注册事件处理器（防止重复注册） */
 let eventHandlersRegistered = false
 
+/** 引用计数（跟踪有多少组件正在使用连接） */
+let connectionRefCount = 0
+
 export function useSignalR() {
   // ============================================
   // Store 引用
@@ -101,6 +106,7 @@ export function useSignalR() {
   
   const logStore = useLogStore()
   const runtimeStore = useRuntimeStore()
+  const wireTapStore = useWireTapStore()
   
   // ============================================
   // 方法
@@ -146,10 +152,12 @@ export function useSignalR() {
           console.log('[SignalR] Reconnecting...')
         })
         
-        connection.value.onreconnected(() => {
+        connection.value.onreconnected(async () => {
           state.value = 'connected'
           runtimeStore.setBackendAvailable(true)
           console.log('[SignalR] Reconnected')
+          // 重连后恢复 WireTap 配置
+          await wireTapStore.loadFromBackend()
         })
         
         connection.value.onclose((err) => {
@@ -173,6 +181,9 @@ export function useSignalR() {
       
       // 连接成功后加载历史日志
       await loadHistoryLogs()
+      
+      // 加载 WireTap 配置（恢复刷新前的状态）
+      await wireTapStore.loadFromBackend()
       
     } catch (err) {
       state.value = 'disconnected'
@@ -274,6 +285,12 @@ export function useSignalR() {
         }
       })
     })
+
+    // WireTap 数据事件
+    // 格式: wireTapData(data: WireTapDataEvent)
+    connection.value.on('wireTapData', (data: WireTapDataEvent) => {
+      wireTapStore.handleWireTapData(data)
+    })
   }
   
   /**
@@ -327,16 +344,20 @@ export function useSignalR() {
   // 生命周期
   // ============================================
   
-  // 组件挂载时自动连接
+  // 组件挂载时自动连接（使用引用计数）
   onMounted(() => {
+    connectionRefCount++
     connect().catch(() => {
       // 连接失败时静默处理，UI 会显示状态
     })
   })
   
-  // 组件卸载时断开连接
+  // 组件卸载时减少引用计数，只有当计数为 0 时才断开连接
+  // 注意：通常不需要断开，因为 SignalR 连接是全局的
   onUnmounted(() => {
-    disconnect()
+    connectionRefCount--
+    // 不再自动断开连接，保持全局连接活跃
+    // 如果需要断开，可以手动调用 disconnect()
   })
   
   return {

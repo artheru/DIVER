@@ -33,7 +33,15 @@
       class="node-handle handle-out handle-visible"
     />
 
-    <!-- 标题栏 -->
+    <!-- 删除按钮 - 左上角 -->
+    <button
+      v-if="canEdit"
+      class="delete-btn"
+      @click.stop="confirmDelete"
+      title="Delete Node"
+    >×</button>
+
+    <!-- 标题栏：名称 + 升级 + 状态 -->
     <div class="node-header" @click="toggleCollapse">
       <span class="collapse-btn">{{ isCollapsed ? '▶' : '▼' }}</span>
       <input
@@ -45,10 +53,14 @@
         @keyup.enter="($event.target as HTMLInputElement)?.blur()"
       />
       <span v-else class="node-name">{{ data.nodeName }}</span>
-    </div>
-
-    <!-- 状态行：只显示运行状态 -->
-    <div class="node-status-row">
+      <!-- 升级按钮 -->
+      <button
+        v-if="canEdit"
+        class="upgrade-btn"
+        @click.stop="openUpgradeDialog"
+        :disabled="isProbing"
+        title="Firmware Upgrade"
+      >{{ isProbing ? '...' : '⬆' }}</button>
       <span class="status-badge" :class="runStateBadgeClass">
         {{ runStateText }}
       </span>
@@ -95,33 +107,25 @@
         </div>
       </div>
 
-      <!-- Port Stats (统计和 IO 状态) -->
-      <PortStatsView
-        v-if="data.isConnected"
-        :stats="nodeStats"
+      <!-- Port View (统一显示端口配置和统计) -->
+      <PortView
+        v-if="hasPortsToShow"
+        :uuid="id"
         :port-configs="portConfigs"
-        :digital-input-count="digitalInputCount"
-        :digital-output-count="digitalOutputCount"
+        :stats="nodeStats"
+        :can-edit="canEdit"
+        :app-state="appState"
+        @edit="openPortEditor"
       />
 
-      <!-- Port Config (可编辑配置) -->
-      <div class="section" v-if="hasPortsToShow && canEdit">
-        <div class="section-title">
-          PORT CONFIG
-          <span class="edit-btn" @click="openPortEditor">Edit</span>
-        </div>
-        <div class="port-list">
-          <div v-for="(port, idx) in displayPorts" :key="idx" class="port-item">
-            <span class="port-index">Port {{ idx }}</span>
-            <span class="port-type" :class="port.type.toLowerCase()">{{ port.type }}</span>
-            <span class="port-name">{{ port.name || `Port${idx}` }}</span>
-            <span class="port-baud">{{ port.baud || '-' }}</span>
-            <span class="port-extra" v-if="port.baud">
-              {{ port.type === 'Serial' ? `FrameMs=${port.receiveFrameMs || 0}` : `RetryMs=${port.retryTimeMs || 10}` }}
-            </span>
-          </div>
-        </div>
-      </div>
+      <!-- IO View (LED 样式) -->
+      <IOView
+        v-if="hasIO"
+        :digital-inputs="nodeStats?.digitalInputs ?? 0"
+        :digital-outputs="nodeStats?.digitalOutputs ?? 0"
+        :input-count="digitalInputCount"
+        :output-count="digitalOutputCount"
+      />
 
       <!-- LowerIO Variables -->
       <div class="section" v-if="lowerIOVariables.length > 0">
@@ -143,19 +147,29 @@
       :ports="portDescriptors"
       @update:model-value="updatePortConfigs"
     />
+    
+    <!-- 固件升级对话框 -->
+    <UpgradeDialog
+      v-model:show="showUpgradeDialog"
+      :mcu-uri="data.mcuUri"
+      :current-version="probeVersion"
+      @complete="handleUpgradeComplete"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
-import { NSelect } from 'naive-ui'
-import { useRuntimeStore, useFilesStore } from '@/stores'
+import { NSelect, useDialog } from 'naive-ui'
+import { useRuntimeStore, useFilesStore, useProjectStore } from '@/stores'
 import { storeToRefs } from 'pinia'
-import { getLogicList, programNode } from '@/api/device'
-import type { PortConfig, PortDescriptor, RuntimeStats, LogicInfo, LayoutInfo } from '@/types'
+import { getLogicList, programNode, configureNode, removeNode, probeNode } from '@/api/device'
+import type { PortConfig, RuntimeStats, LogicInfo, LayoutInfo, VersionInfo } from '@/types'
 import PortConfigEdit from './PortConfigEdit.vue'
-import PortStatsView from './PortStatsView.vue'
+import PortView from './PortView.vue'
+import IOView from './IOView.vue'
+import UpgradeDialog from './UpgradeDialog.vue'
 
 // Props from vue-flow
 const props = defineProps<{
@@ -176,15 +190,21 @@ const props = defineProps<{
 
 // vue-flow hook
 import { useVueFlow } from '@vue-flow/core'
-const { updateNodeData } = useVueFlow()
+const { updateNodeData, removeNodes } = useVueFlow()
+
+// Dialog
+const dialog = useDialog()
 
 // Runtime store
 const runtimeStore = useRuntimeStore()
-const { isRunning, nodeStates } = storeToRefs(runtimeStore)
+const { isRunning, appState, nodeStates } = storeToRefs(runtimeStore)
 
 // Files store (用于监听 buildVersion)
 const filesStore = useFilesStore()
 const { buildVersion } = storeToRefs(filesStore)
+
+// Project store (用于保存)
+const projectStore = useProjectStore()
 
 // ============================================
 // 本地状态
@@ -197,6 +217,11 @@ const localPortConfigs = ref<PortConfig[]>(props.data.ports || [])
 
 // 编辑器状态
 const showPortEdit = ref(false)
+
+// 升级对话框状态
+const showUpgradeDialog = ref(false)
+const isProbing = ref(false)
+const probeVersion = ref<VersionInfo | undefined>(undefined)
 
 // Logic 列表
 const logicList = ref<LogicInfo[]>([])
@@ -251,26 +276,28 @@ const parsedUri = computed(() => {
 })
 
 // 端口配置
-const portConfigs = computed(() => props.data.ports || [])
 const portDescriptors = computed(() => props.data.layout?.ports || [])
 
-// 是否有端口可显示（优先显示配置，否则显示 layout 中的描述）
-const hasPortsToShow = computed(() => portConfigs.value.length > 0 || portDescriptors.value.length > 0)
-
-// 用于显示的端口列表（合并配置和 layout 信息）
-const displayPorts = computed(() => {
-  if (portConfigs.value.length > 0) {
-    return portConfigs.value
+// 端口配置（优先使用现有配置，否则从 layout 生成默认配置）
+const portConfigs = computed(() => {
+  if (props.data.ports && props.data.ports.length > 0) {
+    return props.data.ports
   }
-  // 如果没有配置但有 layout，显示 layout 中的端口（无配置参数）
+  // 从 layout 生成默认配置
   return portDescriptors.value.map(p => ({
     type: p.type,
     name: p.name,
-    baud: 0,  // 未配置
-    receiveFrameMs: 0,
-    retryTimeMs: 0
+    baud: p.type?.toLowerCase() === 'can' ? 1000000 : 115200,
+    receiveFrameMs: p.type?.toLowerCase() === 'serial' ? 0 : undefined,
+    retryTimeMs: p.type?.toLowerCase() === 'can' ? 10 : undefined
   }))
 })
+
+// 是否有端口可显示
+const hasPortsToShow = computed(() => portConfigs.value.length > 0)
+
+// 是否有 IO
+const hasIO = computed(() => digitalInputCount.value > 0 || digitalOutputCount.value > 0)
 
 // Logic 下拉选项
 const logicOptions = computed(() => 
@@ -309,13 +336,98 @@ const digitalOutputCount = computed(() => {
 // 方法
 // ============================================
 
+/**
+ * 打开升级对话框（先 Probe 获取当前版本）
+ */
+async function openUpgradeDialog() {
+  if (isProbing.value) return
+  
+  isProbing.value = true
+  probeVersion.value = undefined
+  
+  try {
+    // Probe 获取当前版本信息
+    const result = await probeNode(props.data.mcuUri)
+    if (result.ok && result.version) {
+      probeVersion.value = result.version
+    }
+    // 无论 Probe 是否成功都打开对话框
+    showUpgradeDialog.value = true
+  } catch (error) {
+    console.error('[CoralNode] Probe failed:', error)
+    // 即使失败也打开对话框，只是没有版本信息
+    showUpgradeDialog.value = true
+  } finally {
+    isProbing.value = false
+  }
+}
+
+/**
+ * 升级完成回调
+ */
+function handleUpgradeComplete() {
+  showUpgradeDialog.value = false
+  // 刷新节点信息
+  runtimeStore.refreshNodes()
+}
+
+function confirmDelete() {
+  dialog.warning({
+    title: 'Delete Node',
+    content: `Are you sure you want to delete "${props.data.nodeName}"?`,
+    positiveText: 'Delete',
+    negativeText: 'Cancel',
+    onPositiveClick: async () => {
+      await deleteNode()
+    }
+  })
+}
+
+async function deleteNode() {
+  try {
+    const result = await removeNode(props.id)
+    if (result.ok) {
+      console.log(`[CoralNode] Node deleted: ${props.id}`)
+      // 从 vue-flow 中移除节点
+      removeNodes([props.id])
+      // 刷新变量列表
+      await runtimeStore.refreshFieldMetas()
+      await runtimeStore.refreshVariables()
+      // 保存到磁盘
+      await projectStore.saveProject({ silent: true })
+    } else {
+      console.error(`[CoralNode] Failed to delete node`)
+    }
+  } catch (error) {
+    console.error(`[CoralNode] Error deleting node:`, error)
+  }
+}
+
 function toggleCollapse() {
   isCollapsed.value = !isCollapsed.value
 }
 
-function updateNodeName() {
+async function updateNodeName() {
   if (localNodeName.value !== props.data.nodeName) {
+    // 先更新本地 UI
     updateNodeData(props.id, { nodeName: localNodeName.value })
+    
+    // 保存到后端
+    try {
+      const result = await configureNode(props.id, { nodeName: localNodeName.value })
+      if (result.ok) {
+        console.log(`[CoralNode] Node name updated: ${props.id} -> ${localNodeName.value}`)
+        // 刷新变量元信息和变量列表（因为 __iteration 变量名包含节点名）
+        await runtimeStore.refreshFieldMetas()
+        await runtimeStore.refreshVariables()
+        // 持久化到磁盘
+        await projectStore.saveProject({ silent: true })
+      } else {
+        console.error(`[CoralNode] Failed to save node name`)
+      }
+    } catch (error) {
+      console.error(`[CoralNode] Error saving node name:`, error)
+    }
   }
 }
 
@@ -334,6 +446,11 @@ async function updateLogicName(newLogic: string) {
       console.log(`[CoralNode] Programmed ${props.id} with ${newLogic}, size: ${result.programSize}`)
       // 更新 isProgrammed 状态
       updateNodeData(props.id, { isProgrammed: true })
+      // 刷新变量列表和字段元信息，更新遥控器绑定的可用变量列表
+      await runtimeStore.refreshVariables()
+      await runtimeStore.refreshFieldMetas()
+      // 持久化到磁盘（保存 logicName 和编译后的程序）
+      await projectStore.saveProject({ silent: true })
     } else {
       console.error(`[CoralNode] Failed to program ${props.id}:`, result)
       // 如果失败，清除 isProgrammed 状态
@@ -370,8 +487,23 @@ function openPortEditor() {
   showPortEdit.value = true
 }
 
-function updatePortConfigs(newConfigs: PortConfig[]) {
+async function updatePortConfigs(newConfigs: PortConfig[]) {
+  // 更新前端显示
   updateNodeData(props.id, { ports: newConfigs })
+  
+  // 保存到后端
+  try {
+    const result = await configureNode(props.id, { portConfigs: newConfigs })
+    if (result.ok) {
+      console.log(`[CoralNode] Port configs saved for ${props.id}`)
+      // 持久化到磁盘
+      await projectStore.saveProject({ silent: true })
+    } else {
+      console.error(`[CoralNode] Failed to save port configs for ${props.id}`)
+    }
+  } catch (error) {
+    console.error(`[CoralNode] Error saving port configs:`, error)
+  }
 }
 
 // 格式化类型名
@@ -435,6 +567,7 @@ watch(buildVersion, () => {
 
 <style scoped>
 .coral-node {
+  position: relative;
   background: linear-gradient(180deg, #1e293b, #0f172a);
   border: 2px solid #334155;
   border-radius: 8px;
@@ -459,6 +592,38 @@ watch(buildVersion, () => {
   min-width: 200px;
 }
 
+/* 删除按钮 */
+.delete-btn {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: #ef4444;
+  color: white;
+  font-size: 14px;
+  font-weight: bold;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.2s, background 0.2s;
+  z-index: 10;
+}
+
+.coral-node:hover .delete-btn {
+  opacity: 1;
+}
+
+.delete-btn:hover {
+  background: #dc2626;
+  transform: scale(1.1);
+}
+
 /* 标题栏 */
 .node-header {
   display: flex;
@@ -478,13 +643,15 @@ watch(buildVersion, () => {
 }
 
 .node-name {
-  flex: 1;
   font-weight: 600;
   color: #f1f5f9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .node-name-input {
-  flex: 1;
+  width: 120px;
   background: rgba(0, 0, 0, 0.3);
   border: 1px solid #4a5568;
   border-radius: 4px;
@@ -499,17 +666,32 @@ watch(buildVersion, () => {
   border-color: #4f8cff;
 }
 
-/* 状态行 */
-.node-status-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 6px 12px;
-  background: rgba(0, 0, 0, 0.2);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+/* 升级按钮 */
+.upgrade-btn {
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #4a5568;
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
 }
 
+.upgrade-btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.4);
+  border-color: #60a5fa;
+}
+
+.upgrade-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 状态徽章 - 右对齐 */
 .status-badge {
+  margin-left: auto;
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 10px;
@@ -517,6 +699,7 @@ watch(buildVersion, () => {
   background: rgba(100, 116, 139, 0.3);
   color: #94a3b8;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .status-badge.active {
@@ -674,6 +857,7 @@ watch(buildVersion, () => {
 .config-value {
   flex: 1;
   color: #e2e8f0;
+  font-size: 11px;
 }
 
 .uri-display {
@@ -710,6 +894,15 @@ watch(buildVersion, () => {
 .logic-select {
   flex: 1;
   max-width: 180px;
+}
+
+/* 统一下拉框字体大小 */
+.logic-select :deep(.n-base-selection-label) {
+  font-size: 11px !important;
+}
+
+.logic-select :deep(.n-base-selection-input) {
+  font-size: 11px !important;
 }
 
 /* 端口列表 */

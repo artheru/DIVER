@@ -31,6 +31,7 @@ export default defineConfig({
 
   server: {
     port: 5173,
+    host: true,  // 监听所有地址，允许手机/平板等外部设备访问
     // 开发模式下，将 API 和 SignalR 请求代理到后端服务器
     proxy: {
       '/api': {

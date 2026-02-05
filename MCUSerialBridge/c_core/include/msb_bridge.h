@@ -168,16 +168,22 @@ DLL_EXPORT MCUSerialBridgeError
 msb_start(msb_handle* handle, uint32_t timeout_ms);
 
 /**
- * @brief 启用 Wire Tap 模式
+ * @brief 设置 Wire Tap 模式
  *
- * 启用后，即使在 DIVER 模式下，端口收到的数据也会上报给 PC。
+ * 配置指定端口的 WireTap 监视功能（RX/TX）。
+ * 启用后，即使在 DIVER 模式下，端口的收发数据也会上报给 PC。
  *
  * @param handle MCU 句柄
+ * @param port_index 端口索引，0xFF = 全部端口
+ * @param flags WireTap 标志（WireTapFlag_RX, WireTapFlag_TX, WireTapFlag_Both）
  * @param timeout_ms 超时时间（毫秒）
  * @return MCUSerialBridgeError 错误码
  */
-DLL_EXPORT MCUSerialBridgeError
-msb_enable_wire_tap(msb_handle* handle, uint32_t timeout_ms);
+DLL_EXPORT MCUSerialBridgeError msb_set_wire_tap(
+        msb_handle* handle,
+        uint8_t port_index,
+        uint8_t flags,
+        uint32_t timeout_ms);
 
 /**
  * @brief 读取MCU IO输入
@@ -242,6 +248,8 @@ DLL_EXPORT MCUSerialBridgeError msb_read_port(
  * 如果调用了 msb_register_port_data_callback，当 MCU
  * 上报数据时，会调用该回调函数，将数据直接传给用户。
  *
+ * @param port_index 端口索引 (0-127)
+ * @param direction 数据方向 (0=RX, 1=TX)
  * @param dst_data 指向接收到的数据缓冲
  *                  - 仅在回调函数内使用
  *                  - 不可跨回调保存指针
@@ -249,6 +257,8 @@ DLL_EXPORT MCUSerialBridgeError msb_read_port(
  * @param user_ctx 用户注册的其他参数
  */
 typedef void (*msb_on_port_data_callback_function_t)(
+        uint8_t port_index,
+        uint8_t direction,
         const uint8_t* dst_data,
         uint32_t dst_data_size,
         void* user_ctx);
@@ -479,7 +489,7 @@ typedef struct MCUSerialBridgeAPI {
     MCUSerialBridgeError (*msb_start)(msb_handle*, uint32_t);
     MCUSerialBridgeError (
             *msb_program)(msb_handle*, const uint8_t*, uint32_t, uint32_t);
-    MCUSerialBridgeError (*msb_enable_wire_tap)(msb_handle*, uint32_t);
+    MCUSerialBridgeError (*msb_set_wire_tap)(msb_handle*, uint8_t, uint8_t, uint32_t);
     MCUSerialBridgeError (*msb_memory_upper_io)(
             msb_handle*,
             const uint8_t*,

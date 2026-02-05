@@ -141,8 +141,8 @@ void packet_parse(const void* data_void, uint32_t length, ...)
             return_buffer = (void*)&g_version_info;
             return_buffer_size = sizeof(g_version_info);
             break;
-        case CommandEnableWireTap:
-            ret = control_on_enable_wire_tap(other_data, other_data_len);
+        case CommandSetWireTap:
+            ret = control_on_set_wire_tap(other_data, other_data_len);
             break;
         case CommandGetLayout: {
             static LayoutInfoC layout_info;

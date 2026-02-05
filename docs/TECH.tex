@@ -1,0 +1,532 @@
+\documentclass[11pt,a4paper]{article}
+
+% 中文支持
+\usepackage[UTF8]{ctex}
+
+% 字体设置
+% Overleaf 使用 XeLaTeX 编译，ctex 会自动配置中文字体
+% 如需自定义等宽字体，取消下面注释：
+% \usepackage{fontspec}
+% \setmonofont{Fira Mono}[Scale=0.85]
+
+% 页面设置
+\usepackage[margin=2.5cm]{geometry}
+
+% 图形和颜色
+\usepackage{tikz}
+\usepackage{xcolor}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, calc}
+
+% 表格
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{multirow}
+
+% 代码高亮
+\usepackage{listings}
+
+% 超链接
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!60!black,
+    urlcolor=blue!60!black
+}
+
+% 其他
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+
+% 颜色定义
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.97,0.97,0.97}
+\definecolor{diverblue}{RGB}{41,98,255}
+\definecolor{diverorange}{RGB}{255,152,0}
+
+% 代码样式
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{blue},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\normalsize,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=8pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=4,
+    frame=single,
+    framerule=0.5pt,
+    rulecolor=\color{gray!30},
+    columns=fullflexible,        % 防止字符挤压
+    basewidth=0.5em,             % 字符基准宽度
+    lineskip=2pt,                % 行间距
+    aboveskip=1em,               % 代码块上方间距
+    belowskip=1em,               % 代码块下方间距
+    xleftmargin=2em,             % 左边距
+    framexleftmargin=1.5em       % 边框左边距
+}
+\lstset{style=mystyle}
+
+% 标题样式
+\titleformat{\section}{\Large\bfseries\color{diverblue}}{\thesection}{1em}{}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{1em}{}
+
+% 页眉页脚
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{\small DIVER 技术白皮书}
+\lhead{\small \leftmark}
+\cfoot{\thepage}
+
+\begin{document}
+
+% 标题页
+\begin{titlepage}
+    \centering
+    \vspace*{3cm}
+    
+    {\Huge\bfseries\color{diverblue} DIVER}\\[0.5cm]
+    {\Large\color{gray} Dotnet Integrated Vehicle Embedded Runtime}\\[2cm]
+    
+    {\LARGE\bfseries 技术白皮书}\\[0.5cm]
+    {\large 用 C\# 重新定义嵌入式开发}\\[3cm]
+    
+    \begin{tikzpicture}
+        \node[draw=diverblue, line width=2pt, rounded corners=10pt, 
+              minimum width=10cm, minimum height=3cm, 
+              fill=diverblue!5] (box) {};
+        \node at (box.center) {\large\textbf{让嵌入式开发像写应用程序一样简单}};
+    \end{tikzpicture}
+    
+    \vfill
+    {\large \today}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+%========================================
+\section{概述}
+%========================================
+
+\textbf{DIVER (Dotnet Integrated Vehicle Embedded Runtime)} 是一款革命性的嵌入式开发框架，首次实现了用 C\# 高级语言直接编写 MCU（微控制器）程序。通过独创的"末梢神经"架构，DIVER 在保持工业级实时性能的同时，大幅提升开发效率。
+
+\vspace{1em}
+\noindent\textbf{核心特性：}
+\begin{itemize}[noitemsep]
+    \item C\# 到 MCU 字节码编译 —— 用熟悉的语法编写嵌入式逻辑
+    \item 类 RTOS 运行时 —— 可配置扫描间隔的确定性执行
+    \item 双向数据交换 —— UpperIO（主机→MCU）和 LowerIO（MCU→主机）
+    \item 硬件 IO 抽象 —— 支持 CAN、串口、GPIO、Modbus
+    \item PC 端模拟调试 —— 无需硬件即可开发测试
+    \item 源码级错误定位 —— MCU 崩溃时精确定位到 C\# 源代码行号
+\end{itemize}
+
+%========================================
+\section{行业痛点}
+%========================================
+
+\subsection{嵌入式开发现状}
+
+当前嵌入式开发面临诸多挑战，严重制约了开发效率和产品迭代速度：
+
+\begin{table}[htbp]
+\centering
+\renewcommand{\arraystretch}{1.3}
+\begin{tabularx}{\textwidth}{>{\bfseries}l X}
+\toprule
+痛点 & 影响 \\
+\midrule
+开发语言门槛高 & C/C++ 语法复杂，指针操作易出错，内存管理困难 \\
+调试效率低下 & MCU 调试需要专用硬件（JTAG/SWD），问题定位困难 \\
+开发周期漫长 & 从原型到稳定版本迭代周期长 \\
+代码复用率低 & 不同 MCU 平台需要重写，知识资产难以沉淀 \\
+人才门槛高 & 需要同时掌握硬件和底层软件知识 \\
+\bottomrule
+\end{tabularx}
+\caption{嵌入式开发痛点分析}
+\end{table}
+
+\subsection{典型场景困境}
+
+\begin{itemize}
+    \item \textbf{机器人开发}：多电机协调控制逻辑复杂，调试一个 CAN 通信问题可能耗费数天
+    \item \textbf{智能设备}：快速迭代需求与嵌入式开发周期矛盾
+    \item \textbf{教育培训}：学生难以快速上手实时控制系统开发
+\end{itemize}
+
+%========================================
+\section{DIVER 解决方案}
+%========================================
+
+\subsection{核心创新：C\# 编译到 MCU}
+
+DIVER 实现了从传统嵌入式开发到现代化开发的跨越：
+
+\begin{table}[htbp]
+\centering
+\renewcommand{\arraystretch}{1.3}
+\begin{tabularx}{\textwidth}{>{\bfseries}l c X}
+\toprule
+对比维度 & 传统方式 & DIVER 方式 \\
+\midrule
+编程语言 & C/C++ & C\# \\
+调试方式 & JTAG 硬件调试 & PC 端模拟调试 \\
+内存管理 & 手动管理 & 自动管理 \\
+代码移植 & 平台相关代码 & 跨平台通用代码 \\
+开发工具 & 分散的工具链 & 统一的 Web IDE \\
+\bottomrule
+\end{tabularx}
+\caption{传统开发与 DIVER 对比}
+\end{table}
+
+\subsection{"末梢神经"分层架构}
+
+DIVER 采用创新的分层架构，将系统分为主机层和 MCU 层：
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+    box/.style={draw, rounded corners, minimum width=12cm, minimum height=2.5cm, align=center},
+    arrow/.style={-{Stealth[length=3mm]}, line width=1.5pt}
+]
+    % 主机层
+    \node[box, fill=diverblue!15, draw=diverblue, line width=1.5pt] (host) at (0,3) {
+        \textbf{\large 主机层（大脑）}\\[0.3em]
+        \begin{tabular}{cccc}
+        复杂业务逻辑 & AI/ML 算法 & 数据分析 & 用户界面 \\
+        .NET 生态系统 & 云端连接 & 日志记录 & 可视化
+        \end{tabular}
+    };
+    
+    % MCU层
+    \node[box, fill=diverorange!15, draw=diverorange, line width=1.5pt] (mcu) at (0,-0.5) {
+        \textbf{\large MCU 层（末梢神经）}\\[0.3em]
+        \begin{tabular}{cccc}
+        实时 IO 控制 & 确定性时序 & CAN/Modbus & GPIO/ADC \\
+        可配置扫描周期 & 硬实时响应 & 安全保护 & 电机控制
+        \end{tabular}
+    };
+    
+    % 双向箭头
+    \draw[arrow, diverblue] ($(host.south)-(1.5,0)$) -- node[left, font=\small] {UpperIO} ($(mcu.north)-(1.5,0)$);
+    \draw[arrow, diverorange] ($(mcu.north)+(1.5,0)$) -- node[right, font=\small] {LowerIO} ($(host.south)+(1.5,0)$);
+    
+    % 通信标签
+    \node[fill=white, font=\small\bfseries] at (0,1.25) {串口 / 以太网};
+    
+\end{tikzpicture}
+\caption{DIVER "末梢神经"分层架构}
+\end{figure}
+
+\noindent\textbf{设计原则：}
+\begin{itemize}[noitemsep]
+    \item \textbf{MCU 负责}：实时 IO 处理、基本控制循环、确定性时序
+    \item \textbf{主机负责}：复杂逻辑、数据记录、用户界面、机器学习
+    \item \textbf{清晰边界}：防止时序问题影响实时操作
+\end{itemize}
+
+\subsection{双向数据流}
+
+DIVER 通过属性标注实现清晰的数据流向定义：
+
+\begin{table}[htbp]
+\centering
+\renewcommand{\arraystretch}{1.3}
+\begin{tabularx}{\textwidth}{l l X l}
+\toprule
+\textbf{方向} & \textbf{属性标注} & \textbf{用途} & \textbf{示例} \\
+\midrule
+主机 → MCU & \texttt{[AsUpperIO]} & 控制命令、设定值 & \texttt{motorSpeed} \\
+MCU → 主机 & \texttt{[AsLowerIO]} & 传感器数据、状态 & \texttt{actualSpeed} \\
+\bottomrule
+\end{tabularx}
+\caption{双向数据流定义}
+\end{table}
+
+%========================================
+\section{核心技术特性}
+%========================================
+
+\subsection{DiverCompiler —— C\# 到字节码编译器}
+
+基于 Fody IL Weaver 技术，DiverCompiler 将 C\# 代码编译为轻量级字节码：
+
+\begin{lstlisting}[language={[Sharp]C}, caption={MCU 逻辑代码示例}]
+// 开发者编写的 C# 代码
+[LogicRunOnMCU(scanInterval = 50)]  // 50ms 扫描周期
+public class MotorControl : LadderLogic<MyVehicle>
+{
+    public override void Operation(int iteration)
+    {
+        if (cart.sensorValue > 100)
+            cart.motorSpeed = 0;
+        else
+            cart.motorSpeed = cart.targetSpeed;
+    }
+}
+\end{lstlisting}
+
+\noindent 编译器自动完成：
+\begin{itemize}[noitemsep]
+    \item 提取 MCU 逻辑代码
+    \item 转换为紧凑字节码（\texttt{.bin}）
+    \item 生成源码映射（\texttt{.diver.map.json}）
+    \item 输出变量描述符（\texttt{.bin.json}）
+\end{itemize}
+
+\subsection{MCU Runtime —— 轻量级虚拟机}
+
+纯 C 实现的高效运行时，具备以下特点：
+
+\begin{table}[htbp]
+\centering
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{ll}
+\toprule
+\textbf{特性} & \textbf{规格} \\
+\midrule
+Flash 占用 & < 32KB \\
+RAM 占用 & < 8KB \\
+执行模式 & 确定性扫描周期，无 GC 停顿 \\
+IO 接口 & 统一的 Event/Stream/Snapshot 抽象 \\
+\bottomrule
+\end{tabular}
+\caption{MCU Runtime 技术规格}
+\end{table}
+
+\begin{lstlisting}[language=C, caption={MCU 端执行循环}]
+// MCU 端执行循环
+while (1) {
+    vm_put_snapshot_buffer(gpio_states);    // 输入 GPIO
+    vm_put_event_buffer(can_messages);      // 输入 CAN
+    vm_put_upper_memory(host_commands);     // 输入主机命令
+    
+    vm_run(iteration++);                    // 执行字节码
+    
+    send_to_host(vm_get_lower_memory());    // 输出状态
+}
+\end{lstlisting}
+
+\subsection{硬件 IO 抽象层}
+
+DIVER 提供三种类型的 IO 抽象，覆盖常见硬件接口：
+
+\begin{table}[htbp]
+\centering
+\renewcommand{\arraystretch}{1.3}
+\begin{tabularx}{\textwidth}{l l X}
+\toprule
+\textbf{类型} & \textbf{API} & \textbf{适用场景} \\
+\midrule
+Event & \texttt{ReadEvent/WriteEvent} & CAN 消息、Modbus 帧 \\
+Stream & \texttt{ReadStream/WriteStream} & 串口 UART 数据流 \\
+Snapshot & \texttt{ReadSnapshot/WriteSnapshot} & GPIO 状态、模拟量 \\
+\bottomrule
+\end{tabularx}
+\caption{硬件 IO 抽象层}
+\end{table}
+
+\subsection{PC 端模拟调试}
+
+无需实际硬件即可进行开发测试，大幅提升调试效率：
+
+\begin{lstlisting}[language={[Sharp]C}, caption={PC 端模拟调试}]
+// 继承 LocalDebugDIVERVehicle 即可在 PC 上运行
+public class MyVehicle : LocalDebugDIVERVehicle
+{
+    [AsLowerIO] public int sensorValue;
+    [AsUpperIO] public int motorSpeed;
+}
+
+// 运行测试
+var vehicle = new MyVehicle();
+vehicle.RunDIVER();  // 在 PC 上模拟 MCU 执行
+\end{lstlisting}
+
+\subsection{源码级错误定位}
+
+当 MCU 发生崩溃时，DIVER 能够精确定位到 C\# 源代码位置：
+
+\begin{lstlisting}[language=json, caption={源码映射示例}]
+{
+  "ilOffset": 239,
+  "methodName": "MotorControl.Operation(Int32)",
+  "sourceFile": "MotorControl.cs",
+  "sourceLine": 15
+}
+\end{lstlisting}
+
+\noindent 错误处理流程：
+\begin{enumerate}[noitemsep]
+    \item 捕获错误位置（IL 偏移）
+    \item 查询源码映射文件
+    \item 输出 C\# 文件名和行号
+\end{enumerate}
+
+\subsection{自定义原生扩展}
+
+当需要高性能计算或特殊硬件访问时，可以用 C 语言编写原生函数，在 C\# 中直接调用。编译器会自动桥接两种语言：
+
+\begin{lstlisting}[language=C, caption={C 端实现高性能函数}]
+// 在 MCU 端用 C 实现（additional_builtins.h）
+void builtin_FastSqrt(uchar** reptr) {
+    int value = pop_int(reptr);      // 从栈获取参数
+    int result = fast_isqrt(value);  // 高效整数开方
+    push_int(reptr, result);         // 返回结果
+}
+\end{lstlisting}
+
+\begin{lstlisting}[language={[Sharp]C}, caption={C\# 中直接调用}]
+// C# 逻辑代码中直接调用，编译器自动桥接
+public override void Operation(int iteration)
+{
+    int distance = cart.sensor_distance;
+    int sqrt_dist = FastMath.FastSqrt(distance);  // 调用 C 原生函数
+    cart.output = sqrt_dist * 10;
+}
+\end{lstlisting}
+
+\noindent 这种机制让开发者可以：
+\begin{itemize}[noitemsep]
+    \item 用 C 实现性能关键的算法（如 PID、滤波、FFT）
+    \item 访问特殊硬件寄存器
+    \item 复用现有的 C 库代码
+\end{itemize}
+
+\subsection{Web 控制面板}
+
+CoralinkerHost 提供基于 ASP.NET + Vue 3 的可视化管理界面：
+
+\begin{itemize}[noitemsep]
+    \item \textbf{节点管理}：添加/删除/配置 MCU 节点
+    \item \textbf{变量监视}：实时 UpperIO/LowerIO 数值显示
+    \item \textbf{在线编译}：Web IDE 编辑代码并一键部署
+    \item \textbf{错误诊断}：致命错误弹窗，支持跳转源码
+\end{itemize}
+
+%========================================
+\section{适用场景}
+%========================================
+
+\subsection{机器人控制}
+
+DIVER 特别适合机器人底层控制开发：
+\begin{itemize}[noitemsep]
+    \item 多轴电机协调控制（CANOpen、Modbus）
+    \item 传感器数据采集与融合
+    \item 安全保护逻辑（急停、触边检测）
+\end{itemize}
+
+\begin{lstlisting}[language={[Sharp]C}, caption={差速底盘控制示例}]
+public override void Operation(int iteration)
+{
+    // 安全检查
+    if (cart.emergency_stop == 1 || cart.edge_touch == 1)
+    {
+        EmergencyStopAllMotors();
+        return;
+    }
+    
+    // 差速计算
+    int leftSpeed = cart.linear_vel - cart.angular_vel;
+    int rightSpeed = cart.linear_vel + cart.angular_vel;
+    
+    // 发送电机命令
+    motors[LEFT].TargetSpeed = leftSpeed;
+    motors[RIGHT].TargetSpeed = rightSpeed;
+}
+\end{lstlisting}
+
+\subsection{工业设备控制}
+
+\begin{itemize}[noitemsep]
+    \item PLC 类梯形图逻辑实现
+    \item Modbus RTU/TCP 设备通信
+    \item 多节点分布式控制系统
+\end{itemize}
+
+\subsection{智能硬件原型}
+
+\begin{itemize}[noitemsep]
+    \item 快速验证控制算法
+    \item 传感器数据采集与处理
+    \item 执行器驱动开发
+\end{itemize}
+
+\subsection{教育与培训}
+
+\begin{itemize}[noitemsep]
+    \item 嵌入式系统教学实验
+    \item 控制理论实践平台
+    \item 机器人竞赛开发环境
+\end{itemize}
+
+%========================================
+\section{技术规格}
+%========================================
+
+\begin{table}[htbp]
+\centering
+\renewcommand{\arraystretch}{1.3}
+\begin{tabularx}{\textwidth}{>{\bfseries}l X}
+\toprule
+项目 & 规格 \\
+\midrule
+主机端要求 & .NET 8.0+，Windows / Linux \\
+MCU 端要求 & ARM Cortex-M 系列，$\geq$512KB Flash，$\geq$128KB RAM \\
+通信接口 & 串口（1M--2Mbps）、以太网 \\
+扫描周期 & 可配置，典型值 10--50ms \\
+IO 支持 & CAN、RS485/Modbus、GPIO、ADC、UART \\
+编译输出 & 字节码（.bin）+ 源码映射 + 变量描述符 \\
+\bottomrule
+\end{tabularx}
+\caption{DIVER 技术规格}
+\end{table}
+
+%========================================
+\section{项目结构}
+%========================================
+
+\begin{table}[htbp]
+\centering
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\textwidth}{l X}
+\toprule
+\textbf{目录} & \textbf{说明} \\
+\midrule
+\texttt{DiverCompiler/} & C\# → MCU 字节码编译器 \\
+\texttt{MCURuntime/} & MCU 端 C 运行时 \\
+\texttt{DiverTest/} & 测试框架与示例代码 \\
+\texttt{MCUSerialBridge/} & 串口通信协议栈 \\
+\texttt{3rd/CoralinkerHost/} & Web 控制面板（ASP.NET + Vue 3） \\
+\texttt{3rd/CoralinkerSDK/} & 多节点管理 SDK \\
+\bottomrule
+\end{tabularx}
+\caption{项目目录结构}
+\end{table}
+
+%========================================
+\vfill
+\begin{center}
+\begin{tikzpicture}
+    \node[draw=diverblue, line width=2pt, rounded corners=8pt, 
+          minimum width=14cm, minimum height=1.2cm, 
+          fill=diverblue!10] {
+        \Large\bfseries DIVER —— 让嵌入式开发更简单、更高效、更可靠
+    };
+\end{tikzpicture}
+\end{center}
+
+\end{document}

@@ -99,12 +99,14 @@ typedef enum {
     CommandVersion = 0x04,
 
     /**
-     * @brief 启用 Wire Tap 模式 (PC → MCU)
+     * @brief 设置 Wire Tap 模式 (PC → MCU)
      *
-     * 启用后，即使在 DIVER 模式下，端口收到的数据也会上报给 PC。
+     * 配置指定端口的 WireTap 监视功能（RX/TX）。
+     * 启用后，即使在 DIVER 模式下，端口的收发数据也会上报给 PC。
+     * 请求数据：WireTapConfigC 结构。
      * 响应命令：0x85（同 seq）。
      */
-    CommandEnableWireTap = 0x05,
+    CommandSetWireTap = 0x05,
 
     /**
      * @brief 获取 MCU 硬件布局信息 (PC → MCU)
@@ -227,6 +229,42 @@ typedef enum {
     PortType_CAN = 0x02,    /**< CAN 总线 */
     PortType_LED = 0x03,    /**< LED / IO 类端口 */
 } PortTypeC;
+
+/* ===============================
+ * WireTap
+ * =============================== */
+
+/**
+ * @brief WireTap 标志位定义
+ */
+typedef enum {
+    WireTapFlag_None = 0x00, /**< 禁用 */
+    WireTapFlag_RX   = 0x01, /**< 启用 RX 监视（接收数据上报） */
+    WireTapFlag_TX   = 0x02, /**< 启用 TX 监视（发送数据上报） */
+    WireTapFlag_Both = 0x03, /**< 启用 RX + TX 监视 */
+} WireTapFlags;
+
+/**
+ * @brief WireTap 配置请求结构
+ *
+ * 用于 CommandSetWireTap 命令的请求数据。
+ */
+typedef struct {
+    u8 port_index; /**< 端口索引，0xFF = 全部端口 */
+    u8 flags;      /**< WireTapFlags 枚举值 */
+} WireTapConfigC;
+
+STATIC_ASSERT(sizeof(WireTapConfigC) == 2, "WireTapConfigC size must be 2");
+
+/**
+ * @brief 端口方向标识掩码
+ *
+ * 用于 CommandUploadPort 中的 port_index 字段：
+ * - port_index & PORT_INDEX_MASK = 实际端口号 (0-127)
+ * - port_index & PORT_DIRECTION_TX_MASK = 方向标识 (0=RX, 0x80=TX)
+ */
+#define PORT_INDEX_MASK         0x7F
+#define PORT_DIRECTION_TX_MASK  0x80
 
 /* ===============================
  * Packet Struct

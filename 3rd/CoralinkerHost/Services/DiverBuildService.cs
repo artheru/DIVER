@@ -32,14 +32,33 @@ public sealed class DiverBuildService
         if (Directory.Exists(buildRoot))
         {
             await _terminal.BuildLineAsync($"Cleaning previous build folder: {buildRoot}", ct);
-            try
+            
+            // 多次尝试删除，处理 Windows Defender 文件锁
+            for (int attempt = 1; attempt <= 3; attempt++)
             {
-                Directory.Delete(buildRoot, recursive: true);
-                await _terminal.BuildLineAsync($"Clean completed successfully", ct);
-            }
-            catch (Exception ex)
-            {
-                await _terminal.BuildLineAsync($"Warning: Could not fully clean build folder: {ex.Message}", ct);
+                try
+                {
+                    // 先尝试删除 obj 目录（最容易被锁定）
+                    var objDir = Path.Combine(buildRoot, "proj", "obj");
+                    if (Directory.Exists(objDir))
+                    {
+                        Directory.Delete(objDir, recursive: true);
+                    }
+                    
+                    Directory.Delete(buildRoot, recursive: true);
+                    await _terminal.BuildLineAsync($"Clean completed successfully", ct);
+                    break;
+                }
+                catch (Exception ex) when (attempt < 3)
+                {
+                    await _terminal.BuildLineAsync($"Clean attempt {attempt} failed (file may be locked by antivirus), retrying in 2s...", ct);
+                    await Task.Delay(2000, ct);
+                }
+                catch (Exception ex)
+                {
+                    await _terminal.BuildLineAsync($"Warning: Could not fully clean build folder: {ex.Message}", ct);
+                    // 继续使用现有文件夹，MSBuild 会覆盖
+                }
             }
         }
         
@@ -143,10 +162,41 @@ public sealed class DiverBuildService
 
         await _terminal.BuildLineAsync($"Preparing MSBuild process...", ct);
         
+        // 先执行 restore，这样可以看到进度
+        await _terminal.BuildLineAsync($"---------- NuGet Restore ----------", ct);
+        var restorePsi = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            Arguments = "restore --verbosity minimal",
+            WorkingDirectory = projDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+        restorePsi.Environment["DOTNET_CLI_UI_LANGUAGE"] = "en";
+        restorePsi.Environment["DOTNET_NOLOGO"] = "true";
+        
+        using (var restoreProc = Process.Start(restorePsi))
+        {
+            if (restoreProc != null)
+            {
+                var restoreRing = new RingBuffer(50);
+                var restoreStdout = ConsumeAsync(restoreProc.StandardOutput, null, restoreRing, ct);
+                var restoreStderr = ConsumeAsync(restoreProc.StandardError, null, restoreRing, ct);
+                await Task.WhenAll(restoreStdout, restoreStderr);
+                await restoreProc.WaitForExitAsync(ct);
+            }
+        }
+        
+        await _terminal.BuildLineAsync($"---------- MSBuild Compile ----------", ct);
+        
         var psi = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = "build -c Debug",
+            Arguments = "build -c Debug --no-restore --verbosity minimal",
             WorkingDirectory = projDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -160,9 +210,8 @@ public sealed class DiverBuildService
         psi.Environment["DOTNET_CLI_UI_LANGUAGE"] = "en";
         psi.Environment["DOTNET_NOLOGO"] = "true";
 
-        await _terminal.BuildLineAsync($"Executing: dotnet build -c Debug", ct);
+        await _terminal.BuildLineAsync($"Executing: dotnet build -c Debug --no-restore", ct);
         await _terminal.BuildLineAsync($"Working directory: {projDir}", ct);
-        await _terminal.BuildLineAsync($"---------- MSBuild Output ----------", ct);
         
         using var proc = Process.Start(psi);
         if (proc == null) throw new InvalidOperationException("Failed to start dotnet build.");
@@ -232,14 +281,17 @@ public sealed class DiverBuildService
     /// <summary>
     /// 消费 MSBuild 输出流，发送到 Build 日志面板
     /// </summary>
-    private async Task ConsumeAsync(StreamReader reader, StreamWriter log, RingBuffer ring, CancellationToken ct)
+    private async Task ConsumeAsync(StreamReader reader, StreamWriter? log, RingBuffer ring, CancellationToken ct)
     {
         while (!reader.EndOfStream && !ct.IsCancellationRequested)
         {
             var line = await reader.ReadLineAsync(ct);
             if (line == null) break;
             if (string.IsNullOrWhiteSpace(line)) continue;
-            await log.WriteLineAsync(line);
+            if (log != null)
+            {
+                await log.WriteLineAsync(line);
+            }
             ring.Add(line);
             // MSBuild 输出不加时间戳，直接发送
             await _terminal.BuildLineRawAsync(line, ct);

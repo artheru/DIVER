@@ -216,6 +216,22 @@ namespace MCUSerialBridgeCLR
     }
 
     /// <summary>
+    /// WireTap 标志枚举
+    /// </summary>
+    [Flags]
+    public enum WireTapFlags : byte
+    {
+        /// <summary>禁用</summary>
+        None = 0x00,
+        /// <summary>启用 RX 监视（接收数据上报）</summary>
+        RX = 0x01,
+        /// <summary>启用 TX 监视（发送数据上报）</summary>
+        TX = 0x02,
+        /// <summary>启用 RX + TX 监视</summary>
+        Both = 0x03,
+    }
+
+    /// <summary>
     /// 端口描述符结构体 (16 bytes)
     /// </summary>
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi, Size = 16)]
@@ -852,6 +868,8 @@ namespace MCUSerialBridgeCLR
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         internal delegate void msb_on_port_data_callback_function_t(
+            byte port_index,
+            byte direction,
             IntPtr dst_data,
             uint dst_data_size,
             IntPtr user_ctx
@@ -886,8 +904,10 @@ namespace MCUSerialBridgeCLR
         );
 
         [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern MCUSerialBridgeError msb_enable_wire_tap(
+        internal static extern MCUSerialBridgeError msb_set_wire_tap(
             IntPtr handle,
+            byte port_index,
+            byte flags,
             uint timeout_ms
         );
 
@@ -1331,7 +1351,11 @@ namespace MCUSerialBridgeCLR
         /// 注册指定端口(Serial)的回调函数
         /// </summary>
         /// <param name="portIndex">端口索引</param>
-        /// <param name="callback">接收数据回调，byte[] 为接收到的原始数据</param>
+        /// <param name="callback">接收数据回调：(portIndex, direction, data) 
+        /// - portIndex: 端口索引
+        /// - direction: 0=RX(接收), 1=TX(发送/WireTap)
+        /// - data: 原始数据
+        /// </param>
         /// <returns>错误码</returns>
         /// <remarks>
         /// 注意事项：
@@ -1344,7 +1368,7 @@ namespace MCUSerialBridgeCLR
         /// </remarks>
         public MCUSerialBridgeError RegisterSerialPortCallback(
             byte portIndex,
-            Action<byte[]> callback
+            Action<byte, byte, byte[]> callback
         )
         {
             if (callback == null)
@@ -1354,11 +1378,11 @@ namespace MCUSerialBridgeCLR
                 return MCUSerialBridgeError.Config_PortNumOver;
 
             // 包装 C# 回调为 P/Invoke 委托
-            void del(IntPtr dst_data, uint dst_data_size, IntPtr user_ctx)
+            void del(byte port_index, byte direction, IntPtr dst_data, uint dst_data_size, IntPtr user_ctx)
             {
                 byte[] data = new byte[dst_data_size];
                 Marshal.Copy(dst_data, data, 0, (int)dst_data_size);
-                callback(data);
+                callback(port_index, direction, data);
             }
 
             // 保存引用，防止 GC 回收
@@ -1377,7 +1401,11 @@ namespace MCUSerialBridgeCLR
         /// 注册指定端口(CAN)的回调函数
         /// </summary>
         /// <param name="portIndex">端口索引</param>
-        /// <param name="callback">接收数据回调，CANMessage 为接收到的原始数据</param>
+        /// <param name="callback">接收数据回调：(portIndex, direction, msg)
+        /// - portIndex: 端口索引
+        /// - direction: 0=RX(接收), 1=TX(发送/WireTap)
+        /// - msg: CANMessage 数据
+        /// </param>
         /// <returns>错误码</returns>
         /// <remarks>
         /// 注意事项：
@@ -1390,7 +1418,7 @@ namespace MCUSerialBridgeCLR
         /// </remarks>
         public MCUSerialBridgeError RegisterCANPortCallback(
             byte portIndex,
-            Action<CANMessage> callback
+            Action<byte, byte, CANMessage> callback
         )
         {
             if (callback == null)
@@ -1400,14 +1428,14 @@ namespace MCUSerialBridgeCLR
                 return MCUSerialBridgeError.Config_PortNumOver;
 
             // 包装 C# 回调为 P/Invoke 委托
-            void del(IntPtr dst_data, uint dst_data_size, IntPtr user_ctx)
+            void del(byte port_index, byte direction, IntPtr dst_data, uint dst_data_size, IntPtr user_ctx)
             {
                 try
                 {
                     byte[] data = new byte[dst_data_size];
                     Marshal.Copy(dst_data, data, 0, (int)dst_data_size);
                     CANMessage msg = CANMessage.FromBytes(data, dst_data_size);
-                    callback(msg);
+                    callback(port_index, direction, msg);
                 }
                 catch
                 {
@@ -1460,17 +1488,20 @@ namespace MCUSerialBridgeCLR
         }
 
         /// <summary>
-        /// 启用 Wire Tap 模式
-        /// 启用后，即使在 DIVER 模式下，端口数据也会上传
+        /// 设置 Wire Tap 模式
+        /// 配置指定端口的 WireTap 监视功能（RX/TX）。
+        /// 启用后，即使在 DIVER 模式下，端口的收发数据也会上报给 PC
         /// </summary>
+        /// <param name="portIndex">端口索引，0xFF = 全部端口</param>
+        /// <param name="flags">WireTap 标志（RX, TX, Both）</param>
         /// <param name="timeout">超时时间（毫秒），默认 200ms</param>
         /// <returns>错误码</returns>
-        public MCUSerialBridgeError EnableWireTap(uint timeout = 200)
+        public MCUSerialBridgeError SetWireTap(byte portIndex, WireTapFlags flags, uint timeout = 200)
         {
             if (nativeHandle == IntPtr.Zero)
                 return MCUSerialBridgeError.Win_HandleNotFound;
 
-            return MCUSerialBridgeCoreAPI.msb_enable_wire_tap(nativeHandle, timeout);
+            return MCUSerialBridgeCoreAPI.msb_set_wire_tap(nativeHandle, portIndex, (byte)flags, timeout);
         }
 
         /// <summary>

@@ -364,19 +364,34 @@ MCUSerialBridgeError msb_start(msb_handle* handle, uint32_t timeout_ms)
 }
 
 // --------------------
-// 启用 Wire Tap
+// 设置 Wire Tap
 // --------------------
-MCUSerialBridgeError msb_enable_wire_tap(msb_handle* handle, uint32_t timeout_ms)
+MCUSerialBridgeError msb_set_wire_tap(
+        msb_handle* handle,
+        uint8_t port_index,
+        uint8_t flags,
+        uint32_t timeout_ms)
 {
-    DBG_PRINT("EnableWireTap called");
+    DBG_PRINT("SetWireTap called: port=%u, flags=0x%02X", port_index, flags);
 
     if (!handle)
         return MSB_Error_Win_HandleNotFound;
 
-    MCUSerialBridgeError ret = mcu_send_packet_and_wait(
-            handle, CommandEnableWireTap, NULL, 0, NULL, 0, timeout_ms);
+    WireTapConfigC config = {
+            .port_index = port_index,
+            .flags = flags,
+    };
 
-    DBG_PRINT("EnableWireTap finished with result[0x%08X]", ret);
+    MCUSerialBridgeError ret = mcu_send_packet_and_wait(
+            handle,
+            CommandSetWireTap,
+            (const uint8_t*)&config,
+            sizeof(config),
+            NULL,
+            0,
+            timeout_ms);
+
+    DBG_PRINT("SetWireTap finished with result[0x%08X]", ret);
     return ret;
 }
 
@@ -792,7 +807,7 @@ void mcu_serial_bridge_get_api(MCUSerialBridgeAPI* api)
     api->msb_upgrade = msb_upgrade;
     api->msb_start = msb_start;
     api->msb_program = msb_program;
-    api->msb_enable_wire_tap = msb_enable_wire_tap;
+    api->msb_set_wire_tap = msb_set_wire_tap;
     api->msb_memory_upper_io = msb_memory_upper_io;
     api->msb_register_memory_lower_io_callback = msb_register_memory_lower_io_callback;
     api->msb_register_console_writeline_callback = msb_register_console_writeline_callback;

@@ -90,7 +90,12 @@ dotnet run
 │   │   │   ├── project.ts   # 项目状态 (selectedAsset, lastBuildId)
 │   │   │   ├── runtime.ts   # 运行状态 (nodeStates, variables, appState)
 │   │   │   ├── files.ts     # 文件管理
-│   │   │   └── logs.ts      # 日志管理 (Terminal/Build/节点日志)
+│   │   │   ├── logs.ts      # 日志管理 (Terminal/Build/节点日志)
+│   │   │   └── wiretap.ts   # WireTap 状态管理
+│   │   ├── protocol/        # 协议解析模块
+│   │   │   ├── modbus/      # MODBUS RTU 解析器
+│   │   │   ├── canopen/     # CANOpen + CiA 301/402 解析器
+│   │   │   └── serial/      # 通用 Serial 解析器
 │   │   ├── components/
 │   │   │   ├── graph/       # 节点图 (Vue-flow)
 │   │   │   │   ├── GraphCanvas.vue    # 画布，直接调用 API
@@ -100,6 +105,8 @@ dotnet run
 │   │   │   └── variables/   # 变量面板
 │   │   ├── types/           # TypeScript 类型定义
 │   │   └── views/
+│   │       ├── HomeView.vue         # 主页面（节点图编辑器）
+│   │       └── ControlPanelView.vue # 独立遥控器页面 (/control)
 │   └── vite.config.ts
 ├── Services/
 │   ├── RuntimeSessionService.cs  # DIVERSession 异步封装 + 日志广播
@@ -150,8 +157,9 @@ dotnet run
 
 5. Running (运行中)
    → 变量交换: UpperIO (可写) / LowerIO (只读)
-   → SignalR 推送: VarsSnapshot (200ms), NodeSnapshot (1s)
-   → 前端轮询: /api/nodes/state (3s, 非运行时)
+   → SignalR 推送: VarsSnapshot (200ms), NodeSnapshot (500ms)
+   → Graph 自动锁定（不可拖动/连接/删除节点）
+   → Build/Start 按钮互斥
 
 6. Stop (停止会话)
    POST /api/stop
@@ -251,6 +259,15 @@ dotnet run
 | `/api/logs/node/{uuid}/clear` | POST | 清空日志 |
 | `/api/logs/clear` | POST | 清空所有日志 |
 
+### WireTap 监听
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/node/{uuid}/wiretap` | POST | 设置端口 WireTap 配置 |
+| `/api/wiretap/configs` | GET | 获取所有节点的 WireTap 配置 |
+| `/api/node/{uuid}/wiretap/logs` | GET | 获取节点的 WireTap 日志 |
+| `/api/wiretap/logs` | GET | 获取所有节点的 WireTap 日志 |
+
 ### 项目管理
 
 | 端点 | 方法 | 说明 |
@@ -289,8 +306,8 @@ dotnet run
       "mcuUri": "serial://name=COM3&baudrate=1000000",
       "nodeName": "Node-1-abc12345",
       "portConfigs": [
-        { "type": "Serial", "baud": 9600, "receiveFrameMs": 20 },
-        { "type": "CAN", "baud": 500000, "retryTimeMs": 10 }
+        { "type": "Serial", "name": "RS485-1", "baud": 115200, "receiveFrameMs": 0 },
+        { "type": "CAN", "name": "CAN-1", "baud": 1000000, "retryTimeMs": 10 }
       ],
       "programBase64": "...",
       "metaJson": "[{\"field\":\"speed\",\"typeid\":6,\"offset\":0,\"flags\":1}]",
@@ -306,24 +323,55 @@ dotnet run
     "windowY": 100,
     "gridCols": 12,
     "gridRows": 12,
-    "locked": false,
+    "isLocked": false,
     "widgets": [
       {
         "id": "widget-1",
         "type": "joystick",
-        "gridX": 0,
-        "gridY": 0,
-        "gridW": 5,
-        "gridH": 7,
+        "gridX": 0, "gridY": 0, "gridW": 5, "gridH": 7,
         "config": {
-          "variableX": "speed",
-          "variableY": "direction",
-          "minX": -100,
-          "maxX": 100,
-          "keyUp": "W",
-          "keyDown": "S",
-          "keyLeft": "A",
-          "keyRight": "D"
+          "variableX": "inputA", "variableY": "inputB",
+          "minX": -100, "maxX": 100, "minY": -100, "maxY": 100,
+          "autoReturnX": true, "autoReturnY": true,
+          "keyUp": "W", "keyDown": "S", "keyLeft": "A", "keyRight": "D",
+          "moveSpeed": 100, "returnSpeed": 200
+        }
+      },
+      {
+        "id": "widget-2",
+        "type": "slider",
+        "gridX": 6, "gridY": 0, "gridW": 5, "gridH": 2,
+        "config": {
+          "variable": "throttle",
+          "min": 0, "max": 100, "autoReturn": false,
+          "keyDecrease": "Z", "keyIncrease": "X",
+          "moveSpeed": 100, "returnSpeed": 200
+        }
+      },
+      {
+        "id": "widget-3",
+        "type": "switch",
+        "gridX": 6, "gridY": 3, "gridW": 3, "gridH": 2,
+        "config": {
+          "variable": "enabled", "states": 2, "keyToggle": "C"
+        }
+      },
+      {
+        "id": "widget-4",
+        "type": "gauge",
+        "gridX": 0, "gridY": 8, "gridW": 4, "gridH": 4,
+        "config": {
+          "variable": "temperature", "style": "gauge",
+          "min": 0, "max": 100, "unit": "°C"
+        }
+      },
+      {
+        "id": "widget-5",
+        "type": "lamp",
+        "gridX": 5, "gridY": 8, "gridW": 3, "gridH": 2,
+        "config": {
+          "variable": "status", "bitCount": 8,
+          "bitsPerLine": 8, "showIndex": true, "color": "#22c55e"
         }
       }
     ]
@@ -341,7 +389,7 @@ dotnet run
 | `ProjectStore` | 项目文件管理，调用 DIVERSession.Export/Import |
 | `DiverBuildService` | C# → MCU 编译，输出到 Build 日志面板 |
 | `TerminalBroadcaster` | SignalR 消息推送 (Terminal/Build/节点日志分离) |
-| `VariableInspectorPushService` | 每 200ms 推送变量，每 1s 推送节点状态 |
+| `VariableInspectorPushService` | 每 200ms 推送变量，每 500ms 推送节点状态 |
 | `JsonHelper` | 统一 JSON 序列化配置 (PascalCase ↔ camelCase) |
 
 ### JSON 序列化
@@ -382,32 +430,56 @@ public static class JsonHelper
 
 | 组件 | 说明 |
 |------|------|
-| `GraphCanvas.vue` | Vue-flow 节点图画布，直接调用 API 管理节点 |
-| `CoralNodeView.vue` | MCU 节点视图，从 runtime store 获取状态 |
+| `GraphCanvas.vue` | Vue-flow 节点图画布，运行时自动锁定交互 |
+| `CoralNodeView.vue` | MCU 节点视图，含升级按钮、端口配置、IO 状态 |
 | `AddNodeDialog.vue` | 添加节点对话框，调用 addNode API |
-| `TerminalPanel.vue` | 终端面板 (Terminal/Build 标签分离) |
+| `UpgradeDialog.vue` | 固件升级对话框（支持从 Node 视图直接打开） |
+| `TerminalPanel.vue` | 终端面板 (Terminal/Build 标签分离，Build/Start 互斥) |
 | `VariablePanel.vue` | 变量表格 + 编辑 |
-| `ControlWindow.vue` | 遥控器面板（摇杆、滑块、开关，支持键盘绑定） |
+| `ControlWindow.vue` | 遥控器面板（摇杆、滑块、开关、仪表盘、指示灯） |
 | `FatalErrorDialog.vue` | MCU 错误弹窗，支持跳转到源代码 |
 
 ### 遥控器面板
 
-ControlWindow 提供可拖拽、可调整大小的遥控器窗口，支持三种控件：
+ControlWindow 提供可拖拽、可调整大小的遥控器窗口，支持五种控件：
 
 | 控件 | 说明 | 键盘绑定 |
 |------|------|----------|
 | **Joystick** | 双轴摇杆，绑定 X/Y 两个变量 | 上下左右四个方向键，支持 WASD/IJKL/方向键预设 |
 | **Slider** | 单轴滑块，绑定一个变量 | +/- 两个方向键，支持 ZX/NM/RF 等预设 |
 | **Switch** | 开关，绑定一个 bool 变量 | 单键切换，支持 C/V/B 预设 |
+| **Gauge** | 只读仪表盘，支持纯文本/进度条/仪表盘样式 | 无（只读） |
+| **Lamp** | 只读 LED 指示灯，显示二进制位状态 | 无（只读） |
 
-**特性**：
+**控件控制特性**：
+- Joystick/Slider 支持自动回弹，回弹位置用百分比设置（0-100%，默认 50%）
+- 键盘绑定在输入框获得焦点时自动禁用
+
+**Gauge 仪表盘特性**：
+- 显示样式：纯文本（数值/字符串）、水平/垂直进度条、仪表盘
+- 仪表盘模式显示 5 个刻度数字（0%, 25%, 50%, 75%, 100%）
+- 超出范围时指针变红，可超出 180° 最大约 ±20°
+- 严重超限时（>110°）指针抖动警示
+
+**Lamp 指示灯特性**：
+- 可绑定任意数值变量（i8/u8/i16/u16/i32/u32）
+- 支持多位显示（默认 1 位），每 8 位一行
+- 可自定义 LED 颜色
+- 位索引从 0 开始递增
+
+**通用特性**：
 - 网格布局（默认 12x12 格，每格 32px）
 - 控件可拖拽、可调整大小
 - 布局锁定功能
-- 键盘绑定支持自定义按键和移动/回弹速度
-- 自动回弹可单独配置 X/Y 轴
 - 布局持久化到 `projectStore.controlLayout`
 - 字段元信息在页面加载时获取（`/api/variables/meta`），无需 Start 即可配置绑定
+- **变量列表区分**：可控变量（绿色背景）和只读变量（橙色背景）
+- **触摸设备支持**：自动检测触摸设备，隐藏键盘绑定显示，支持触摸拖动操作
+
+**独立页面** `/control`：
+- 简洁的只读遥控器界面，适合手机/平板使用
+- 顶部状态栏显示运行状态和 Start/Stop 按钮
+- 布局锁定，只能操控不能修改配置
 
 ### 日志面板
 
@@ -420,17 +492,42 @@ TerminalPanel 包含两个独立标签：
 
 **Build 错误跳转**：编译错误行 (如 `TestLogic.cs(107,31): error CS1026`) 可点击跳转到源代码对应行。
 
+### WireTap 端口监听
+
+WireTap 功能允许实时监听 MCU 端口（Serial/CAN）的通信数据，用于调试和协议分析。
+
+**功能特性**：
+- 在节点视图的端口统计区域点击 TX/RX 圆点启用/禁用监听
+- 支持 Serial 和 CAN 两种端口类型
+- 日志面板显示多列视图：Console + 各端口日志
+- 数据支持折叠/展开（超过 16 字节自动折叠）
+- 选中十六进制数据可 Inspect 查看多种数据解析（u16/i16/u32/f32 等）
+- 日志存储在 DIVERSession 内存中（最大 10000 条），刷新页面不丢失
+- Start 时清空日志，Stop 时保留日志和计数器
+
+**协议解析功能**：
+- 点击日志条目旁的 🔍 按钮可进行协议解析
+- 支持的协议：
+  - **MODBUS RTU** (Serial)：功能码解析、CRC 校验、寄存器值解析
+  - **CANOpen** (CAN)：NMT、SDO、PDO、Heartbeat、Emergency 解析
+  - **CiA 301**：通信配置对象字典（0x1000 区域）
+  - **CiA 402**：驱动器配置（Controlword、Statusword、运行模式等）
+- 协议解析架构可扩展，位于 `ClientApp/src/protocol/`
+
 ### SignalR 事件
 
-| 事件 | 方向 | 数据 |
+| 事件 | 方向 | 频率/说明 |
 |------|------|------|
-| `terminalLine` | Server→Client | 终端日志行 |
-| `buildLine` | Server→Client | Build 日志行（编译输出） |
-| `nodeLogLine` | Server→Client | 节点日志 (uuid, message) |
-| `varsSnapshot` | Server→Client | 变量快照 |
-| `nodeSnapshot` | Server→Client | 节点状态快照 |
-| `fatalError` | Server→Client | MCU Fatal Error (HardFault/ASSERT) |
-| `upgradeProgress` | Server→Client | 固件升级进度 |
+| `terminalLine` | Server→Client | 终端日志行（实时） |
+| `buildLine` | Server→Client | Build 日志行（编译时） |
+| `nodeLogLine` | Server→Client | 节点日志 (uuid, message)（实时） |
+| `varsSnapshot` | Server→Client | 变量快照（**200ms**） |
+| `nodeSnapshot` | Server→Client | 节点状态快照（**500ms**，含 TX/RX/IO） |
+| `wiretapdata` | Server→Client | WireTap 端口数据（实时，含 Serial/CAN 数据） |
+| `fatalError` | Server→Client | MCU Fatal Error (HardFault/ASSERT)（实时） |
+| `upgradeProgress` | Server→Client | 固件升级进度（实时） |
+
+**运行时数据流**：后端每 500ms 从下位机轮询状态，同时通过 SignalR 推送到前端。前端不再需要 HTTP 轮询。
 
 ### 类型定义 (`types/index.ts`)
 
@@ -484,7 +581,7 @@ interface ControlLayoutConfig {
   windowY: number
   gridCols: number
   gridRows: number
-  locked: boolean
+  isLocked: boolean
   widgets: ControlWidget[]
 }
 ```
@@ -510,12 +607,19 @@ interface ControlLayoutConfig {
 - 检查 SignalR 连接状态
 - LowerIO 字段只读，不能设置
 - 确认节点处于 Running 状态
+- Build 完成后会自动刷新变量列表（删除/修改变量后重新编译即可更新）
 
 ### 日志重复
 
+**节点日志**：
 - 使用 `afterSeq` 参数获取新日志
 - 首次获取时不传 afterSeq
 - logs store 自动管理 lastSeq
+
+**终端/Build 日志**：
+- SignalR 连接使用单例模式，避免多个组件创建重复连接
+- `useSignalR()` composable 的 connection/state 定义在模块级别
+- 如果仍然出现重复，检查浏览器是否打开了多个标签页
 
 ### 节点位置不保存
 
@@ -528,6 +632,17 @@ interface ControlLayoutConfig {
 - 选择 Logic 后会调用 `/api/node/{uuid}/program` API
 - Logic 数据存储在 DIVERSession 中，前端 dirty 检查不会触发
 - 点击 Save 总是会调用后端保存（不依赖 dirty 状态）
+
+### 节点操作后数据丢失
+
+- 所有节点操作（添加、删除、重命名、配置端口、选择 Logic）都会自动保存到磁盘
+- 无需手动点击 Save
+
+### 固件升级
+
+- AddNodeDialog 中 Probe 成功后可升级
+- CoralNodeView 中点击升级按钮（⬆）可直接升级已添加的节点
+- 升级前会自动 Probe 获取当前版本信息
 
 ---
 

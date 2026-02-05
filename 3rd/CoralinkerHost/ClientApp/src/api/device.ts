@@ -16,7 +16,9 @@ import type {
   NodeStateSnapshot,
   NodeSettingsRequest,
   NodeExportData,
-  LogicInfo
+  LogicInfo,
+  WireTapFlags,
+  WireTapPortConfig
 } from '@/types'
 
 // ============================================
@@ -181,4 +183,80 @@ export async function pollNodeState(mcuUri: string): Promise<{
  */
 export async function updateNodePortConfig(nodeId: string, ports: PortConfig[]): Promise<{ ok: boolean; error?: string }> {
   return configureNode(nodeId, { portConfigs: ports })
+}
+
+// ============================================
+// WireTap API
+// ============================================
+
+/**
+ * 设置节点的 WireTap 配置
+ * @param uuid 节点 UUID
+ * @param portIndex 端口索引，0xFF 表示所有端口
+ * @param flags WireTap 标志
+ */
+export async function setNodeWireTap(uuid: string, portIndex: number, flags: WireTapFlags): Promise<{ ok: boolean }> {
+  return post(`/api/node/${uuid}/wiretap`, { portIndex, flags })
+}
+
+/**
+ * 获取节点的 WireTap 配置
+ * @param uuid 节点 UUID
+ */
+export async function getNodeWireTap(uuid: string): Promise<{ ok: boolean; config?: WireTapPortConfig[] }> {
+  return get(`/api/node/${uuid}/wiretap`)
+}
+
+/**
+ * 获取所有节点的 WireTap 配置
+ */
+export async function getAllWireTapConfigs(): Promise<{ ok: boolean; configs: Record<string, WireTapPortConfig[]> }> {
+  return get('/api/wiretap/configs')
+}
+
+/**
+ * WireTap 日志条目（从后端返回）
+ */
+export interface WireTapLogEntryFromBackend {
+  uuid: string
+  nodeName: string
+  portIndex: number
+  direction: number  // 0=RX, 1=TX
+  portType: string   // "Serial" | "CAN"
+  rawData: number[] | string  // byte array or base64
+  canMessage?: {
+    id: number
+    dlc: number
+    rtr: boolean
+    data: number[] | string
+  }
+  timestamp: string
+}
+
+/**
+ * 获取节点的 WireTap 日志
+ * @param uuid 节点 UUID
+ * @param afterIndex 可选，只返回此索引之后的日志
+ * @param maxCount 最大返回数量
+ */
+export async function getNodeWireTapLogs(
+  uuid: string, 
+  afterIndex?: number, 
+  maxCount?: number
+): Promise<{ ok: boolean; entries: WireTapLogEntryFromBackend[]; latestIndex: number }> {
+  const params = new URLSearchParams()
+  if (afterIndex !== undefined) params.set('afterIndex', afterIndex.toString())
+  if (maxCount !== undefined) params.set('maxCount', maxCount.toString())
+  const query = params.toString()
+  return get(`/api/node/${uuid}/wiretap/logs${query ? '?' + query : ''}`)
+}
+
+/**
+ * 获取所有节点的 WireTap 日志
+ */
+export async function getAllWireTapLogs(): Promise<{ 
+  ok: boolean; 
+  logs: Record<string, WireTapLogEntryFromBackend[]> 
+}> {
+  return get('/api/wiretap/logs')
 }

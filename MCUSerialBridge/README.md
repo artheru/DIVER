@@ -179,6 +179,16 @@ MCU 支持两种运行模式：
    * MCU 通过 `CommandMemoryLowerIO` 向 PC 上报输出变量（LowerIO）
    * 默认情况下，DIVER 模式下端口数据不上报，除非启用 Wire Tap 模式
 
+### Wire Tap 模式
+
+Wire Tap 是一种调试功能，允许在 DIVER 模式下监听端口通信数据：
+
+* 通过 `CommandEnableWireTap (0x05)` 启用，数据格式：`portIndex (1B) + flags (1B)`
+* `flags` 位定义：`bit0 = RX`, `bit1 = TX`
+* 启用后，MCU 会通过 `CommandUploadPort (0x20)` 上报匹配端口的收发数据
+* 支持按端口独立控制 TX/RX 监听
+* CoralinkerHost 前端提供可视化的 WireTap 日志查看和协议解析功能
+
 ### 程序下载（分片传输）
 
 `CommandProgram` 支持大程序的分片传输：

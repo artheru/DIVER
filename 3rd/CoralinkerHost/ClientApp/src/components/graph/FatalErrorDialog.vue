@@ -346,13 +346,20 @@ watch(() => props.errorData?.logicName, async (logicName) => {
 }
 
 .error-message-box {
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 122, 69, 0.3);
   border-radius: 6px;
-  padding: 12px;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 13px;
-  color: #ff7a45;
-  word-break: break-all;
+  padding: 14px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.6;
+  color: #ff9a6c;
+  word-break: break-word;
+}
+
+.error-message-box code {
+  font-family: inherit;
+  font-size: inherit;
 }
 
 .coredump-box {
