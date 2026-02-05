@@ -5085,17 +5085,19 @@ void builtin_BitConverter_GetBytes_Single(uchar** reptr) {
 }
 
 void builtin_BitConverter_GetBytes_UInt16(uchar** reptr) {
-	int startIndex = pop_int(reptr);
-	int array_id = pop_reference(reptr);
+	unsigned short value = pop_short(reptr);
+	int array_id = newarr(2, Byte);
 	struct array_val* arr = heap_obj[array_id].pointer;
-	PUSH_STACK_UINT16(*(unsigned short*)(&arr->payload + startIndex));
+	*(unsigned short*)&arr->payload = value;
+	PUSH_STACK_REFERENCEID(array_id);
 }
 
 void builtin_BitConverter_GetBytes_UInt32(uchar** reptr) {
-	int startIndex = pop_int(reptr);
-	int array_id = pop_reference(reptr);
+	unsigned int value = pop_int(reptr);
+	int array_id = newarr(4, Byte);
 	struct array_val* arr = heap_obj[array_id].pointer;
-	push_int(reptr, *(unsigned int*)(&arr->payload + startIndex));
+	*(unsigned int*)&arr->payload = value;
+	PUSH_STACK_REFERENCEID(array_id);
 }
 
 void builtin_BitConverter_ToBoolean(uchar** reptr) {
