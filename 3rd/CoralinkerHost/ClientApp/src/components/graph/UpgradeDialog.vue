@@ -316,7 +316,7 @@ async function handleUpgrade() {
   upgradeStage.value = 'Connecting'
   upgradeMessage.value = ''
   upgradeResult.value = null
-  nodeId.value = crypto.randomUUID()
+  nodeId.value = Math.random().toString(36).slice(2) + Date.now().toString(36)
   
   try {
     const result = await startUpgrade(props.mcuUri, upgFile.value, nodeId.value)
