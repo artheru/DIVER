@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <Compile Include="..\..\DiverTest\DIVER\DIVERInterface.cs" Link="res\DIVERInterface.cs" />
+    <Compile Include="..\..\DiverTest\DIVER\DIVERCommonUtils.cs" Link="res\DIVERCommonUtils.cs" />
     <Compile Include="..\..\DiverTest\RunOnMCU.cs" Link="res\RunOnMCU.cs" />
     <Compile Include="..\..\DiverTest\Extensions.cs" Link="res\Extensions.cs" />
   </ItemGroup>
