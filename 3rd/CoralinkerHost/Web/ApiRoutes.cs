@@ -177,7 +177,8 @@ public static class ApiRoutes
             var full = Path.Combine(store.InputsDir, name);
             if (File.Exists(full)) return Results.BadRequest(new { error = "File already exists." });
 
-            var content = req.Template ?? "using CartActivator;\n\nnamespace DiverTest\n{\n    // [LogicRunOnMCU(scanInterval = 50)]\n    public class MyLogic : LadderLogic<TestVehicle>\n    {\n        public override void Operation(int iteration)\n        {\n            // TODO\n        }\n    }\n}\n";
+            var className = Path.GetFileNameWithoutExtension(name);
+            var content = req.Template ?? GenerateDefaultTemplate(className);
             await File.WriteAllTextAsync(full, content, Encoding.UTF8, ct);
             return Results.Ok(new { ok = true, path = $"assets/inputs/{name}" });
         });
@@ -940,6 +941,64 @@ public static class ApiRoutes
             return new MCUSerialBridgeCLR.CANPortConfig(p.Baud, p.RetryTimeMs ?? 10);
         }
         return new MCUSerialBridgeCLR.SerialPortConfig(p.Baud, p.ReceiveFrameMs ?? 0);
+    }
+
+    private static string GenerateDefaultTemplate(string className)
+    {
+        return $$"""
+            using CartActivator;
+
+            /// <summary>
+            /// {{className}} 的变量表
+            /// 定义 Host 与 MCU 之间交换的变量
+            /// </summary>
+            public class {{className}}Cart : CartDefinition
+            {
+                // Host → MCU (在 Variables 面板中可修改)
+                [AsUpperIO] public int input;
+
+                // MCU → Host (在 Variables 面板中可查看)
+                [AsLowerIO] public int output;
+            }
+
+            /// <summary>
+            /// {{className}}
+            /// </summary>
+            [LogicRunOnMCU(scanInterval = 100)]
+            public class {{className}} : LadderLogic<{{className}}Cart>
+            {
+                public override void Operation(int iteration)
+                {
+                    Console.WriteLine($"Hello World! iteration={iteration}");
+
+                    // ---- 变量表读写 ----
+                    // cart.input  : 读取 UpperIO 变量 (Host → MCU)
+                    // cart.output : 写入 LowerIO 变量 (MCU → Host)
+                    // cart.output = cart.input + 1;
+
+                    // ---- 串口通信 ----
+                    // RunOnMCU.WriteStream(byte[] data, int portIndex)
+                    //   发送字节数组到指定串口端口
+                    //   示例: RunOnMCU.WriteStream(new byte[] { 0x01, 0x03 }, 0);
+
+                    // ---- CAN 总线通信 ----
+                    // RunOnMCU.WriteCANMessage(int portIndex, CANMessage msg)
+                    //   发送 CAN 报文到指定 CAN 端口
+                    //   示例:
+                    //   RunOnMCU.WriteCANMessage(4, new CANMessage
+                    //   {
+                    //       ID = 0x601,
+                    //       RTR = false,
+                    //       Payload = new byte[] { 0x40, 0x41, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00 }
+                    //   });
+
+                    // ---- 数字 IO (32 路开关量输出) ----
+                    // RunOnMCU.WriteSnapshot(byte[] data)
+                    //   写入 4 字节 = 32 位数字输出
+                    //   示例: RunOnMCU.WriteSnapshot(BitConverter.GetBytes(0x0000_0001));
+                }
+            }
+            """;
     }
 }
 

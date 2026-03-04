@@ -92,6 +92,10 @@ public sealed class DiverBuildService
         if (File.Exists(diverInterface))
             File.Copy(diverInterface, Path.Combine(projDir, "DIVERInterface.cs"), overwrite: true);
 
+        var diverCommonUtils = Path.Combine(diverTestDir, "DIVER", "DIVERCommonUtils.cs");
+        if (File.Exists(diverCommonUtils))
+            File.Copy(diverCommonUtils, Path.Combine(projDir, "DIVERCommonUtils.cs"), overwrite: true);
+
         var extensions = Path.Combine(diverTestDir, "Extensions.cs");
         if (File.Exists(extensions))
             File.Copy(extensions, Path.Combine(projDir, "Extensions.cs"), overwrite: true);
