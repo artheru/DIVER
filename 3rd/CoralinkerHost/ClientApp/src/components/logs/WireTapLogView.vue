@@ -186,7 +186,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useWireTapStore, useLogStore } from '@/stores'
-import type { WireTapLogEntry, CANMessageData } from '@/types'
+import type { WireTapLogEntry } from '@/types'
 import { protocolRegistry, type ParseResult, type ParseContext } from '@/protocol'
 
 const props = defineProps<{
@@ -301,11 +301,10 @@ interface ParsedLogLine {
 
 const parsedConsoleLines = computed((): ParsedLogLine[] => {
   return consoleLines.value.map(line => {
-    // 尝试匹配时间戳格式: [HH:MM:SS.mmm] 或 [HH:MM:SS]
     const timeMatch = line.match(/^\[(\d{2}:\d{2}:\d{2}(?:\.\d{3})?)\]\s*/)
     if (timeMatch) {
       return {
-        time: timeMatch[1],
+        time: timeMatch[1] ?? null,
         message: line.slice(timeMatch[0].length)
       }
     }
@@ -495,7 +494,7 @@ function interpretBytes(bytes: number[]): InspectInterpretation[] {
   
   // 1 字节
   if (len === 1) {
-    const u8 = bytes[0]
+    const u8 = bytes[0]!
     const i8 = u8 > 127 ? u8 - 256 : u8
     results.push({ type: 'u8', value: `${u8}` })
     results.push({ type: 'i8', value: `${i8}` })
@@ -509,8 +508,8 @@ function interpretBytes(bytes: number[]): InspectInterpretation[] {
   if (len === 2) {
     const buffer = new ArrayBuffer(2)
     const view = new DataView(buffer)
-    view.setUint8(0, bytes[0])
-    view.setUint8(1, bytes[1])
+    view.setUint8(0, bytes[0]!)
+    view.setUint8(1, bytes[1]!)
     
     results.push({ type: 'u16 LE', value: `${view.getUint16(0, true)}` })
     results.push({ type: 'u16 BE', value: `${view.getUint16(0, false)}` })
@@ -524,7 +523,7 @@ function interpretBytes(bytes: number[]): InspectInterpretation[] {
   if (len === 4) {
     const buffer = new ArrayBuffer(4)
     const view = new DataView(buffer)
-    for (let i = 0; i < 4; i++) view.setUint8(i, bytes[i])
+    for (let i = 0; i < 4; i++) view.setUint8(i, bytes[i]!)
     
     results.push({ type: 'u32 LE', value: `${view.getUint32(0, true)}` })
     results.push({ type: 'u32 BE', value: `${view.getUint32(0, false)}` })
@@ -540,7 +539,7 @@ function interpretBytes(bytes: number[]): InspectInterpretation[] {
   if (len === 8) {
     const buffer = new ArrayBuffer(8)
     const view = new DataView(buffer)
-    for (let i = 0; i < 8; i++) view.setUint8(i, bytes[i])
+    for (let i = 0; i < 8; i++) view.setUint8(i, bytes[i]!)
     
     results.push({ type: 'u64 LE', value: `${view.getBigUint64(0, true)}` })
     results.push({ type: 'u64 BE', value: `${view.getBigUint64(0, false)}` })
@@ -555,8 +554,8 @@ function interpretBytes(bytes: number[]): InspectInterpretation[] {
     let leVal = BigInt(0)
     let beVal = BigInt(0)
     for (let i = 0; i < len; i++) {
-      leVal |= BigInt(bytes[i]) << BigInt(i * 8)
-      beVal = (beVal << BigInt(8)) | BigInt(bytes[i])
+      leVal |= BigInt(bytes[i]!) << BigInt(i * 8)
+      beVal = (beVal << BigInt(8)) | BigInt(bytes[i]!)
     }
     results.push({ type: `${len}B LE`, value: `${leVal}` })
     results.push({ type: `${len}B BE`, value: `${beVal}` })

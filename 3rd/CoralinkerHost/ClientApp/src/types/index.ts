@@ -275,12 +275,13 @@ export interface SetVariableRequest {
 /**
  * WireTap 标志
  */
-export enum WireTapFlags {
-  None = 0x00,
-  RX = 0x01,
-  TX = 0x02,
-  Both = 0x03
-}
+export const WireTapFlags = {
+  None: 0x00,
+  RX: 0x01,
+  TX: 0x02,
+  Both: 0x03
+} as const
+export type WireTapFlags = (typeof WireTapFlags)[keyof typeof WireTapFlags]
 
 /**
  * WireTap 端口配置
@@ -311,6 +312,7 @@ export interface CANMessageData {
   id: number
   dlc: number
   rtr: boolean
+  ext?: boolean
   data: number[]
 }
 

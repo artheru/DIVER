@@ -25,9 +25,8 @@ export class CANopenParser implements ProtocolParser {
   readonly portTypes: ('serial' | 'can')[] = ['can']
   readonly description = 'CANOpen protocol (CiA 301 + CiA 402)'
   
-  detect(data: number[], context: ParseContext): number {
+  detect(_data: number[], context: ParseContext): number {
     if (context.portType !== 'can') return 0
-    // 注意：canId 可以是 0 (NMT 消息)，所以用 undefined 检查
     if (context.canId === undefined) return 0
     
     const cobId = context.canId
@@ -128,8 +127,8 @@ export class CANopenParser implements ProtocolParser {
   
   private parseNMT(data: number[], fields: ParsedField[]): void {
     if (data.length >= 2) {
-      const command = data[0]
-      const nodeId = data[1]
+      const command = data[0]!
+      const nodeId = data[1]!
       
       fields.push({
         name: 'Command',
@@ -151,7 +150,7 @@ export class CANopenParser implements ProtocolParser {
   
   private getNMTSummary(data: number[]): string {
     if (data.length >= 2) {
-      const cmd = NMT_COMMANDS[data[0]] || 'Unknown'
+      const cmd = NMT_COMMANDS[data[0]!] || 'Unknown'
       const node = data[1] === 0 ? 'All' : `Node ${data[1]}`
       return `NMT ${cmd} → ${node}`
     }
@@ -184,16 +183,15 @@ export class CANopenParser implements ProtocolParser {
     if (data.length >= 1) {
       fields.push({
         name: 'Counter',
-        bytes: [data[0]],
-        value: data[0],
+        bytes: [data[0]!],
+        value: data[0]!,
         highlight: '#ce93d8'
       })
     }
   }
   
-  private parseEmergency(data: number[], fields: ParsedField[], nodeId: number): void {
+  private parseEmergency(data: number[], fields: ParsedField[], _nodeId: number): void {
     if (data.length >= 8) {
-      // Emergency Error Code (bytes 0-1)
       const errorCode = ByteUtils.readU16LE(data, 0)
       const errorName = this.lookupEmergencyError(errorCode)
       
@@ -205,11 +203,10 @@ export class CANopenParser implements ProtocolParser {
         highlight: '#ef5350'
       })
       
-      // Error Register (byte 2)
       fields.push({
         name: 'Error Register',
-        bytes: [data[2]],
-        value: `0x${data[2].toString(16).toUpperCase().padStart(2, '0')}`,
+        bytes: [data[2]!],
+        value: `0x${data[2]!.toString(16).toUpperCase().padStart(2, '0')}`,
         highlight: '#ffb74d'
       })
       
@@ -246,9 +243,9 @@ export class CANopenParser implements ProtocolParser {
     return `EMCY Node ${nodeId}`
   }
   
-  private parseHeartbeat(data: number[], fields: ParsedField[], nodeId: number): void {
+  private parseHeartbeat(data: number[], fields: ParsedField[], _nodeId: number): void {
     if (data.length >= 1) {
-      const state = data[0]
+      const state = data[0]!
       const stateName = NMT_STATES[state] || 'Unknown'
       
       fields.push({
@@ -263,7 +260,7 @@ export class CANopenParser implements ProtocolParser {
   
   private getHeartbeatSummary(data: number[], nodeId: number): string {
     if (data.length >= 1) {
-      const stateName = NMT_STATES[data[0]] || 'Unknown'
+      const stateName = NMT_STATES[data[0]!] || 'Unknown'
       return `Heartbeat Node ${nodeId}: ${stateName}`
     }
     return `Heartbeat Node ${nodeId}`
@@ -279,16 +276,12 @@ export class CANopenParser implements ProtocolParser {
       return { messageType: 'SDO', summary: `SDO Node ${nodeId}: Empty` }
     }
     
-    const command = data[0]
-    const isRequest = type === 'SDO_RX'  // RX = Client → Server = Request
-    
-    // 解析命令说明符
-    const ccs = (command >> 5) & 0x07  // Client Command Specifier
+    const command = data[0]!
+    const isRequest = type === 'SDO_RX'
     
     let messageType = 'SDO'
     let summary = ''
     
-    // Abort Transfer
     if ((command & 0xE0) === 0x80) {
       return this.parseSDOAbort(data, fields, nodeId)
     }
@@ -296,9 +289,8 @@ export class CANopenParser implements ProtocolParser {
     // 解析索引和子索引（如果存在）
     if (data.length >= 4) {
       const index = ByteUtils.readU16LE(data, 1)
-      const subIndex = data[3]
+      const subIndex = data[3]!
       
-      // 查找对象字典（带来源标识）
       const { entry: objEntry, source } = this.lookupObject(index, subIndex)
       
       const indexStr = `0x${index.toString(16).toUpperCase().padStart(4, '0')}`
@@ -460,7 +452,7 @@ export class CANopenParser implements ProtocolParser {
   ): { messageType: string; summary: string } {
     fields.push({
       name: 'Command',
-      bytes: [data[0]],
+      bytes: [data[0]!],
       value: '0x80',
       description: 'Abort Transfer',
       highlight: '#ef5350'
@@ -468,7 +460,7 @@ export class CANopenParser implements ProtocolParser {
     
     if (data.length >= 4) {
       const index = ByteUtils.readU16LE(data, 1)
-      const subIndex = data[3]
+      const subIndex = data[3]!
       
       fields.push({
         name: 'Index',
@@ -508,32 +500,28 @@ export class CANopenParser implements ProtocolParser {
   
   private parseSDOData(
     index: number, 
-    subIndex: number, 
+    _subIndex: number, 
     data: number[],
-    objEntry?: { name?: string; dataType?: string }
+    _objEntry?: { name?: string; dataType?: string }
   ): { field: ParsedField; valueStr: string } {
     let value: number | string
     let description: string | undefined
     let valueStr: string
     
-    // 特殊处理 CiA 402 对象
     if (index === 0x6040 && data.length >= 2) {
-      // Controlword
       const cwValue = ByteUtils.readU16LE(data, 0)
       const cwResult = parseControlword(cwValue)
       value = cwValue
       description = cwResult.command
       valueStr = `${cwValue} (${cwResult.command})`
     } else if (index === 0x6041 && data.length >= 2) {
-      // Statusword
       const swValue = ByteUtils.readU16LE(data, 0)
       const swResult = parseStatusword(swValue)
       value = swValue
       description = swResult.state
       valueStr = `${swValue} (${swResult.state})`
     } else if ((index === 0x6060 || index === 0x6061) && data.length >= 1) {
-      // Modes of Operation
-      const mode = data[0] > 127 ? data[0] - 256 : data[0]
+      const mode = data[0]! > 127 ? data[0]! - 256 : data[0]!
       const modeName = OperationModes[mode] || 'Unknown'
       value = mode
       description = modeName
@@ -547,7 +535,7 @@ export class CANopenParser implements ProtocolParser {
     } else {
       // 通用解析
       if (data.length === 1) {
-        value = data[0]
+        value = data[0]!
         valueStr = `${value}`
       } else if (data.length === 2) {
         value = ByteUtils.readU16LE(data, 0)
@@ -573,7 +561,7 @@ export class CANopenParser implements ProtocolParser {
     }
   }
   
-  private parsePDO(data: number[], fields: ParsedField[], type: string, nodeId: number): void {
+  private parsePDO(data: number[], fields: ParsedField[], _type: string, _nodeId: number): void {
     // PDO 数据是映射定义的，这里只显示原始字节
     // 可以扩展为根据 PDO 映射配置解析
     

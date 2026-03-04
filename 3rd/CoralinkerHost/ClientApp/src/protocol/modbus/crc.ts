@@ -30,7 +30,7 @@ const CRC_TABLE = new Uint16Array(256)
 export function calculateCRC16(data: number[]): number {
   let crc = 0xFFFF
   for (const byte of data) {
-    crc = (crc >> 8) ^ CRC_TABLE[(crc ^ byte) & 0xFF]
+    crc = (crc >> 8) ^ CRC_TABLE[(crc ^ byte) & 0xFF]!
   }
   return crc
 }
@@ -44,7 +44,7 @@ export function verifyCRC16(data: number[]): boolean {
   if (data.length < 3) return false
   
   const payload = data.slice(0, -2)
-  const receivedCRC = data[data.length - 2] | (data[data.length - 1] << 8)
+  const receivedCRC = data[data.length - 2]! | (data[data.length - 1]! << 8)
   const calculatedCRC = calculateCRC16(payload)
   
   return receivedCRC === calculatedCRC

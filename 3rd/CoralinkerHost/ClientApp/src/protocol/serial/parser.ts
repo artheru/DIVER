@@ -74,7 +74,6 @@ export class RawSerialParser implements ProtocolParser {
     
     if (data.length >= 4) {
       const u32le = ByteUtils.readU32LE(data, 0)
-      const u32be = ByteUtils.readU32BE(data, 0)
       fields.push({
         name: 'First 4 bytes (U32 LE)',
         bytes: data.slice(0, 4),

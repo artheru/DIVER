@@ -85,33 +85,27 @@ export const ByteUtils = {
     return bytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(separator)
   },
   
-  /** 读取 U16 Big Endian */
   readU16BE(bytes: number[], offset: number): number {
-    return (bytes[offset] << 8) | bytes[offset + 1]
+    return (bytes[offset]! << 8) | bytes[offset + 1]!
   },
   
-  /** 读取 U16 Little Endian */
   readU16LE(bytes: number[], offset: number): number {
-    return bytes[offset] | (bytes[offset + 1] << 8)
+    return bytes[offset]! | (bytes[offset + 1]! << 8)
   },
   
-  /** 读取 U32 Big Endian */
   readU32BE(bytes: number[], offset: number): number {
-    return (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]
+    return (bytes[offset]! << 24) | (bytes[offset + 1]! << 16) | (bytes[offset + 2]! << 8) | bytes[offset + 3]!
   },
   
-  /** 读取 U32 Little Endian */
   readU32LE(bytes: number[], offset: number): number {
-    return bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)
+    return bytes[offset]! | (bytes[offset + 1]! << 8) | (bytes[offset + 2]! << 16) | (bytes[offset + 3]! << 24)
   },
   
-  /** 读取 I16 Big Endian */
   readI16BE(bytes: number[], offset: number): number {
     const val = ByteUtils.readU16BE(bytes, offset)
     return val > 0x7FFF ? val - 0x10000 : val
   },
   
-  /** 读取 I16 Little Endian */
   readI16LE(bytes: number[], offset: number): number {
     const val = ByteUtils.readU16LE(bytes, offset)
     return val > 0x7FFF ? val - 0x10000 : val

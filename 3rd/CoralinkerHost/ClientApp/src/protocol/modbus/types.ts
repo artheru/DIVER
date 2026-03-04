@@ -3,29 +3,27 @@
  */
 
 /** MODBUS 功能码 */
-export enum ModbusFunctionCode {
-  ReadCoils = 0x01,
-  ReadDiscreteInputs = 0x02,
-  ReadHoldingRegisters = 0x03,
-  ReadInputRegisters = 0x04,
-  WriteSingleCoil = 0x05,
-  WriteSingleRegister = 0x06,
-  WriteMultipleCoils = 0x0F,
-  WriteMultipleRegisters = 0x10,
-  // 诊断
-  ReadExceptionStatus = 0x07,
-  Diagnostics = 0x08,
-  GetCommEventCounter = 0x0B,
-  GetCommEventLog = 0x0C,
-  ReportSlaveID = 0x11,
-  // 文件操作
-  ReadFileRecord = 0x14,
-  WriteFileRecord = 0x15,
-  // 其他
-  MaskWriteRegister = 0x16,
-  ReadWriteMultipleRegisters = 0x17,
-  ReadFIFOQueue = 0x18
-}
+export const ModbusFunctionCode = {
+  ReadCoils: 0x01,
+  ReadDiscreteInputs: 0x02,
+  ReadHoldingRegisters: 0x03,
+  ReadInputRegisters: 0x04,
+  WriteSingleCoil: 0x05,
+  WriteSingleRegister: 0x06,
+  WriteMultipleCoils: 0x0F,
+  WriteMultipleRegisters: 0x10,
+  ReadExceptionStatus: 0x07,
+  Diagnostics: 0x08,
+  GetCommEventCounter: 0x0B,
+  GetCommEventLog: 0x0C,
+  ReportSlaveID: 0x11,
+  ReadFileRecord: 0x14,
+  WriteFileRecord: 0x15,
+  MaskWriteRegister: 0x16,
+  ReadWriteMultipleRegisters: 0x17,
+  ReadFIFOQueue: 0x18
+} as const
+export type ModbusFunctionCode = (typeof ModbusFunctionCode)[keyof typeof ModbusFunctionCode]
 
 /** 功能码名称映射 */
 export const FunctionCodeNames: Record<number, string> = {
@@ -50,18 +48,19 @@ export const FunctionCodeNames: Record<number, string> = {
 }
 
 /** MODBUS 异常码 */
-export enum ModbusExceptionCode {
-  IllegalFunction = 0x01,
-  IllegalDataAddress = 0x02,
-  IllegalDataValue = 0x03,
-  SlaveDeviceFailure = 0x04,
-  Acknowledge = 0x05,
-  SlaveDeviceBusy = 0x06,
-  NegativeAcknowledge = 0x07,
-  MemoryParityError = 0x08,
-  GatewayPathUnavailable = 0x0A,
-  GatewayTargetDeviceFailedToRespond = 0x0B
-}
+export const ModbusExceptionCode = {
+  IllegalFunction: 0x01,
+  IllegalDataAddress: 0x02,
+  IllegalDataValue: 0x03,
+  SlaveDeviceFailure: 0x04,
+  Acknowledge: 0x05,
+  SlaveDeviceBusy: 0x06,
+  NegativeAcknowledge: 0x07,
+  MemoryParityError: 0x08,
+  GatewayPathUnavailable: 0x0A,
+  GatewayTargetDeviceFailedToRespond: 0x0B
+} as const
+export type ModbusExceptionCode = (typeof ModbusExceptionCode)[keyof typeof ModbusExceptionCode]
 
 /** 异常码名称映射 */
 export const ExceptionCodeNames: Record<number, string> = {

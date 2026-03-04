@@ -48,7 +48,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { NModal, NCard, NButton, NSpin } from 'naive-ui'
-import { getLogicList, type LogicInfo } from '@/api/device'
+import { getLogicList } from '@/api/device'
+import type { LogicInfo } from '@/types'
 
 // Props
 const props = defineProps<{

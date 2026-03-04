@@ -670,8 +670,6 @@ const showConfigDialog = ref(false)
 const editingWidget = ref<GridWidget | null>(null)
 const selectedWidgetId = ref<string | null>(null)
 const draggingWidgetId = ref<string | null>(null)
-const canvasRef = ref<HTMLDivElement | null>(null)
-
 // 控件拖动
 const widgetDragStartX = ref(0)
 const widgetDragStartY = ref(0)

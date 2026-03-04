@@ -167,7 +167,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { NModal, NCard, NButton, NSpin, NProgress } from 'naive-ui'
 import { parseUpgFile, startUpgrade } from '@/api/upgrade'
 import { useSignalR } from '@/composables/useSignalR'
-import type { VersionInfo, UpgradeProgress as UpgradeProgressType } from '@/types'
+import type { VersionInfo } from '@/types'
 
 // Props
 const props = defineProps<{
@@ -268,7 +268,7 @@ function handleFileDrop(e: DragEvent) {
   
   const files = e.dataTransfer?.files
   if (files && files.length > 0) {
-    const file = files[0]
+    const file = files[0]!
     if (file.name.toLowerCase().endsWith('.upg')) {
       processFile(file)
     }
@@ -278,7 +278,7 @@ function handleFileDrop(e: DragEvent) {
 function handleFileSelect(e: Event) {
   const input = e.target as HTMLInputElement
   if (input.files && input.files.length > 0) {
-    processFile(input.files[0])
+    processFile(input.files[0]!)
   }
   input.value = ''
 }
