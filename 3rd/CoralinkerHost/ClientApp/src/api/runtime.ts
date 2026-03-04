@@ -7,12 +7,9 @@
 
 import { get, post } from './index'
 import type {
-  StartResult,
-  SessionState,
   CartFieldMeta,
   CartFieldValue,
   SetVariableRequest,
-  LogQueryResult,
   NodeStateSnapshot
 } from '@/types'
 
@@ -241,7 +238,7 @@ export async function getRuntimeSnapshot(): Promise<{
 /**
  * @deprecated 不再需要，节点统计在 NodeStateSnapshot.stats 中
  */
-export async function getNodeStats(nodeId: string): Promise<{ ok: boolean; error?: string }> {
+export async function getNodeStats(_nodeId: string): Promise<{ ok: boolean; error?: string }> {
   console.warn('[API] getNodeStats() is deprecated, stats are included in node state')
   return { ok: true }
 }

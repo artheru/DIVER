@@ -12,15 +12,15 @@
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import { 
-  create, 
-  NConfigProvider, 
-  NMessageProvider, 
-  NDialogProvider,
-  NNotificationProvider
-} from 'naive-ui'
 import App from './App.vue'
 import router from './router'
+
+// 本地字体（替代 Google Fonts CDN，支持纯局域网部署）
+import '@fontsource/inter/400.css'
+import '@fontsource/inter/500.css'
+import '@fontsource/inter/600.css'
+import '@fontsource/jetbrains-mono/400.css'
+import '@fontsource/jetbrains-mono/500.css'
 
 // 全局样式
 import './styles/main.css'
@@ -28,29 +28,9 @@ import './styles/main.css'
 // LiteGraph 样式
 import 'litegraph.js/css/litegraph.css'
 
-// 创建 Naive UI 实例（按需引入的组件会自动注册）
-const naive = create({
-  components: [
-    NConfigProvider,
-    NMessageProvider,
-    NDialogProvider,
-    NNotificationProvider
-  ]
-})
-
-// 创建 Vue 应用
 const app = createApp(App)
-
-// 安装 Pinia 状态管理
 app.use(createPinia())
-
-// 安装 Naive UI
-app.use(naive)
-
-// 安装路由
 app.use(router)
-
-// 挂载应用到 DOM
 app.mount('#app')
 
 console.log('[App] Coralinker DIVER Host started')

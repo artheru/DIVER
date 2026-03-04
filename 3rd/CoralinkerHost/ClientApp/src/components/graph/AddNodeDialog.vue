@@ -159,7 +159,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { NModal, NCard, NButton, NFormItem, NSelect, NRadioGroup, NRadioButton, NInput, NSpin } from 'naive-ui'
 import { getAvailablePorts, probeNode, addNode as apiAddNode } from '@/api/device'
 import UpgradeDialog from './UpgradeDialog.vue'
-import type { LayoutInfo, VersionInfo, NodeProbeResult } from '@/types'
+import type { LayoutInfo, VersionInfo } from '@/types'
 
 // Props
 const props = defineProps<{

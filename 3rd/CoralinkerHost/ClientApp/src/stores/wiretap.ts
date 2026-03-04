@@ -10,7 +10,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed, triggerRef } from 'vue'
-import { WireTapFlags, type WireTapDataEvent, type WireTapLogEntry, type CANMessageData } from '@/types'
+import { WireTapFlags, type WireTapDataEvent, type WireTapLogEntry } from '@/types'
 import * as deviceApi from '@/api/device'
 
 /** 单个端口的最大日志条目数 */
@@ -167,13 +167,12 @@ export const useWireTapStore = defineStore('wiretap', () => {
   async function setPortWireTap(uuid: string, portIndex: number, rx: boolean, tx: boolean, portType?: string, portName?: string): Promise<boolean> {
     const state = ensureNodeState(uuid)
     
-    // 计算 flags
-    let flags = WireTapFlags.None
+    let flags = WireTapFlags.None as number
     if (rx) flags |= WireTapFlags.RX
     if (tx) flags |= WireTapFlags.TX
     
     try {
-      const result = await deviceApi.setNodeWireTap(uuid, portIndex, flags)
+      const result = await deviceApi.setNodeWireTap(uuid, portIndex, flags as WireTapFlags)
       
       if (result.ok) {
         // 更新本地状态

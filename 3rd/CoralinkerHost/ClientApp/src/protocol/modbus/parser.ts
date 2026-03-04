@@ -13,16 +13,13 @@ export class ModbusRtuParser implements ProtocolParser {
   readonly portTypes: ('serial' | 'can')[] = ['serial']
   readonly description = 'MODBUS RTU protocol over RS-485/RS-232'
   
-  detect(data: number[], context: ParseContext): number {
-    // 最小帧长度：地址(1) + 功能码(1) + CRC(2) = 4
+  detect(data: number[], _context: ParseContext): number {
     if (data.length < 4) return 0
     
-    // 检查从机地址是否有效 (1-247)
-    const slaveAddr = data[0]
+    const slaveAddr = data[0]!
     if (slaveAddr === 0 || slaveAddr > 247) return 0.15
     
-    // 检查功能码是否在常见范围
-    const funcCode = data[1] & 0x7F
+    const funcCode = data[1]! & 0x7F
     const isCommonFuncCode = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x0F, 0x10].includes(funcCode)
     
     if (funcCode < 1 || funcCode > 0x18) return 0.2
@@ -54,8 +51,7 @@ export class ModbusRtuParser implements ProtocolParser {
       }
     }
     
-    // 解析从机地址
-    const slaveAddr = data[0]
+    const slaveAddr = data[0]!
     fields.push({
       name: 'Slave Address',
       bytes: [slaveAddr],
@@ -64,8 +60,7 @@ export class ModbusRtuParser implements ProtocolParser {
       highlight: '#4fc3f7'
     })
     
-    // 解析功能码
-    const funcByte = data[1]
+    const funcByte = data[1]!
     const isException = (funcByte & 0x80) !== 0
     const funcCode = funcByte & 0x7F
     const funcName = FunctionCodeNames[funcCode] || `Unknown (0x${funcCode.toString(16).toUpperCase()})`
@@ -90,8 +85,7 @@ export class ModbusRtuParser implements ProtocolParser {
       this.parseNormalMessage(funcCode, dataBytes, fields, context, errors)
     }
     
-    // CRC 校验
-    const receivedCRC = crcBytes[0] | (crcBytes[1] << 8)
+    const receivedCRC = crcBytes[0]! | (crcBytes[1]! << 8)
     const calculatedCRC = calculateCRC16(data.slice(0, -2))
     const crcValid = receivedCRC === calculatedCRC
     
@@ -124,7 +118,7 @@ export class ModbusRtuParser implements ProtocolParser {
   
   private parseException(dataBytes: number[], fields: ParsedField[]): void {
     if (dataBytes.length >= 1) {
-      const exCode = dataBytes[0]
+      const exCode = dataBytes[0]!
       const exName = ExceptionCodeNames[exCode] || 'Unknown'
       fields.push({
         name: 'Exception Code',
@@ -141,7 +135,7 @@ export class ModbusRtuParser implements ProtocolParser {
     dataBytes: number[],
     fields: ParsedField[],
     context: ParseContext,
-    errors: string[]
+    _errors: string[]
   ): void {
     switch (funcCode) {
       case ModbusFunctionCode.ReadCoils:
@@ -183,7 +177,7 @@ export class ModbusRtuParser implements ProtocolParser {
     }
   }
   
-  private parseReadBitsRequest(dataBytes: number[], fields: ParsedField[], context: ParseContext): void {
+  private parseReadBitsRequest(dataBytes: number[], fields: ParsedField[], _context: ParseContext): void {
     if (dataBytes.length === 4) {
       // 请求：起始地址 + 数量
       const startAddr = ByteUtils.readU16BE(dataBytes, 0)
@@ -204,8 +198,7 @@ export class ModbusRtuParser implements ProtocolParser {
         highlight: '#ce93d8'
       })
     } else if (dataBytes.length >= 1) {
-      // 响应：字节数 + 数据
-      const byteCount = dataBytes[0]
+      const byteCount = dataBytes[0]!
       fields.push({
         name: 'Byte Count',
         bytes: [byteCount],
@@ -226,7 +219,7 @@ export class ModbusRtuParser implements ProtocolParser {
     }
   }
   
-  private parseReadRegistersRequest(dataBytes: number[], fields: ParsedField[], context: ParseContext): void {
+  private parseReadRegistersRequest(dataBytes: number[], fields: ParsedField[], _context: ParseContext): void {
     if (dataBytes.length === 4) {
       // 请求：起始地址 + 数量
       const startAddr = ByteUtils.readU16BE(dataBytes, 0)
@@ -248,8 +241,7 @@ export class ModbusRtuParser implements ProtocolParser {
         highlight: '#ce93d8'
       })
     } else if (dataBytes.length >= 1) {
-      // 响应：字节数 + 寄存器值
-      const byteCount = dataBytes[0]
+      const byteCount = dataBytes[0]!
       fields.push({
         name: 'Byte Count',
         bytes: [byteCount],
@@ -320,11 +312,11 @@ export class ModbusRtuParser implements ProtocolParser {
     }
   }
   
-  private parseWriteMultipleCoils(dataBytes: number[], fields: ParsedField[], context: ParseContext): void {
+  private parseWriteMultipleCoils(dataBytes: number[], fields: ParsedField[], _context: ParseContext): void {
     if (dataBytes.length >= 5) {
       const startAddr = ByteUtils.readU16BE(dataBytes, 0)
       const quantity = ByteUtils.readU16BE(dataBytes, 2)
-      const byteCount = dataBytes[4]
+      const byteCount = dataBytes[4]!
       
       fields.push({
         name: 'Start Address',
@@ -378,11 +370,11 @@ export class ModbusRtuParser implements ProtocolParser {
     }
   }
   
-  private parseWriteMultipleRegisters(dataBytes: number[], fields: ParsedField[], context: ParseContext): void {
+  private parseWriteMultipleRegisters(dataBytes: number[], fields: ParsedField[], _context: ParseContext): void {
     if (dataBytes.length >= 5) {
       const startAddr = ByteUtils.readU16BE(dataBytes, 0)
       const quantity = ByteUtils.readU16BE(dataBytes, 2)
-      const byteCount = dataBytes[4]
+      const byteCount = dataBytes[4]!
       
       fields.push({
         name: 'Start Address',
@@ -446,7 +438,7 @@ export class ModbusRtuParser implements ProtocolParser {
     const bits: string[] = []
     for (let i = 0; i < data.length; i++) {
       for (let j = 0; j < 8; j++) {
-        bits.push((data[i] >> j) & 1 ? '1' : '0')
+        bits.push((data[i]! >> j) & 1 ? '1' : '0')
       }
     }
     return bits.join('')
@@ -457,7 +449,7 @@ export class ModbusRtuParser implements ProtocolParser {
     funcCode: number,
     isException: boolean,
     dataBytes: number[],
-    context: ParseContext
+    _context: ParseContext
   ): string {
     const funcName = FunctionCodeNames[funcCode] || 'Unknown'
     
@@ -475,7 +467,7 @@ export class ModbusRtuParser implements ProtocolParser {
           const qty = ByteUtils.readU16BE(dataBytes, 2)
           return `Slave ${slaveAddr}: Read ${qty} regs @ 0x${addr.toString(16).toUpperCase()}`
         } else if (dataBytes.length >= 1) {
-          const count = dataBytes[0] / 2
+          const count = dataBytes[0]! / 2
           return `Slave ${slaveAddr}: Response ${count} registers`
         }
         break

@@ -3,5 +3,5 @@
  * @description Composables 统一导出
  */
 
-export { useSignalR, type ConnectionState } from './useSignalR'
+export { useSignalR, type ConnectionState, type FatalErrorData } from './useSignalR'
 export { useAutoSave } from './useAutoSave'

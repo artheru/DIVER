@@ -85,8 +85,8 @@ class ProtocolRegistry {
     
     // 如果有任何解析器有置信度，使用置信度最高的
     // (Raw Serial 后备解析器置信度为 0.1，所以总会有结果)
-    if (scored[0].confidence > 0) {
-      return scored[0].parser.parse(data, context)
+    if (scored[0]!.confidence > 0) {
+      return scored[0]!.parser.parse(data, context)
     }
     
     return null

@@ -7,8 +7,6 @@
 
 import { get, post } from './index'
 import type {
-  VersionInfo,
-  LayoutInfo,
   PortConfig,
   NodeProbeResult,
   AddNodeResult,
