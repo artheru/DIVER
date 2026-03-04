@@ -1,5 +1,6 @@
 using CoralinkerHost.Services;
 using CoralinkerHost.Web;
+using Microsoft.AspNetCore.ResponseCompression;
 
 namespace CoralinkerHost;
 
@@ -16,6 +17,16 @@ internal static class Program
         {
             options.SerializerOptions.PropertyNamingPolicy = JsonHelper.Options.PropertyNamingPolicy;
             options.SerializerOptions.PropertyNameCaseInsensitive = JsonHelper.Options.PropertyNameCaseInsensitive;
+        });
+
+        builder.Services.AddResponseCompression(options =>
+        {
+            options.EnableForHttps = true;
+            options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat([
+                "application/javascript",
+                "text/css",
+                "application/json"
+            ]);
         });
 
         builder.Services.AddSignalR();
@@ -47,6 +58,7 @@ internal static class Program
             });
         });
 
+        app.UseResponseCompression();
         app.UseDefaultFiles();
         app.UseStaticFiles();
 

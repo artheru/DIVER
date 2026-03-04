@@ -240,7 +240,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { NButton, NModal, NCard, NInput } from 'naive-ui'
 import { storeToRefs } from 'pinia'
 import { Splitpanes, Pane } from 'splitpanes'
@@ -252,7 +252,7 @@ import { programNode } from '@/api/device'
 
 // 子组件
 import GraphCanvas from '@/components/graph/GraphCanvas.vue'
-import CodeEditor from '@/components/editor/CodeEditor.vue'
+const CodeEditor = defineAsyncComponent(() => import('@/components/editor/CodeEditor.vue'))
 import HexEditor from '@/components/editor/HexEditor.vue'
 import AssetTree from '@/components/assets/AssetTree.vue'
 import TerminalPanel from '@/components/logs/TerminalPanel.vue'
@@ -285,7 +285,7 @@ useAutoSave()
 const showNewFileDialog = ref(false)
 const newFileName = ref('')
 const graphCanvasRef = ref<InstanceType<typeof GraphCanvas> | null>(null)
-const codeEditorRef = ref<InstanceType<typeof CodeEditor> | null>(null)
+const codeEditorRef = ref<{ goToLine: (line: number) => void, getValue: () => string } | null>(null)
 const importFileRef = ref<HTMLInputElement | null>(null)
 const showAddNodeDialog = ref(false)
 const showControlWindow = ref(false)

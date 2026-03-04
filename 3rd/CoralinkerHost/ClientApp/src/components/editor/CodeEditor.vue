@@ -15,7 +15,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import * as monaco from 'monaco-editor'
+import { monaco } from '@/lib/monaco'
 
 // ============================================
 // Props 和 Emits

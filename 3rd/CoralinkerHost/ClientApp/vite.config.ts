@@ -18,7 +18,7 @@ export default defineConfig({
     vue(),
     // Monaco Editor 插件：自动处理 editor.worker.js 等 Worker 文件
     (monacoEditorPlugin as any).default({
-      languageWorkers: ['editorWorkerService', 'css', 'html', 'json', 'typescript']
+      languageWorkers: ['editorWorkerService', 'json']
     })
   ],
 
@@ -48,16 +48,29 @@ export default defineConfig({
   },
 
   build: {
-    // 构建产物输出到 wwwroot，供 ASP.NET Core 静态文件服务
     outDir: '../wwwroot',
     emptyOutDir: true,
-    sourcemap: true
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('@vue-flow') || id.includes('d3-')) {
+            return 'vue-flow'
+          }
+          if (id.includes('naive-ui')) {
+            return 'naive-ui'
+          }
+          if (id.includes('litegraph')) {
+            return 'litegraph'
+          }
+        }
+      }
+    }
   },
 
   // 预构建优化：提前处理较大的依赖库
   optimizeDeps: {
     include: [
-      'monaco-editor',
       'litegraph.js',
       'naive-ui',
       'pinia',
