@@ -26,8 +26,9 @@ const http = axios.create({
  */
 http.interceptors.request.use(
   (config) => {
-    // 如果需要认证，可以在这里添加 token
-    // config.headers.Authorization = `Bearer ${token}`
+    if (config.data instanceof FormData) {
+      delete config.headers['Content-Type']
+    }
     return config
   },
   (error) => {
