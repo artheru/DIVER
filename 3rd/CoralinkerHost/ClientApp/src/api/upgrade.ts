@@ -3,7 +3,7 @@
  * @description 固件升级相关 API
  */
 
-const API_BASE = ''
+import http from './index'
 
 /**
  * 固件元数据（MCU 和 UPG 通用）
@@ -38,20 +38,12 @@ export async function parseUpgFile(file: File): Promise<UpgParseResult> {
   const formData = new FormData()
   formData.append('file', file)
 
-  const response = await fetch(`${API_BASE}/api/upgrade/parse`, {
-    method: 'POST',
-    body: formData
-  })
-
-  if (!response.ok) {
-    throw new Error(`HTTP error: ${response.status}`)
-  }
-
-  return await response.json()
+  const response = await http.post<UpgParseResult>('/api/upgrade/parse', formData)
+  return response.data
 }
 
 /**
- * 开始固件升级
+ * 开始固件升级（烧录耗时较长，超时设为 5 分钟）
  */
 export async function startUpgrade(
   mcuUri: string,
@@ -65,14 +57,8 @@ export async function startUpgrade(
     formData.append('nodeId', nodeId)
   }
 
-  const response = await fetch(`${API_BASE}/api/upgrade/start`, {
-    method: 'POST',
-    body: formData
+  const response = await http.post<UpgradeResult>('/api/upgrade/start', formData, {
+    timeout: 300_000
   })
-
-  if (!response.ok) {
-    throw new Error(`HTTP error: ${response.status}`)
-  }
-
-  return await response.json()
+  return response.data
 }
