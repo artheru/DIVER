@@ -52,6 +52,8 @@ namespace CartActivator
 
                 for (int cid = 0; cid < tup.fields.Length; cid++)
                 {
+                    if (tup.fields[cid].isUpper) continue;
+
                     // Skip upper-only fields on host writeback (we still consume the bytes)
                     byte typeid = br.ReadByte();
                     object value;
@@ -407,24 +409,8 @@ namespace CartActivator
 
         /// ///////////////////////////////// DONT CARE /////////////////////////////////////
         #pragma warning disable CS0649 // Fields are assigned via JSON deserialization
-        class PField
-        {
-            public string field;
-            public FieldInfo fi;
-            public bool isUpper;
-            public bool isLower;
-            public int typeid, offset; // Reserved for future use
-        }
         #pragma warning restore CS0649
 
-        class LogicInfo
-        {
-            public string name;
-            public PField[] fields;
-            public int iterations;
-            public string diver;
-            public string map;
-        }
         private Dictionary<string, LogicInfo> mcu_logics = new();
 
         /// ///////////////////////////////// Debugging /////////////////////////////////////

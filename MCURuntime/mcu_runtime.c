@@ -1096,12 +1096,13 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
 #define HEAP_WRITE_REFERENCEID(val) *heap=ReferenceID; As(heap+1, int)=val; heap+=get_val_sz(ReferenceID);
 
 // PUSH - optimized to avoid unnecessary memset
-#define PUSH_STACK_INT8(val) *eptr = SByte; As(eptr + 1, int) = val; ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
-#define PUSH_STACK_UINT8(val) *eptr = Byte; As(eptr + 1, int) = val; ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
-#define PUSH_STACK_INT16(val) *eptr = Int16; As(eptr + 1, int) = val; ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
-#define PUSH_STACK_UINT16(val) *eptr = UInt16; As(eptr + 1, int) = val; ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
-#define PUSH_STACK_INT(val) *eptr = Int32; As(eptr + 1, int) = val; ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
-#define PUSH_STACK_UINT(val) *eptr = UInt32; As(eptr + 1, int) = val; ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
+// NOTE: Clear only eptr[5~7], NOT eptr[4] which is part of the value stored at eptr[1~4]
+#define PUSH_STACK_INT8(val) *eptr = SByte; As(eptr + 1, int) = val; eptr[5]=eptr[6]=eptr[7]=0; eptr+=STACK_STRIDE;
+#define PUSH_STACK_UINT8(val) *eptr = Byte; As(eptr + 1, int) = val; eptr[5]=eptr[6]=eptr[7]=0; eptr+=STACK_STRIDE;
+#define PUSH_STACK_INT16(val) *eptr = Int16; As(eptr + 1, int) = val; eptr[5]=eptr[6]=eptr[7]=0; eptr+=STACK_STRIDE;
+#define PUSH_STACK_UINT16(val) *eptr = UInt16; As(eptr + 1, int) = val; eptr[5]=eptr[6]=eptr[7]=0; eptr+=STACK_STRIDE;
+#define PUSH_STACK_INT(val) *eptr = Int32; As(eptr + 1, int) = val; eptr[5]=eptr[6]=eptr[7]=0; eptr+=STACK_STRIDE;
+#define PUSH_STACK_UINT(val) *eptr = UInt32; As(eptr + 1, int) = val; eptr[5]=eptr[6]=eptr[7]=0; eptr+=STACK_STRIDE;
 
 // now our stack has eptr+1 8B aligned.
 
@@ -1112,7 +1113,7 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
 #define PUSH_STACK_METHODHANDLER(val) *eptr = MethodPointer; As(eptr + 1, struct method_pointer) = (val); eptr+=STACK_STRIDE;
 
 // not on reference id: it's heap object ID, not address!!!
-#define PUSH_STACK_REFERENCEID(val) *eptr = ReferenceID; As(eptr + 1, int) = val; ((int*)eptr)[1] = 0; eptr+=STACK_STRIDE;
+#define PUSH_STACK_REFERENCEID(val) *eptr = ReferenceID; As(eptr + 1, int) = val; eptr[5]=eptr[6]=eptr[7]=0; eptr+=STACK_STRIDE;
 
 // address is starting at mem0;
 #define PUSH_STACK_ADDRESS(val, typeid) *eptr = Address; As(eptr + 1, int) = (int)(val-mem0); *(eptr+5)=typeid; eptr+=STACK_STRIDE;
@@ -3372,18 +3373,19 @@ void vm_sort_slots() {
 
 
 // PUSH - optimized to avoid unnecessary memset
-#define PUSH_STACK_INT8(val) **reptr = SByte; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
-#define PUSH_STACK_UINT8(val) **reptr = Byte; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
-#define PUSH_STACK_INT16(val) **reptr = Int16; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
-#define PUSH_STACK_UINT16(val) **reptr = UInt16; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
-#define PUSH_STACK_INT(val) **reptr = Int32; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
-#define PUSH_STACK_UINT(val) **reptr = UInt32; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
+// NOTE: Clear only (*reptr)[5~7], NOT (*reptr)[4] which is part of the value stored at (*reptr)[1~4]
+#define PUSH_STACK_INT8(val) **reptr = SByte; As(*reptr + 1, int) = val; (*reptr)[5]=(*reptr)[6]=(*reptr)[7]=0; *reptr+=8;
+#define PUSH_STACK_UINT8(val) **reptr = Byte; As(*reptr + 1, int) = val; (*reptr)[5]=(*reptr)[6]=(*reptr)[7]=0; *reptr+=8;
+#define PUSH_STACK_INT16(val) **reptr = Int16; As(*reptr + 1, int) = val; (*reptr)[5]=(*reptr)[6]=(*reptr)[7]=0; *reptr+=8;
+#define PUSH_STACK_UINT16(val) **reptr = UInt16; As(*reptr + 1, int) = val; (*reptr)[5]=(*reptr)[6]=(*reptr)[7]=0; *reptr+=8;
+#define PUSH_STACK_INT(val) **reptr = Int32; As(*reptr + 1, int) = val; (*reptr)[5]=(*reptr)[6]=(*reptr)[7]=0; *reptr+=8;
+#define PUSH_STACK_UINT(val) **reptr = UInt32; As(*reptr + 1, int) = val; (*reptr)[5]=(*reptr)[6]=(*reptr)[7]=0; *reptr+=8;
 //#define PUSH_STACK_FLOAT_D(val) **reptr = Single; As(*reptr + 1, float) = val; *reptr+=8;
 // special way to push float because of memory alignment issue.
 #define PUSH_STACK_FLOAT_M(val) { **reptr = Single; int iv = *(int*)(&(val)); As(*reptr + 1, int) = *(int*)(&(iv)); *reptr+=8; }
 
 // not on reference id: it's heap object ID, not address!!!
-#define PUSH_STACK_REFERENCEID(val) **reptr = ReferenceID; As(*reptr + 1, int) = val; ((int*)*reptr)[1] = 0; *reptr+=8;
+#define PUSH_STACK_REFERENCEID(val) **reptr = ReferenceID; As(*reptr + 1, int) = val; (*reptr)[5]=(*reptr)[6]=(*reptr)[7]=0; *reptr+=8;
 
 #undef PUSH_STACK_INDIRECT
 #define POP {(*reptr)-=8;}
@@ -6579,18 +6581,19 @@ void setup_builtin_methods() {
 
 void write_snapshot(uchar* buffer, int size)
 {
-	int width = 128;
-	int height = 64;
-	for (int y = 0; y < 64; ++y)
-	{
-		for (int x = 0; x < 128; ++x)
-		{
-			char bit = (buffer[(y / 8) * width + x] & (1 << (y % 8))) != 0;
-			if (bit) printf("\u2588");
-			else printf(" ");
-		}
-		printf("\n");
-	}
+	printf("write snapshot...\n");
+	// int width = 128;
+	// int height = 64;
+	// for (int y = 0; y < 64; ++y)
+	// {
+	// 	for (int x = 0; x < 128; ++x)
+	// 	{
+	// 		char bit = (buffer[(y / 8) * width + x] & (1 << (y % 8))) != 0;
+	// 		if (bit) printf("\u2588");
+	// 		else printf(" ");
+	// 	}
+	// 	printf("\n");
+	// }
 } // size is equal to "vm_put_snapshot_buffer"
 
 #ifndef IS_MCU
@@ -6633,11 +6636,13 @@ void print_stacktrace(void) {
 }
 
 void report_error(int il_offset, uchar* error_str, int line_no) { 
+	flush_console();  // Flush any buffered console output before reporting error
 	err_cb(il_offset, error_str, strlen(error_str), line_no);
 	print_stacktrace();
 	exit(2);
 }
 void print_line(uchar* str, int length) { printf("%s\n", str); } // should upload text info.
+void flush_console() { fflush(stdout); } // PC version: flush stdout
 
 inline void enter_critical() {};
 inline void leave_critical() {};
