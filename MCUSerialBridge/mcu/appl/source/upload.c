@@ -1,6 +1,7 @@
 #include "appl/upload.h"
 
 #include "appl/control.h"
+#include "appl/fatal_error.h"
 #include "appl/packet.h"
 #include "hal/dcan.h"
 #include "msb_protocol.h"
@@ -277,6 +278,23 @@ void upload_console_writeline()
             upload_console_writeline_buffer_length);
 
     // After sending, clear the buffer by setting the length to 0
+    upload_console_writeline_buffer_length = 0;
+}
+
+void upload_console_writeline_fatal()
+{
+    if (upload_console_writeline_buffer_length == 0) {
+        return;
+    }
+
+    if (upload_console_writeline_buffer_length > PACKET_MAX_DATALEN) {
+        upload_console_writeline_buffer_length = PACKET_MAX_DATALEN;
+    }
+
+    fatal_error_send_console_writeline(
+            upload_console_writeline_buffer,
+            upload_console_writeline_buffer_length);
+
     upload_console_writeline_buffer_length = 0;
 }
 

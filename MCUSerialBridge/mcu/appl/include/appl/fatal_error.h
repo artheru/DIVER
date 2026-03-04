@@ -35,3 +35,13 @@ void fatal_error_send_string(int il_offset, const char* error_str, int line_no);
  * @param core_dump  CoreDumpVariables 指针
  */
 void fatal_error_send_coredump(int il_offset, const CoreDumpVariables* core_dump);
+
+/**
+ * @brief 在致命错误前阻塞发送缓冲的 Console.WriteLine 输出
+ * 
+ * 使用 sync 模式发送，不复位 MCU（由后续的 send_string/send_coredump 负责复位）。
+ * 
+ * @param data   Console 输出缓冲区
+ * @param length 缓冲区数据长度
+ */
+void fatal_error_send_console_writeline(const void* data, uint32_t length);

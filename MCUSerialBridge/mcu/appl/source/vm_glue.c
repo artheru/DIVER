@@ -35,13 +35,6 @@ void write_stream(
             "VMGlue: write_stream, stm_id = %d, len = %d\n", streamID, size);
 
     control_vm_write_port(streamID, buffer, size);
-    
-    // if (!ports_add_buffer(streamID, 0, buffer, size)) {
-    //     bsp_beep_play_once(BeepMusicError);
-    //     g_state = State_ExecutionError;
-    //     g_error_code = ErrorCode_ExecutionFIFOBufferFull;
-    //     console_printf_do("ERROR: VMGlue, CAN Not add FIFO Buffer, stop!\n");
-    // };
 }
 void write_event(
         int portID,
@@ -57,45 +50,6 @@ void write_event(
             size);
 
     control_vm_write_port(portID, buffer, size);
-
-    // console_print_buffer_do(buffer, size);
-    // if (!ports_add_buffer(portID, eventID, buffer, size)) {
-    //     bsp_beep_play_once(BeepMusicError);
-    //     g_state = State_ExecutionError;
-    //     g_error_code = ErrorCode_ExecutionFIFOBufferFull;
-    //     console_printf_do("ERROR: VMGlue, CAN Not add FIFO Buffer, stop!\n");
-    // };
-}
-
-void old_report_error(
-        const char* filename,
-        uint32_t line_no,
-        uchar* error_str,
-        uint32_t length)  // should report error and terminate
-// execution, enter safe mode.
-{
-    console_printf_do(
-            "ERROR: VM Doomed at %s:%d, reason:\n", filename, line_no);
-    console_print_string_do(error_str, length);
-
-    // char line_info[64];
-    // int line_info_len = snprintf(
-    //         line_info,
-    //         sizeof(line_info),
-    //         "VM Doomed at %s:%lu\n",
-    //         filename,
-    //         line_no);
-    // uplink_add_log(line_info, line_info_len);
-    // uplink_add_log(error_str, length);
-    // bsp_beep_play_once(BeepMusicError);
-    // g_state = State_ExecutionError;
-
-    // io_failsafe();
-    // delay_ms(5);
-    // uplink_upload_downside_memory(0, 0);
-    // while (1) {
-    //     ;
-    // }
 }
 
 void report_error(int il_offset, uchar* error_str, int line_no)
@@ -112,11 +66,15 @@ void report_error(int il_offset, uchar* error_str, int line_no)
     g_mcu_state.is_programmed = 0;
     console_printf_do("VMGlue: VM aborted, sending error to PC...\n");
 
+    // 发送已缓冲的 Console.WriteLine 输出
+    upload_console_writeline_fatal();
+
     // 发送错误到上位机并复位 MCU (此函数不会返回)
     fatal_error_send_string(il_offset, (const char*)error_str, line_no);
 
     // 不会执行到这里
-    while (1) {}
+    while (1) {
+    }
 }
 
 void print_line(uchar* str, int length)  // should upload text info.

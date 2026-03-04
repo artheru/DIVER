@@ -77,6 +77,13 @@ void report_wiretap_transmit_can(
 void upload_console_writeline();
 
 /*
+ * @brief 上传日志到 PC（致命错误模式）
+ * 上传日志到 PC
+ * @note 调用该函数后，会清空上传缓冲区
+ */
+void upload_console_writeline_fatal();
+
+/*
  * @brief 追加日志到上传缓冲区
  * @param data 数据指针
  * @param length 数据长度

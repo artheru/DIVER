@@ -6635,6 +6635,7 @@ void print_stacktrace(void) {
 	free(sym);
 }
 
+void flush_console() { fflush(stdout); } // PC version: flush stdout
 void report_error(int il_offset, uchar* error_str, int line_no) { 
 	flush_console();  // Flush any buffered console output before reporting error
 	err_cb(il_offset, error_str, strlen(error_str), line_no);
@@ -6642,7 +6643,6 @@ void report_error(int il_offset, uchar* error_str, int line_no) {
 	exit(2);
 }
 void print_line(uchar* str, int length) { printf("%s\n", str); } // should upload text info.
-void flush_console() { fflush(stdout); } // PC version: flush stdout
 
 inline void enter_critical() {};
 inline void leave_critical() {};

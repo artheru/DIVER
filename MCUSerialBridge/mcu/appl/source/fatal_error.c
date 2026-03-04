@@ -145,3 +145,58 @@ void fatal_error_send_coredump(int il_offset, const CoreDumpVariables* core_dump
     
     fatal_error_send_impl(&payload);
 }
+
+void fatal_error_send_console_writeline(const void* data, uint32_t length)
+{
+    if (length == 0 || data == NULL) {
+        return;
+    }
+
+    if (length > PACKET_MAX_DATALEN) {
+        length = PACKET_MAX_DATALEN;
+    }
+
+    // Reuse the static error packet buffer (large enough for console data)
+    uint8_t* pkt = s_error_packet;
+
+    // Header
+    pkt[0] = PACKET_HEADER_1;
+    pkt[1] = PACKET_HEADER_2;
+
+    // Length
+    uint16_t payload_len = sizeof(PayloadHeader) + length;
+    pkt[2] = (uint8_t)(payload_len & 0xFF);
+    pkt[3] = (uint8_t)((payload_len >> 8) & 0xFF);
+    pkt[4] = (uint8_t)(~pkt[3]);
+    pkt[5] = (uint8_t)(~pkt[2]);
+
+    // PayloadHeader
+    uint8_t* header_ptr = pkt + 6;
+    PayloadHeader header = {
+        .command = CommandUploadConsoleWriteLine,
+        .sequence = 0,
+        .timestamp_ms = 0,
+        .error_code = 0,
+    };
+    memcpy(header_ptr, &header, sizeof(PayloadHeader));
+
+    // Console data
+    uint8_t* payload_ptr = header_ptr + sizeof(PayloadHeader);
+    memcpy(payload_ptr, data, length);
+
+    // CRC
+    uint8_t* crc_ptr = payload_ptr + length;
+    uint16_t crc = crc16(pkt + 6, payload_len);
+    crc_ptr[0] = (uint8_t)(crc & 0xFF);
+    crc_ptr[1] = (uint8_t)((crc >> 8) & 0xFF);
+
+    // Tail
+    uint8_t* tail_ptr = crc_ptr + 2;
+    tail_ptr[0] = PACKET_TAIL_1_2;
+    tail_ptr[1] = PACKET_TAIL_1_2;
+
+    uint32_t total_len = tail_ptr + 2 - pkt;
+
+    // Sync send (no repeat, no reset — caller will send error/coredump next)
+    hal_usart_send_sync(uplink_usart, pkt, total_len);
+}

@@ -1,6 +1,6 @@
 # MCU Runtime Bugs
 
-## 1. BitConverter.GetBytes(UInt16) 和 GetBytes(UInt32) 实现错误
+## 1. ~~BitConverter.GetBytes(UInt16) 和 GetBytes(UInt32) 实现错误~~ ✅ 已修复
 
 **文件**: `mcu_runtime.c` 第 5087-5099 行
 
@@ -45,10 +45,11 @@ void builtin_BitConverter_GetBytes_UInt32(uchar** reptr) {
 **临时规避**: 使用 `int` 类型代替 `uint`，调用 `BitConverter.GetBytes(int)` 可正常工作。
 
 **发现日期**: 2026-02-05
+**修复日期**: 已修复（当前代码已采用正确实现：pop 值 → newarr → 写入 payload → push 引用）
 
 ---
 
-## 2. PUSH_STACK_INT 会截断 int 的最高字节
+## 2. ~~PUSH_STACK_INT 会截断 int 的最高字节~~ ✅ 已修复
 
 **文件**: `mcu_runtime.c` 第 1103 行和第 3379 行
 
@@ -151,10 +152,11 @@ void builtin_BitConverter_GetBytes_UInt32(uchar** reptr) {
 - 影响所有算术运算结果、字段读取、Console 打印等
 
 **发现日期**: 2026-02-05
+**修复日期**: 2026-03-04（commit 455646b：将 `((int*)eptr)[1] = 0` 改为 `eptr[5]=eptr[6]=eptr[7]=0`，两组宏定义均已修复）
 
 ---
 
-## 3. Fatal Error 发生时 Console.WriteLine 输出丢失
+## 3. ~~Fatal Error 发生时 Console.WriteLine 输出丢失~~ ✅ 已修复
 
 **问题**: 当运行时发生致命错误（如数组越界）时，Console.WriteLine 的输出没有被发送到 Host，而是直接跳到了 Fatal Error 报告和 MCU 重启。
 
@@ -197,3 +199,4 @@ Disconnecting node due to fatal error...
 **修复建议**: 在报告 Fatal Error 之前，先确保所有 Console 输出已经通过回调发送给 Host。
 
 **发现日期**: 2026-02-05
+**修复日期**: 2026-03-04（commit 455646b：在 `report_error` 中调用 `flush_console()` 刷新缓冲区，新增 `flush_console()` 函数声明与实现）

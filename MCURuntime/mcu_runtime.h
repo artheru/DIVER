@@ -140,7 +140,6 @@ void write_event(int portID, int eventID, uchar* buffer, int size); // called to
 
 void report_error(int il_offset, uchar* error_str, int line_no); // should report error and terminate execution, enter safe mode.
 void print_line(uchar* str, int length); // should upload text info.
-void flush_console(); // should flush any buffered console output before error reporting.
 
 #ifdef IS_MCU
 // For implementation of inline functions
