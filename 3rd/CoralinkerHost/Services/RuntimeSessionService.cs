@@ -8,24 +8,16 @@ namespace CoralinkerHost.Services;
 public sealed class RuntimeSessionService
 {
     private readonly TerminalBroadcaster _terminal;
+    private readonly WireTapAggregatorService _aggregator;
     private readonly DIVERSession _session = DIVERSession.Instance;
 
-    public RuntimeSessionService(TerminalBroadcaster terminal)
+    public RuntimeSessionService(TerminalBroadcaster terminal, WireTapAggregatorService aggregator)
     {
         _terminal = terminal;
+        _aggregator = aggregator;
         
-        // 订阅节点日志事件，广播到 SignalR
-        _session.OnNodeLog += async (uuid, message) =>
-        {
-            try
-            {
-                await _terminal.NodeLogLineAsync(uuid, message);
-            }
-            catch
-            {
-                // ignore broadcast errors
-            }
-        };
+        // 节点日志事件现在由 WireTapAggregatorService 批量推送（nodeLogBatch）
+        // 减少高频 Console.WriteLine 导致的 SignalR 推送风暴
 
         // 订阅致命错误事件，广播到 SignalR（JSON 已由 DIVERSession 格式化）
         _session.OnFatalError += async (uuid, errorJson) =>
@@ -40,36 +32,9 @@ public sealed class RuntimeSessionService
             }
         };
 
-        // 订阅 WireTap 数据事件，广播到 SignalR
-        _session.OnWireTapData += async (args) =>
-        {
-            try
-            {
-                var data = new
-                {
-                    uuid = args.UUID,
-                    nodeName = args.NodeName,
-                    portIndex = args.PortIndex,
-                    direction = args.Direction,
-                    portType = args.PortType.ToString(),
-                    rawData = args.RawData,
-                    canMessage = args.CANMessage != null ? new
-                    {
-                        id = args.CANMessage.ID,
-                        dlc = args.CANMessage.DLC,
-                        rtr = args.CANMessage.RTR,
-                        data = args.CANMessage.Payload
-                    } : null,
-                    // 使用后端记录的时间戳，而不是广播时的时间
-                    timestamp = args.Timestamp.ToString("O")
-                };
-                await _terminal.WireTapDataAsync(data);
-            }
-            catch
-            {
-                // ignore broadcast errors
-            }
-        };
+        // WireTap 数据事件现在由 WireTapAggregatorService 处理：
+        // - CAN 帧聚合后通过 wireTapCanAggregated 推送
+        // - Serial 帧节流后通过 wireTapSerialBatch 批量推送
     }
 
     /// <summary>
@@ -77,6 +42,8 @@ public sealed class RuntimeSessionService
     /// </summary>
     public async Task<StartResult> StartAsync(CancellationToken ct)
     {
+        _aggregator.Reset();
+
         await _terminal.LineAsync("[session] ========== Starting ==========", ct);
         
         var result = _session.Start();

@@ -160,7 +160,7 @@ MCUSerialBridgeError mcu_send_packet_and_wait(
     }
 }
 
-void msb_parse_upload_data(msb_handle* handle, const DataPacket* data_packet)
+void msb_parse_upload_data(msb_handle* handle, const DataPacket* data_packet, uint32_t timestamp_ms)
 {
     if (!handle || !handle->is_open || !data_packet)
         return;
@@ -194,6 +194,7 @@ void msb_parse_upload_data(msb_handle* handle, const DataPacket* data_packet)
                 direction,
                 data_packet->data,
                 data_packet->data_len,
+                timestamp_ms,
                 handle->port_data_callback_ctx[port_index]);
         return;
     }
@@ -216,6 +217,7 @@ void msb_parse_upload_data(msb_handle* handle, const DataPacket* data_packet)
     DBG_PRINT("UploadData: Received Port[%u], len=%u", port_index, data_len);
     memcpy(q->queue[q->head].data, data_packet->data, data_len);
     q->queue[q->head].len = data_len;
+    q->queue[q->head].timestamp_ms = timestamp_ms;
     q->head = next;
 
     /* 唤醒 read_ports */

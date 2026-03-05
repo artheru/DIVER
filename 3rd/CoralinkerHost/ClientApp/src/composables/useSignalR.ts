@@ -19,7 +19,7 @@ import * as signalR from '@microsoft/signalr'
 import { useLogStore } from '@/stores/logs'
 import { useRuntimeStore } from '@/stores/runtime'
 import { useWireTapStore } from '@/stores/wiretap'
-import type { WireTapDataEvent } from '@/types'
+import type { WireTapDataEvent, WireTapCanAggregatedEvent, WireTapSerialBatchEvent } from '@/types'
 
 /** SignalR 连接状态 */
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
@@ -241,10 +241,16 @@ export function useSignalR() {
       logStore.appendBuild(line)
     })
     
-    // 节点日志事件
-    // 格式: nodeLogLine(uuid: string, message: string)
+    // 节点日志事件（旧的逐行推送，保留兼容）
     connection.value.on('nodeLogLine', (uuid: string, message: string) => {
-      logStore.appendNodeLog(uuid, message)
+      logStore.appendNodeLog(uuid, '', message)
+    })
+
+    // 节点日志批量推送（~250ms 节流）
+    connection.value.on('nodeLogBatch', (uuid: string, entries: Array<{ hostTimestamp: string; message: string; mcuTimestampMs: number }>) => {
+      for (const entry of entries) {
+        logStore.appendNodeLog(uuid, entry.hostTimestamp, entry.message, entry.mcuTimestampMs)
+      }
     })
     
     // 变量快照更新事件 (后端发送 varsSnapshot)
@@ -286,10 +292,19 @@ export function useSignalR() {
       })
     })
 
-    // WireTap 数据事件
-    // 格式: wireTapData(data: WireTapDataEvent)
+    // WireTap 数据事件（旧的逐帧推送，保留兼容）
     connection.value.on('wireTapData', (data: WireTapDataEvent) => {
       wireTapStore.handleWireTapData(data)
+    })
+
+    // CAN 聚合快照（新）
+    connection.value.on('wireTapCanAggregated', (data: WireTapCanAggregatedEvent) => {
+      wireTapStore.handleCanAggregated(data)
+    })
+
+    // Serial 批量推送（新）
+    connection.value.on('wireTapSerialBatch', (data: WireTapSerialBatchEvent) => {
+      wireTapStore.handleSerialBatch(data)
     })
   }
   

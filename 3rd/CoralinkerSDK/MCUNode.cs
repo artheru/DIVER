@@ -58,8 +58,8 @@ public class MCUNode : IDisposable
     /// <summary>LowerIO 数据接收事件（由 DIVERSession 订阅）</summary>
     internal event Action<byte[]>? OnLowerIOReceived;
     
-    /// <summary>控制台输出事件</summary>
-    internal event Action<string>? OnConsoleOutput;
+    /// <summary>控制台输出事件 (message, mcuTimestampMs)</summary>
+    internal event Action<string, uint>? OnConsoleOutput;
     
     /// <summary>致命错误事件（MCU HardFault 或 ASSERT 失败）</summary>
     internal event Action<ErrorPayload>? OnFatalError;
@@ -136,7 +136,7 @@ public class MCUNode : IDisposable
 
             // Register callbacks
             _bridge.RegisterMemoryLowerIOCallback(data => OnLowerIOReceived?.Invoke(data));
-            _bridge.RegisterConsoleWriteLineCallback(msg => OnConsoleOutput?.Invoke(msg));
+            _bridge.RegisterConsoleWriteLineCallback((msg, mcuTs) => OnConsoleOutput?.Invoke(msg, mcuTs));
             _bridge.RegisterFatalErrorCallback(payload => OnFatalError?.Invoke(payload));
 
             LastError = null;
@@ -396,7 +396,7 @@ public class MCUNode : IDisposable
     /// - data: 原始数据
     /// </param>
     /// <returns>是否成功</returns>
-    public bool RegisterSerialPortCallback(byte portIndex, Action<byte, byte, byte[]> callback)
+    public bool RegisterSerialPortCallback(byte portIndex, Action<byte, byte, byte[], uint> callback)
     {
         if (_bridge == null || !_bridge.IsOpen)
         {
@@ -425,7 +425,7 @@ public class MCUNode : IDisposable
     /// - msg: CANMessage
     /// </param>
     /// <returns>是否成功</returns>
-    public bool RegisterCANPortCallback(byte portIndex, Action<byte, byte, CANMessage> callback)
+    public bool RegisterCANPortCallback(byte portIndex, Action<byte, byte, CANMessage, uint> callback)
     {
         if (_bridge == null || !_bridge.IsOpen)
         {

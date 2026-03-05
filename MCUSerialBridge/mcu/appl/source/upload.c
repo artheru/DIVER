@@ -4,6 +4,7 @@
 #include "appl/fatal_error.h"
 #include "appl/packet.h"
 #include "hal/dcan.h"
+#include "hal/systick.h"
 #include "msb_protocol.h"
 #include "util/console.h"
 #include "util/mempool.h"
@@ -57,17 +58,19 @@ static inline bool should_upload_tx(uint32_t port_index)
  * @param port_index_with_dir 端口索引（bit7 = 方向：0=RX, 1=TX）
  * @param data 数据指针
  * @param length 数据长度
+ * @param timestamp_ms MCU 时间戳（毫秒）
  */
 static void upload_port_data(
         uint8_t port_index_with_dir,
         const void* data,
-        uint32_t length)
+        uint32_t length,
+        uint32_t timestamp_ms)
 {
     PayloadHeader header = {
             .command = CommandUploadPort,
             .sequence = 0,
             .error_code = 0,
-            .timestamp_ms = 0,
+            .timestamp_ms = timestamp_ms,
     };
 
     if (length > PACKET_MAX_DATALEN) {
@@ -89,18 +92,20 @@ static void upload_port_data(
  * @param id_info CAN ID 信息
  * @param data_0_3 数据字节 0-3
  * @param data_4_7 数据字节 4-7
+ * @param timestamp_ms MCU 时间戳（毫秒）
  */
 static void upload_can_port_data(
         uint8_t port_index_with_dir,
         CANIDInfo id_info,
         uint32_t data_0_3,
-        uint32_t data_4_7)
+        uint32_t data_4_7,
+        uint32_t timestamp_ms)
 {
     PayloadHeader header = {
             .command = CommandUploadPort,
             .sequence = 0,
             .error_code = 0,
-            .timestamp_ms = 0,
+            .timestamp_ms = timestamp_ms,
     };
 
     if (id_info.dlc > 8) {
@@ -150,6 +155,8 @@ void on_hal_receive_serial(
         uint32_t length,
         uint32_t port_index)
 {
+    uint32_t ts = (uint32_t)(g_hal_timestamp_us / 1000);
+
     console_printf_do(
             "RECEIVED PACKET FROM SERIAL %u, len %u\n", port_index, length);
     
@@ -170,7 +177,7 @@ void on_hal_receive_serial(
     }
 
     // 上报 RX 数据（port_index 不带 0x80 标志）
-    upload_port_data((uint8_t)port_index, data, length);
+    upload_port_data((uint8_t)port_index, data, length, ts);
 }
 
 void on_hal_receive_can(
@@ -179,6 +186,8 @@ void on_hal_receive_can(
         uint32_t data_4_7,
         uint32_t port_index)
 {
+    uint32_t ts = (uint32_t)(g_hal_timestamp_us / 1000);
+
     console_printf_do("RECEIVED PACKET FROM CAN %d\n", port_index);
     
     // 累加 RX 统计（CAN 帧大小 = header(2) + payload(dlc)）
@@ -209,7 +218,7 @@ void on_hal_receive_can(
     }
 
     // 上报 RX 数据（port_index 不带 0x80 标志）
-    upload_can_port_data((uint8_t)port_index, id_info, data_0_3, data_4_7);
+    upload_can_port_data((uint8_t)port_index, id_info, data_0_3, data_4_7, ts);
 }
 
 /* ===============================
@@ -221,6 +230,8 @@ void report_wiretap_transmit_serial(
         uint32_t length,
         uint32_t port_index)
 {
+    uint32_t ts = (uint32_t)(g_hal_timestamp_us / 1000);
+
     // 检查是否应该上报 TX 到 PC
     if (!should_upload_tx(port_index)) {
         return;
@@ -229,7 +240,7 @@ void report_wiretap_transmit_serial(
     console_printf_do("WIRETAP TX SERIAL %u, len %u\n", port_index, length);
 
     // 上报 TX 数据（port_index | 0x80 表示 TX 方向）
-    upload_port_data((uint8_t)(port_index | PORT_DIRECTION_TX_MASK), data, length);
+    upload_port_data((uint8_t)(port_index | PORT_DIRECTION_TX_MASK), data, length, ts);
 }
 
 void report_wiretap_transmit_can(
@@ -238,6 +249,8 @@ void report_wiretap_transmit_can(
         uint32_t data_4_7,
         uint32_t port_index)
 {
+    uint32_t ts = (uint32_t)(g_hal_timestamp_us / 1000);
+
     // 检查是否应该上报 TX 到 PC
     if (!should_upload_tx(port_index)) {
         return;
@@ -247,7 +260,7 @@ void report_wiretap_transmit_can(
 
     // 上报 TX 数据（port_index | 0x80 表示 TX 方向）
     upload_can_port_data((uint8_t)(port_index | PORT_DIRECTION_TX_MASK), 
-                         id_info, data_0_3, data_4_7);
+                         id_info, data_0_3, data_4_7, ts);
 }
 
 /* ===============================
@@ -260,11 +273,13 @@ void upload_console_writeline()
         return;
     }
 
+    uint32_t ts = (uint32_t)(g_hal_timestamp_us / 1000);
+
     PayloadHeader header = {
             .command = CommandUploadConsoleWriteLine,
             .sequence = 0,
             .error_code = 0,
-            .timestamp_ms = 0,
+            .timestamp_ms = ts,
     };
 
     if (upload_console_writeline_buffer_length > PACKET_MAX_DATALEN) {

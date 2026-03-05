@@ -15,11 +15,18 @@ import * as runtimeApi from '@/api/runtime'
 /** 单条日志的最大保留数量 */
 const MAX_LOG_LINES = 2000
 
+/** 节点日志条目 */
+export interface NodeLogEntry {
+  hostTime: string
+  mcuTimestampMs: number
+  message: string
+}
+
 /** 节点日志信息 */
 interface NodeLogInfo {
   uuid: string
   nodeName: string
-  lastSeq: number  // 最后获取的 seq
+  lastSeq: number
 }
 
 export const useLogStore = defineStore('logs', () => {
@@ -33,8 +40,8 @@ export const useLogStore = defineStore('logs', () => {
   /** Build 日志行 */
   const buildLines = ref<string[]>([])
   
-  /** 节点日志 Map<uuid, string[]> */
-  const nodeLogs = ref<Map<string, string[]>>(new Map())
+  /** 节点日志 Map<uuid, NodeLogEntry[]> */
+  const nodeLogs = ref<Map<string, NodeLogEntry[]>>(new Map())
   
   /** 节点信息 Map<uuid, NodeLogInfo> */
   const nodeInfos = ref<Map<string, NodeLogInfo>>(new Map())
@@ -46,13 +53,21 @@ export const useLogStore = defineStore('logs', () => {
   // 计算属性
   // ============================================
   
-  /** 当前显示的日志行 */
+  /** 当前显示的终端/构建日志行 */
   const currentLines = computed(() => {
     if (activeTab.value === 'terminal') {
       return terminalLines.value
     }
     if (activeTab.value === 'build') {
       return buildLines.value
+    }
+    return [] as string[]
+  })
+
+  /** 当前节点日志条目（activeTab 为 uuid 时有效） */
+  const currentNodeEntries = computed((): NodeLogEntry[] => {
+    if (activeTab.value === 'terminal' || activeTab.value === 'build') {
+      return []
     }
     return nodeLogs.value.get(activeTab.value) || []
   })
@@ -66,9 +81,6 @@ export const useLogStore = defineStore('logs', () => {
   // 操作方法
   // ============================================
   
-  /**
-   * 生成时间戳字符串
-   */
   function getTimestamp(): string {
     const now = new Date()
     const MM = String(now.getMonth() + 1).padStart(2, '0')
@@ -80,106 +92,51 @@ export const useLogStore = defineStore('logs', () => {
     return `${MM}-${DD} ${HH}:${mm}:${ss}.${sss}`
   }
 
-  /**
-   * 添加终端日志行 (原始，不加时间戳，用于接收后端日志)
-   * @param line 日志内容
-   */
   function appendTerminal(line: string) {
     terminalLines.value.push(line)
-    
-    // 限制日志数量，防止内存溢出
     if (terminalLines.value.length > MAX_LOG_LINES) {
       terminalLines.value.splice(0, terminalLines.value.length - MAX_LOG_LINES)
     }
   }
 
-  /**
-   * 添加前端本地日志行 (带 [UI] 前缀和时间戳)
-   * @param line 日志内容
-   */
   function logUI(line: string) {
     appendTerminal(`[UI][${getTimestamp()}] ${line}`)
   }
 
-  /**
-   * 添加 Build 日志行
-   * @param line 日志内容
-   */
   function appendBuild(line: string) {
     buildLines.value.push(line)
-    
-    // 限制日志数量
     if (buildLines.value.length > MAX_LOG_LINES) {
       buildLines.value.splice(0, buildLines.value.length - MAX_LOG_LINES)
     }
   }
 
-  /**
-   * 添加 Build 日志行 (带时间戳)
-   * @param line 日志内容
-   */
   function logBuild(line: string) {
     appendBuild(`[${getTimestamp()}] ${line}`)
   }
 
-  /**
-   * 清空 Build 日志
-   */
   function clearBuild() {
     buildLines.value.length = 0
   }
   
   /**
-   * 生成短格式时间戳（HH:MM:SS.mmm）
+   * 添加节点日志条目
    */
-  function getShortTimestamp(): string {
-    const now = new Date()
-    const HH = String(now.getHours()).padStart(2, '0')
-    const mm = String(now.getMinutes()).padStart(2, '0')
-    const ss = String(now.getSeconds()).padStart(2, '0')
-    const ms = String(now.getMilliseconds()).padStart(3, '0')
-    return `${HH}:${mm}:${ss}.${ms}`
-  }
-  
-  /**
-   * 添加节点日志行（由 SignalR 调用）
-   * @param uuid 节点 UUID
-   * @param line 日志内容
-   */
-  function appendNodeLog(uuid: string, line: string) {
-    // 确保节点标签存在
+  function appendNodeLog(uuid: string, hostTime: string, message: string, mcuTimestampMs: number = 0) {
     ensureNodeTab(uuid)
-    
+
     let logs = nodeLogs.value.get(uuid)
-    
     if (!logs) {
       logs = []
       nodeLogs.value.set(uuid, logs)
     }
-    
-    // 检查消息是否已有时间戳（后端已添加）
-    // 格式: [HH:MM:SS.mmm] 或 [HH:MM:SS]
-    const hasTimestamp = /^\[\d{2}:\d{2}:\d{2}(?:\.\d{3})?\]/.test(line)
-    
-    if (hasTimestamp) {
-      logs.push(line)
-    } else {
-      // 兼容旧消息：添加时间戳
-      const timestamp = getShortTimestamp()
-      logs.push(`[${timestamp}] ${line}`)
-    }
-    
-    // 限制日志数量
+
+    logs.push({ hostTime, mcuTimestampMs, message })
+
     if (logs.length > MAX_LOG_LINES) {
       logs.splice(0, logs.length - MAX_LOG_LINES)
     }
   }
   
-  /**
-   * 确保节点日志标签存在
-   * @param uuid 节点 UUID
-   * @param nodeName 节点显示名称
-   */
   function ensureNodeTab(uuid: string, nodeName?: string) {
     if (!nodeInfos.value.has(uuid)) {
       nodeInfos.value.set(uuid, {
@@ -188,44 +145,28 @@ export const useLogStore = defineStore('logs', () => {
         lastSeq: 0
       })
       
-      // 初始化日志数组
       if (!nodeLogs.value.has(uuid)) {
         nodeLogs.value.set(uuid, [])
       }
     } else if (nodeName) {
-      // 更新节点名称
       const info = nodeInfos.value.get(uuid)!
       info.nodeName = nodeName
     }
   }
   
-  /**
-   * 移除节点日志标签
-   * @param uuid 节点 UUID
-   */
   function removeNodeTab(uuid: string) {
     nodeInfos.value.delete(uuid)
     nodeLogs.value.delete(uuid)
     
-    // 如果正在查看被移除的标签，切换回终端
     if (activeTab.value === uuid) {
       activeTab.value = 'terminal'
     }
   }
   
-  /**
-   * 切换日志标签
-   * @param tabId 'terminal' 或 uuid
-   */
   function switchTab(tabId: string) {
     activeTab.value = tabId
   }
   
-  /**
-   * 加载节点日志（使用 seq 分页，避免重复）
-   * @param uuid 节点 UUID
-   * @param maxCount 最大加载数量
-   */
   async function loadNodeLogs(uuid: string, maxCount = 500) {
     const info = nodeInfos.value.get(uuid)
     const afterSeq = info?.lastSeq || undefined
@@ -243,17 +184,14 @@ export const useLogStore = defineStore('logs', () => {
         nodeLogs.value.set(uuid, logs)
       }
       
-      // 添加新日志
       for (const entry of result.entries) {
-        logs.push(`[${entry.timestamp}] ${entry.message}`)
+        logs.push({ hostTime: entry.timestamp, mcuTimestampMs: 0, message: entry.message })
       }
       
-      // 限制日志数量
       if (logs.length > MAX_LOG_LINES) {
         logs.splice(0, logs.length - MAX_LOG_LINES)
       }
       
-      // 更新 lastSeq
       if (info && result.latestSeq) {
         info.lastSeq = result.latestSeq
       }
@@ -264,11 +202,6 @@ export const useLogStore = defineStore('logs', () => {
     }
   }
   
-  /**
-   * 加载节点历史日志（首次加载，不使用 afterSeq）
-   * @param uuid 节点 UUID
-   * @param maxCount 最大加载数量
-   */
   async function loadNodeHistory(uuid: string, maxCount = 1000) {
     try {
       const result = await runtimeApi.getNodeLogs(uuid, undefined, maxCount)
@@ -277,14 +210,14 @@ export const useLogStore = defineStore('logs', () => {
         return
       }
       
-      const logs: string[] = []
-      for (const entry of result.entries) {
-        logs.push(`[${entry.timestamp}] ${entry.message}`)
-      }
+      const logs: NodeLogEntry[] = result.entries.map(entry => ({
+        hostTime: entry.timestamp,
+        mcuTimestampMs: 0,
+        message: entry.message
+      }))
       
       nodeLogs.value.set(uuid, logs)
       
-      // 更新 lastSeq
       const info = nodeInfos.value.get(uuid)
       if (info && result.latestSeq) {
         info.lastSeq = result.latestSeq
@@ -296,9 +229,6 @@ export const useLogStore = defineStore('logs', () => {
     }
   }
   
-  /**
-   * 加载 Terminal 历史日志（前端初始化时调用）
-   */
   async function loadTerminalHistory() {
     try {
       const result = await runtimeApi.getTerminalLogs()
@@ -307,7 +237,6 @@ export const useLogStore = defineStore('logs', () => {
         return
       }
       
-      // 用历史日志替换当前内容（避免重复）
       terminalLines.value = result.lines
       
       console.log(`[Logs] Loaded ${result.lines.length} terminal history logs`)
@@ -316,9 +245,6 @@ export const useLogStore = defineStore('logs', () => {
     }
   }
 
-  /**
-   * 清空当前标签的日志
-   */
   function clearCurrent() {
     if (activeTab.value === 'terminal') {
       terminalLines.value.length = 0
@@ -329,55 +255,38 @@ export const useLogStore = defineStore('logs', () => {
       if (logs) {
         logs.length = 0
       }
-      
-      // 重置 lastSeq
+
       const info = nodeInfos.value.get(activeTab.value)
       if (info) {
         info.lastSeq = 0
       }
       
-      // 调用后端清空
       runtimeApi.clearNodeLogs(activeTab.value).catch(console.error)
     }
   }
   
-  /**
-   * 清空终端日志
-   */
   function clearTerminal() {
     terminalLines.value.length = 0
   }
   
-  /**
-   * 清空所有日志
-   */
   function clearAll() {
     terminalLines.value.length = 0
     nodeLogs.value.forEach(logs => logs.length = 0)
     nodeInfos.value.forEach(info => info.lastSeq = 0)
     
-    // 调用后端清空
     runtimeApi.clearAllLogs().catch(console.error)
   }
   
-  /**
-   * 清空所有节点日志（用于 Start 时清空上一次运行的日志）
-   */
   function clearAllNodeLogs() {
     nodeLogs.value.forEach(logs => logs.length = 0)
     nodeInfos.value.forEach(info => info.lastSeq = 0)
     console.log('[Logs] Cleared all node logs for new run')
   }
   
-  /**
-   * 同步节点标签与节点列表
-   * @param nodes 节点列表 [{uuid, nodeName}, ...]
-   */
   async function syncNodeTabs(nodes: Array<{ uuid: string; nodeName: string }>) {
     const currentUuids = new Set(nodes.map(n => n.uuid))
     const newNodes: string[] = []
     
-    // 添加新节点
     for (const node of nodes) {
       const isNew = !nodeInfos.value.has(node.uuid)
       ensureNodeTab(node.uuid, node.nodeName)
@@ -386,14 +295,12 @@ export const useLogStore = defineStore('logs', () => {
       }
     }
     
-    // 移除不存在的节点
     for (const uuid of nodeInfos.value.keys()) {
       if (!currentUuids.has(uuid)) {
         removeNodeTab(uuid)
       }
     }
     
-    // 为新节点加载历史日志
     for (const uuid of newNodes) {
       await loadNodeHistory(uuid)
     }
@@ -409,6 +316,7 @@ export const useLogStore = defineStore('logs', () => {
     
     // 计算属性
     currentLines,
+    currentNodeEntries,
     nodeTabs,
     
     // 方法

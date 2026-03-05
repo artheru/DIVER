@@ -272,9 +272,9 @@ namespace MCUTestDIVER
                 done:
                 Log(sb.ToString());
             });
-            bridge.RegisterConsoleWriteLineCallback(str =>
+            bridge.RegisterConsoleWriteLineCallback((str, mcuTs) =>
             {
-                Log("ConsoleWriteLine in MCU Callback Received: >>>{0}<<<", str);
+                Log("ConsoleWriteLine in MCU Callback Received (MCU ts={0}ms): >>>{1}<<<", mcuTs, str);
             });
 
             Log("=== Main Loop Start (DIVER Mode) ===");

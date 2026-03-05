@@ -362,4 +362,4 @@ CoralinkerSDK/
 | 事件 | 签名 | 说明 |
 |------|------|------|
 | `OnStateChanged` | `Action<DIVERSessionState>` | 状态变更 |
-| `OnNodeLog` | `Action<string, string>` | 节点日志 (uuid, message) |
+| `OnNodeLog` | `Action<string, string, string, uint>` | 节点日志 (uuid, hostTimestamp, message, mcuTimestampMs) |

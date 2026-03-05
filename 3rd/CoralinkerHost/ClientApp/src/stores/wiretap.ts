@@ -10,7 +10,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed, triggerRef } from 'vue'
-import { WireTapFlags, type WireTapDataEvent, type WireTapLogEntry } from '@/types'
+import { WireTapFlags, type WireTapDataEvent, type WireTapLogEntry, type CANAggregatedGroup, type WireTapCanAggregatedEvent, type WireTapSerialBatchEvent } from '@/types'
 import * as deviceApi from '@/api/device'
 
 /** 单个端口的最大日志条目数 */
@@ -45,6 +45,9 @@ export const useWireTapStore = defineStore('wiretap', () => {
   
   /** 节点 WireTap 状态 Map<uuid, NodeWireTapState> */
   const nodeStates = ref<Map<string, NodeWireTapState>>(new Map())
+
+  /** CAN 聚合组 Map<compositeKey, CANAggregatedGroup> */
+  const canAggregatedGroups = ref<Map<string, CANAggregatedGroup>>(new Map())
   
   // ============================================
   // 计算属性
@@ -149,6 +152,17 @@ export const useWireTapStore = defineStore('wiretap', () => {
     const ss = String(date.getSeconds()).padStart(2, '0')
     const sss = String(date.getMilliseconds()).padStart(3, '0')
     return `${HH}:${mm}:${ss}.${sss}`
+  }
+
+  /**
+   * 格式化 MCU 相对时间戳 (毫秒 -> +mm:ss.mmm)
+   */
+  function formatMcuTimestamp(ms: number): string {
+    const totalSec = Math.floor(ms / 1000)
+    const millis = ms % 1000
+    const minutes = Math.floor(totalSec / 60)
+    const seconds = totalSec % 60
+    return `+${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(millis).padStart(3, '0')}`
   }
   
   // ============================================
@@ -273,6 +287,7 @@ export const useWireTapStore = defineStore('wiretap', () => {
     // 创建日志条目
     const entry: WireTapLogEntry = {
       timestamp: formatTimestamp(event.timestamp),
+      mcuTimestamp: formatMcuTimestamp(event.mcuTimestampMs),
       direction: event.direction === 0 ? 'RX' : 'TX',
       hexData: formatHex(rawBytes),
       rawBytes,
@@ -296,6 +311,96 @@ export const useWireTapStore = defineStore('wiretap', () => {
   }
   
   /**
+   * 生成 CAN 聚合组的 composite key
+   */
+  function canGroupKey(uuid: string, portIndex: number, direction: number, rtr: boolean, dlc: number, canId: number): string {
+    return `${uuid}:${portIndex}:${direction}:${rtr}:${dlc}:${canId}`
+  }
+
+  /**
+   * 处理 CAN 聚合快照事件（由 SignalR wireTapCanAggregated 调用）
+   */
+  function handleCanAggregated(event: WireTapCanAggregatedEvent) {
+    for (const group of event.groups) {
+      const key = canGroupKey(group.uuid, group.portIndex, group.direction, group.rtr, group.dlc, group.canId)
+      canAggregatedGroups.value.set(key, group)
+
+      // 确保该 port 的 portLog 存在（用于 getPortsWithDataForNode 检测）
+      const state = ensureNodeState(group.uuid, group.nodeName)
+      if (!state.portLogs.has(group.portIndex)) {
+        state.portLogs.set(group.portIndex, {
+          portIndex: group.portIndex,
+          portType: 'CAN',
+          portName: `Port ${group.portIndex}`,
+          entries: []
+        })
+      }
+    }
+    triggerRef(canAggregatedGroups)
+  }
+
+  /**
+   * 处理 Serial 批量事件（由 SignalR wireTapSerialBatch 调用）
+   */
+  function handleSerialBatch(event: WireTapSerialBatchEvent) {
+    for (const entry of event.entries) {
+      handleWireTapData(entry)
+    }
+  }
+
+  /**
+   * 获取节点所有有数据的端口（config 开启 OR 有日志数据 OR 有 CAN 聚合组）
+   * 用于控制日志面板可见性（WireTap 关闭后面板不消失）
+   */
+  function getPortsWithDataForNode(uuid: string): number[] {
+    const state = nodeStates.value.get(uuid)
+    if (!state) return []
+
+    const portSet = new Set<number>()
+
+    // config 激活的端口
+    for (const [portIndex, config] of state.portConfigs) {
+      if (config.rx || config.tx) {
+        portSet.add(portIndex)
+      }
+    }
+
+    // 有 Serial 日志数据的端口
+    for (const [portIndex, portLog] of state.portLogs) {
+      if (portLog.entries.length > 0) {
+        portSet.add(portIndex)
+      }
+    }
+
+    // 有 CAN 聚合组的端口
+    for (const group of canAggregatedGroups.value.values()) {
+      if (group.uuid === uuid) {
+        portSet.add(group.portIndex)
+      }
+    }
+
+    return Array.from(portSet).sort((a, b) => a - b)
+  }
+
+  /**
+   * 获取某个端口的 CAN 聚合组列表，按 CAN ID 升序 → 方向 (RX=0 先) → DLC 排序
+   */
+  function getCanGroupsForPort(uuid: string, portIndex: number): CANAggregatedGroup[] {
+    const result: CANAggregatedGroup[] = []
+    for (const group of canAggregatedGroups.value.values()) {
+      if (group.uuid === uuid && group.portIndex === portIndex) {
+        result.push(group)
+      }
+    }
+    result.sort((a, b) =>
+      a.canId - b.canId ||
+      a.direction - b.direction ||
+      a.dlc - b.dlc
+    )
+    return result
+  }
+
+  /**
    * 清空端口 WireTap 日志
    */
   function clearPortLogs(uuid: string, portIndex: number) {
@@ -304,6 +409,13 @@ export const useWireTapStore = defineStore('wiretap', () => {
     if (portLog) {
       portLog.entries.length = 0
     }
+    // Also clear CAN aggregated groups for this port
+    for (const [key, group] of canAggregatedGroups.value) {
+      if (group.uuid === uuid && group.portIndex === portIndex) {
+        canAggregatedGroups.value.delete(key)
+      }
+    }
+    triggerRef(canAggregatedGroups)
   }
   
   /**
@@ -316,6 +428,12 @@ export const useWireTapStore = defineStore('wiretap', () => {
         portLog.entries.length = 0
       }
     }
+    for (const [key, group] of canAggregatedGroups.value) {
+      if (group.uuid === uuid) {
+        canAggregatedGroups.value.delete(key)
+      }
+    }
+    triggerRef(canAggregatedGroups)
   }
   
   /**
@@ -327,6 +445,8 @@ export const useWireTapStore = defineStore('wiretap', () => {
         portLog.entries.length = 0
       }
     }
+    canAggregatedGroups.value.clear()
+    triggerRef(canAggregatedGroups)
     console.log('[WireTap] Cleared all logs')
   }
   
@@ -481,6 +601,7 @@ export const useWireTapStore = defineStore('wiretap', () => {
             
             const entry: WireTapLogEntry = {
               timestamp: logEntry.timestamp,
+              mcuTimestamp: formatMcuTimestamp(logEntry.mcuTimestampMs),
               direction: logEntry.direction === 0 ? 'RX' : 'TX',
               hexData: formatHex(rawBytes),
               rawBytes,
@@ -508,12 +629,15 @@ export const useWireTapStore = defineStore('wiretap', () => {
    */
   function reset() {
     nodeStates.value.clear()
+    canAggregatedGroups.value.clear()
     triggerRef(nodeStates)
+    triggerRef(canAggregatedGroups)
   }
   
   return {
     // 状态
     nodeStates,
+    canAggregatedGroups,
     
     // 计算属性
     activeNodes,
@@ -524,7 +648,11 @@ export const useWireTapStore = defineStore('wiretap', () => {
     getPortWireTap,
     getPortLogs,
     getActivePortsForNode,
+    getPortsWithDataForNode,
+    getCanGroupsForPort,
     handleWireTapData,
+    handleCanAggregated,
+    handleSerialBatch,
     clearPortLogs,
     clearNodeLogs,
     clearAllLogs,

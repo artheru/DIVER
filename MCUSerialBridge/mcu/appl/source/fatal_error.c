@@ -13,6 +13,7 @@
 #include "appl/fatal_error.h"
 #include "appl/threads.h"
 #include "appl/version.h"
+#include "hal/systick.h"
 #include "hal/usart.h"
 #include "hal/nvic.h"
 #include "hal/delay.h"
@@ -35,8 +36,9 @@ static uint8_t s_error_packet[PACKET_OFFLOAD_SIZE + sizeof(PayloadHeader) + size
  * 函数不会返回，会在发送完成后复位 MCU。
  * 
  * @param payload 错误 Payload 指针
+ * @param timestamp_ms MCU 时间戳（毫秒），必须在禁用中断前由 caller 保存
  */
-static void fatal_error_send_impl(const ErrorPayloadC* payload)
+static void fatal_error_send_impl(const ErrorPayloadC* payload, uint32_t timestamp_ms)
 {
     // ========== 1. 禁用所有中断 ==========
     // 使用内联汇编直接禁用中断 (永久禁用，不会重新启用)
@@ -79,7 +81,7 @@ static void fatal_error_send_impl(const ErrorPayloadC* payload)
         PayloadHeader header = {
             .command = CommandError,
             .sequence = (uint32_t)i,
-            .timestamp_ms = 0,
+            .timestamp_ms = timestamp_ms,
             .error_code = 0xDEAD
         };
         memcpy(header_ptr, &header, sizeof(PayloadHeader));
@@ -105,6 +107,8 @@ static void fatal_error_send_impl(const ErrorPayloadC* payload)
 
 void fatal_error_send_string(int il_offset, const char* error_str, int line_no)
 {
+    uint32_t ts = (uint32_t)(g_hal_timestamp_us / 1000);
+
     ErrorPayloadC payload;
     memset(&payload, 0, sizeof(payload));
     
@@ -124,11 +128,13 @@ void fatal_error_send_string(int il_offset, const char* error_str, int line_no)
         payload.core_dump.raw[len] = '\0';
     }
     
-    fatal_error_send_impl(&payload);
+    fatal_error_send_impl(&payload, ts);
 }
 
 void fatal_error_send_coredump(int il_offset, const CoreDumpVariables* core_dump)
 {
+    uint32_t ts = (uint32_t)(g_hal_timestamp_us / 1000);
+
     ErrorPayloadC payload;
     memset(&payload, 0, sizeof(payload));
     
@@ -143,11 +149,13 @@ void fatal_error_send_coredump(int il_offset, const CoreDumpVariables* core_dump
         memcpy(&payload.core_dump.f4, core_dump, sizeof(CoreDumpVariablesF4C));
     }
     
-    fatal_error_send_impl(&payload);
+    fatal_error_send_impl(&payload, ts);
 }
 
 void fatal_error_send_console_writeline(const void* data, uint32_t length)
 {
+    uint32_t ts = (uint32_t)(g_hal_timestamp_us / 1000);
+
     if (length == 0 || data == NULL) {
         return;
     }
@@ -175,7 +183,7 @@ void fatal_error_send_console_writeline(const void* data, uint32_t length)
     PayloadHeader header = {
         .command = CommandUploadConsoleWriteLine,
         .sequence = 0,
-        .timestamp_ms = 0,
+        .timestamp_ms = ts,
         .error_code = 0,
     };
     memcpy(header_ptr, &header, sizeof(PayloadHeader));

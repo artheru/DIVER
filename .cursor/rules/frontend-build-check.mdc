@@ -1,0 +1,15 @@
+---
+description: After editing frontend files in CoralinkerHost/ClientApp, run vue-tsc type check to verify no TS errors
+globs: 3rd/CoralinkerHost/ClientApp/**/*.{ts,vue}
+alwaysApply: false
+---
+
+# Frontend Build Check
+
+After modifying any `.ts` or `.vue` file under `3rd/CoralinkerHost/ClientApp/`, run the TypeScript type check to verify there are no compile errors:
+
+```bash
+cd 3rd/CoralinkerHost/ClientApp && npx vue-tsc --noEmit
+```
+
+Fix all type errors before considering the task complete.

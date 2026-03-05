@@ -20,14 +20,14 @@
       </div>
       <div class="column-content" ref="consoleRef">
         <div 
-          v-for="(parsed, idx) in parsedConsoleLines" 
+          v-for="(entry, idx) in consoleEntries" 
           :key="idx" 
           class="log-entry console-entry"
         >
-          <span v-if="parsed.time" class="entry-time">{{ parsed.time }}</span>
-          <span v-html="formatLine(parsed.message)"></span>
+          <span v-if="entry.hostTime" class="entry-time">{{ entry.hostTime }} <span v-if="entry.mcuTimestampMs" class="mcu-time">{{ formatMcuTime(entry.mcuTimestampMs) }}</span></span>
+          <span v-html="formatLine(entry.message)"></span>
         </div>
-        <div v-if="parsedConsoleLines.length === 0" class="empty-log">No logs yet</div>
+        <div v-if="consoleEntries.length === 0" class="empty-log">No logs yet</div>
       </div>
     </div>
 
@@ -53,31 +53,15 @@
           <button class="clear-btn" @click="clearPortLog(port.portIndex)" title="Clear">🗑</button>
         </div>
         <div class="column-content" ref="portRefs">
-          <template v-if="port.portType === 'CAN'">
-            <div 
-              v-for="(entry, entryIdx) in getPortEntries(port.portIndex)" 
-              :key="entryIdx" 
-              class="log-entry can-entry"
-              :class="{ highlighted: highlightedEntry?.portIndex === port.portIndex && highlightedEntry?.entryIdx === entryIdx }"
-            >
-              <span class="entry-time">{{ entry.timestamp }}</span>
-              <span class="entry-dir" :class="entry.direction.toLowerCase()">{{ entry.direction }}</span>
-              <button 
-                class="parse-btn" 
-                @click="showProtocolParse($event, entry, port.portType, port.portIndex, entryIdx)"
-                title="Parse as protocol"
-              >🔍</button>
-              <div v-if="entry.canMessage" class="can-message">
-                <span class="can-id">ID:{{ formatCanId(entry.canMessage.id) }}</span>
-                <span class="can-dlc">DLC:{{ entry.canMessage.dlc }}</span>
-                <span v-if="entry.canMessage.rtr" class="can-rtr">RTR</span>
-                <span 
-                  class="can-data" 
-                  @mouseup="handleHexSelection($event, entry, port.portIndex, entryIdx)"
-                >{{ formatCanData(entry.canMessage.data) }}</span>
-              </div>
-            </div>
-          </template>
+          <!-- CAN: 使用聚合视图 -->
+          <CANAggregatedView
+            v-if="port.portType === 'CAN'"
+            :uuid="uuid"
+            :port-index="port.portIndex"
+            @inspect="handleCanInspect"
+            @parse="handleCanParse"
+          />
+          <!-- Serial: 保持原始平铺列表 -->
           <template v-else>
             <div 
               v-for="(entry, entryIdx) in getPortEntries(port.portIndex)" 
@@ -85,7 +69,7 @@
               class="log-entry serial-entry"
               :class="{ highlighted: highlightedEntry?.portIndex === port.portIndex && highlightedEntry?.entryIdx === entryIdx }"
             >
-              <span class="entry-time">{{ entry.timestamp }}</span>
+              <span class="entry-time">{{ entry.timestamp }} <span class="mcu-time">{{ entry.mcuTimestamp }}</span></span>
               <span class="entry-dir" :class="entry.direction.toLowerCase()">{{ entry.direction }}</span>
               <button 
                 class="parse-btn" 
@@ -115,8 +99,8 @@
                 {{ isExpanded(port.portIndex, entryIdx) ? '▼' : '▶' }}
               </button>
             </div>
+            <div v-if="getPortEntries(port.portIndex).length === 0" class="empty-log">No data</div>
           </template>
-          <div v-if="getPortEntries(port.portIndex).length === 0" class="empty-log">No data</div>
         </div>
       </div>
     </div>
@@ -188,6 +172,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useWireTapStore, useLogStore } from '@/stores'
 import type { WireTapLogEntry } from '@/types'
 import { protocolRegistry, type ParseResult, type ParseContext } from '@/protocol'
+import CANAggregatedView from './CANAggregatedView.vue'
 
 const props = defineProps<{
   /** 节点 UUID */
@@ -287,37 +272,23 @@ function constrainPopupPosition(
 // 计算属性
 // ============================================
 
-// Console 日志行
-const consoleLines = computed(() => {
-  const logs = logStore.nodeLogs.get(props.uuid)
-  return logs || []
+// Console 日志条目（结构化）
+const consoleEntries = computed(() => {
+  return logStore.nodeLogs.get(props.uuid) || []
 })
 
-// 解析后的 Console 日志（分离时间戳和消息）
-interface ParsedLogLine {
-  time: string | null
-  message: string
+function formatMcuTime(ms: number): string {
+  if (ms === 0) return ''
+  const totalSec = Math.floor(ms / 1000)
+  const millis = ms % 1000
+  const minutes = Math.floor(totalSec / 60)
+  const seconds = totalSec % 60
+  return `+${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(millis).padStart(3, '0')}`
 }
 
-const parsedConsoleLines = computed((): ParsedLogLine[] => {
-  return consoleLines.value.map(line => {
-    const timeMatch = line.match(/^\[(\d{2}:\d{2}:\d{2}(?:\.\d{3})?)\]\s*/)
-    if (timeMatch) {
-      return {
-        time: timeMatch[1] ?? null,
-        message: line.slice(timeMatch[0].length)
-      }
-    }
-    return {
-      time: null,
-      message: line
-    }
-  })
-})
-
-// 活动的端口列表
+// 有数据的端口列表（config 激活 OR 有日志/聚合数据）
 const activePorts = computed(() => {
-  const ports = wireTapStore.getActivePortsForNode(props.uuid)
+  const ports = wireTapStore.getPortsWithDataForNode(props.uuid)
   const state = wireTapStore.nodeStates.get(props.uuid)
   
   return ports.map(portIndex => {
@@ -348,27 +319,6 @@ function formatLine(line: string): string {
     .replace(/\x1b\[36m/g, '<span class="log-cyan">')
     .replace(/\x1b\[0m/g, '</span>')
     .replace(/\x1b\[\d+m/g, '')
-}
-
-// 格式化 CAN ID
-function formatCanId(id: number): string {
-  return '0x' + id.toString(16).toUpperCase().padStart(3, '0')
-}
-
-// 格式化 CAN 数据
-function formatCanData(data: number[] | string | undefined): string {
-  if (!data) return ''
-  // 如果是 base64 字符串，解码它
-  if (typeof data === 'string') {
-    try {
-      const bytes = atob(data)
-      return Array.from(bytes, c => c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join(' ')
-    } catch {
-      return data
-    }
-  }
-  if (!Array.isArray(data)) return ''
-  return data.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')
 }
 
 // 清空 Console
@@ -706,6 +656,20 @@ function formatFieldBytes(bytes: number[]): string {
   return bytes.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')
 }
 
+// CANAggregatedView inspect event handler
+function handleCanInspect(event: MouseEvent, entry: WireTapLogEntry, portIndex: number, _entryIdx: number) {
+  handleHexSelection(event, entry, portIndex, 0)
+}
+
+// CANAggregatedView parse event handler
+function handleCanParse(result: unknown, position: { x: number; y: number }, portIndex: number, _entryIdx: number) {
+  highlightedEntry.value = { portIndex, entryIdx: 0 }
+  parseResult.value = result as ParseResult
+  parsePosition.value = constrainPopupPosition(position.x, position.y, 500, 400)
+  parseJustOpened.value = true
+  setTimeout(() => { parseJustOpened.value = false }, 100)
+}
+
 // 开始调整大小 (index 是 Port 在 activePorts 中的索引)
 function startResize(event: MouseEvent, index: number) {
   resizingIndex.value = index
@@ -783,7 +747,7 @@ watch(activePorts, (ports) => {
 }, { immediate: true })
 
 // 自动滚动
-watch([parsedConsoleLines, () => wireTapStore.nodeStates.get(props.uuid)], () => {
+watch([consoleEntries, () => wireTapStore.nodeStates.get(props.uuid)], () => {
   scrollToBottom()
 }, { deep: true })
 
@@ -945,6 +909,10 @@ onUnmounted(() => {
   color: #64748b;
   font-size: 10px;
   flex-shrink: 0;
+}
+
+.mcu-time {
+  color: #8b5cf6;
 }
 
 .entry-dir {

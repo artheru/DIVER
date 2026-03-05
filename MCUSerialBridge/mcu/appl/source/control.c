@@ -1091,11 +1091,13 @@ void control_upload_memory_lower_io(const uint8_t* data, uint32_t data_length)
         return;
     }
 
+    uint32_t ts = (uint32_t)(g_hal_timestamp_us / 1000);
+
     PayloadHeader header = {
             .command = CommandMemoryLowerIO,
             .sequence = 0,
             .error_code = 0,
-            .timestamp_ms = 0,
+            .timestamp_ms = ts,
     };
 
     // 构造 MemoryExchangePacket

@@ -138,8 +138,15 @@ public sealed class TerminalBroadcaster
     
     public Task NodeLogLineAsync(string uuid, string message, CancellationToken ct = default)
     {
-        // 发送两个参数：uuid 和 message（message 已经带时间戳）
         return _hub.Clients.All.SendAsync("nodeLogLine", uuid, message, ct);
+    }
+
+    /// <summary>
+    /// 批量推送节点日志行
+    /// </summary>
+    public Task NodeLogBatchAsync(string uuid, List<object> entries, CancellationToken ct = default)
+    {
+        return _hub.Clients.All.SendAsync("nodeLogBatch", uuid, entries, ct);
     }
 
     /// <summary>
@@ -166,10 +173,26 @@ public sealed class TerminalBroadcaster
     }
 
     /// <summary>
-    /// 推送 WireTap 数据事件
+    /// 推送 WireTap 数据事件（旧的逐帧推送，保留兼容）
     /// </summary>
     public Task WireTapDataAsync(object data, CancellationToken ct = default)
     {
         return _hub.Clients.All.SendAsync("wireTapData", data, ct);
+    }
+
+    /// <summary>
+    /// 推送 CAN 聚合快照
+    /// </summary>
+    public Task WireTapCanAggregatedAsync(object data, CancellationToken ct = default)
+    {
+        return _hub.Clients.All.SendAsync("wireTapCanAggregated", data, ct);
+    }
+
+    /// <summary>
+    /// 推送 Serial 批量数据
+    /// </summary>
+    public Task WireTapSerialBatchAsync(object data, CancellationToken ct = default)
+    {
+        return _hub.Clients.All.SendAsync("wireTapSerialBatch", data, ct);
     }
 }

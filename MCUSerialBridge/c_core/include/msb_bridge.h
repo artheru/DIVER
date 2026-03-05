@@ -261,6 +261,7 @@ typedef void (*msb_on_port_data_callback_function_t)(
         uint8_t direction,
         const uint8_t* dst_data,
         uint32_t dst_data_size,
+        uint32_t timestamp_ms,
         void* user_ctx);
 
 /**
@@ -379,6 +380,7 @@ DLL_EXPORT MCUSerialBridgeError msb_register_memory_lower_io_callback(
 typedef void (*msb_on_console_writeline_callback_function_t)(
         const char* message,
         uint32_t message_len,
+        uint32_t timestamp_ms,
         void* user_ctx);
 
 /**

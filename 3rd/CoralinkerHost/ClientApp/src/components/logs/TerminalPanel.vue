@@ -48,6 +48,15 @@
       
       <!-- 终端控制组 -->
       <div class="btn-group">
+        <button 
+          v-if="currentNodeHasWireTap"
+          class="action-btn" 
+          @click="exportNodeCsv" 
+          title="Export WireTap logs to CSV"
+        >
+          <span class="btn-icon">📥</span>
+          <span class="btn-text">Export</span>
+        </button>
         <button class="action-btn" @click="clearCurrent" title="Clear terminal">
           <span class="btn-icon">🗑</span>
           <span class="btn-text">Clear</span>
@@ -82,15 +91,15 @@
         </div>
         <div class="column-content" ref="contentRef" @click="handleLogClick">
           <div 
-            v-for="(parsed, idx) in parsedNodeLines" 
+            v-for="(entry, idx) in nodeEntries" 
             :key="idx" 
             class="log-entry console-entry"
-            :class="{ 'error-entry': isErrorLine(parsed.raw), 'warning-entry': isWarningLine(parsed.raw) }"
+            :class="{ 'error-entry': isErrorLine(entry.message), 'warning-entry': isWarningLine(entry.message) }"
           >
-            <span v-if="parsed.time" class="entry-time">{{ parsed.time }}</span>
-            <span v-html="formatLine(parsed.message)"></span>
+            <span v-if="entry.hostTime" class="entry-time">{{ entry.hostTime }} <span v-if="entry.mcuTimestampMs" class="mcu-time">{{ formatMcuTime(entry.mcuTimestampMs) }}</span></span>
+            <span v-html="formatLine(entry.message)"></span>
           </div>
-          <div v-if="parsedNodeLines.length === 0" class="empty-log">No logs yet</div>
+          <div v-if="nodeEntries.length === 0" class="empty-log">No logs yet</div>
         </div>
       </div>
     </div>
@@ -116,6 +125,7 @@
 import { ref, watch, nextTick, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useLogStore, useWireTapStore } from '@/stores'
+import { exportNodeWireTapCsv } from '@/api/device'
 import WireTapLogView from './WireTapLogView.vue'
 
 // ============================================
@@ -141,14 +151,13 @@ const buildErrorCount = computed(() => {
   return buildLines.value.filter(line => line.includes(': error ')).length
 })
 
-// 当前 Tab 是否是有 WireTap 的节点
+// 当前 Tab 是否是有 WireTap 数据的节点（config 激活 OR 有已采集的日志）
 const currentNodeHasWireTap = computed(() => {
   if (activeTab.value === 'terminal' || activeTab.value === 'build') {
     return false
   }
-  // 检查当前节点是否有活动的 WireTap
-  const activePorts = wireTapStore.getActivePortsForNode(activeTab.value)
-  return activePorts.length > 0
+  const ports = wireTapStore.getPortsWithDataForNode(activeTab.value)
+  return ports.length > 0
 })
 
 // 当前节点信息
@@ -162,31 +171,19 @@ const isNodeTab = computed(() => {
   return activeTab.value !== 'terminal' && activeTab.value !== 'build'
 })
 
-// 解析后的节点日志行（分离时间戳和消息）
-interface ParsedLogLine {
-  time: string | null
-  message: string
-  raw: string
-}
-
-const parsedNodeLines = computed((): ParsedLogLine[] => {
-  return currentLines.value.map(line => {
-    // 尝试匹配时间戳格式: [HH:MM:SS.mmm] 或 [HH:MM:SS]
-    const timeMatch = line.match(/^\[(\d{2}:\d{2}:\d{2}(?:\.\d{3})?)\]\s*/)
-    if (timeMatch && timeMatch[1]) {
-      return {
-        time: timeMatch[1],
-        message: line.slice(timeMatch[0].length),
-        raw: line
-      }
-    }
-    return {
-      time: null,
-      message: line,
-      raw: line
-    }
-  })
+// 节点日志条目（结构化，直接从 store 获取）
+const nodeEntries = computed(() => {
+  return logStore.currentNodeEntries
 })
+
+function formatMcuTime(ms: number): string {
+  if (ms === 0) return ''
+  const totalSec = Math.floor(ms / 1000)
+  const millis = ms % 1000
+  const minutes = Math.floor(totalSec / 60)
+  const seconds = totalSec % 60
+  return `+${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(millis).padStart(3, '0')}`
+}
 
 // ============================================
 // 本地状态
@@ -216,6 +213,26 @@ function switchTab(tabId: string) {
  */
 function clearCurrent() {
   logStore.clearCurrent()
+}
+
+/**
+ * 导出当前节点 WireTap 日志为 CSV
+ */
+async function exportNodeCsv() {
+  if (!currentNodeHasWireTap.value) return
+  try {
+    const blob = await exportNodeWireTapCsv(activeTab.value)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `wiretap_${currentNodeInfo.value.nodeName || activeTab.value.slice(0, 8)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    console.error('[TerminalPanel] CSV export failed:', err)
+  }
 }
 
 /**
@@ -301,7 +318,7 @@ function handleLogClick(event: MouseEvent) {
 // 监听日志变化，自动滚动
 // ============================================
 
-watch(currentLines, () => {
+watch([currentLines, nodeEntries], () => {
   nextTick(() => {
     scrollToBottom()
   })
@@ -547,6 +564,10 @@ watch(currentLines, () => {
   flex-shrink: 0;
   color: #64748b;
   font-size: 10px;
+}
+
+.console-only-view .console-entry .mcu-time {
+  color: #8b5cf6;
 }
 
 .console-only-view .empty-log {

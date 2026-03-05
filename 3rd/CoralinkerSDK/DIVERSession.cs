@@ -307,7 +307,8 @@ public record WireTapDataEventArgs(
     PortType PortType,
     byte[] RawData,
     CANMessage? CANMessage,  // 仅 CAN 端口有值
-    DateTime Timestamp  // 数据接收时间（后端时间戳）
+    DateTime Timestamp,  // 数据接收时间（后端时间戳）
+    uint McuTimestampMs  // MCU 端时间戳（毫秒，相对时间）
 );
 
 /// <summary>
@@ -321,7 +322,8 @@ public record WireTapLogEntry(
     string PortType,  // "Serial" | "CAN"
     byte[] RawData,
     CANMessage? CANMessage,
-    DateTime Timestamp
+    DateTime Timestamp,
+    uint McuTimestampMs  // MCU 端时间戳（毫秒，相对时间）
 );
 
 /// <summary>
@@ -371,8 +373,8 @@ public sealed class DIVERSession : IDisposable
     /// <summary>状态变更事件</summary>
     public event Action<DIVERSessionState>? OnStateChanged;
 
-    /// <summary>节点日志事件</summary>
-    public event Action<string, string>? OnNodeLog;
+    /// <summary>节点日志事件 (uuid, hostTimestamp, message, mcuTimestampMs)</summary>
+    public event Action<string, string, string, uint>? OnNodeLog;
 
     /// <summary>节点致命错误事件（MCU HardFault 或 ASSERT 失败），参数为 JSON 字符串</summary>
     public event Action<string, string>? OnFatalError;
@@ -1044,7 +1046,7 @@ public sealed class DIVERSession : IDisposable
 
             // 注册回调
             handle.OnLowerIOReceived += data => HandleLowerIO(entry.UUID, data);
-            handle.OnConsoleOutput += msg => HandleConsoleOutput(entry.UUID, msg);
+            handle.OnConsoleOutput += (msg, mcuTs) => HandleConsoleOutput(entry.UUID, msg, mcuTs);
             handle.OnFatalError += payload => HandleFatalError(entry.UUID, payload);
 
             // Connect
@@ -1430,25 +1432,22 @@ public sealed class DIVERSession : IDisposable
         }
     }
 
-    private void HandleConsoleOutput(string uuid, string message)
+    private void HandleConsoleOutput(string uuid, string message, uint mcuTimestampMs)
     {
         if (!_nodes.TryGetValue(uuid, out var entry))
             return;
 
-        LogToNode(entry, message);
+        LogToNode(entry, message, mcuTimestampMs);
     }
     
     /// <summary>
     /// 向节点日志添加一条消息（自动添加时间戳）
     /// </summary>
-    private void LogToNode(NodeEntry entry, string message)
+    private void LogToNode(NodeEntry entry, string message, uint mcuTimestampMs = 0)
     {
-        // 添加时间戳到消息（在后端添加，而不是前端，避免批量消息时间戳相同）
-        var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
-        var timestampedMessage = $"[{timestamp}] {message}";
-        
-        entry.LogBuffer.Add(timestampedMessage);
-        OnNodeLog?.Invoke(entry.UUID, timestampedMessage);
+        var hostTimestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+        entry.LogBuffer.Add($"[{hostTimestamp}] {message}");
+        OnNodeLog?.Invoke(entry.UUID, hostTimestamp, message, mcuTimestampMs);
     }
 
     private void HandleFatalError(string uuid, ErrorPayload payload)
@@ -1545,17 +1544,17 @@ public sealed class DIVERSession : IDisposable
             if (port.Type == MCUSerialBridgeCLR.PortType.CAN)
             {
                 // CAN 端口回调
-                handle.RegisterCANPortCallback(portIndex, (pi, direction, canMsg) =>
+                handle.RegisterCANPortCallback(portIndex, (pi, direction, canMsg, mcuTs) =>
                 {
-                    HandleWireTapCANData(entry.UUID, pi, direction, canMsg);
+                    HandleWireTapCANData(entry.UUID, pi, direction, canMsg, mcuTs);
                 });
             }
             else
             {
                 // Serial 端口回调
-                handle.RegisterSerialPortCallback(portIndex, (pi, direction, data) =>
+                handle.RegisterSerialPortCallback(portIndex, (pi, direction, data, mcuTs) =>
                 {
-                    HandleWireTapSerialData(entry.UUID, pi, direction, data);
+                    HandleWireTapSerialData(entry.UUID, pi, direction, data, mcuTs);
                 });
             }
         }
@@ -1566,12 +1565,11 @@ public sealed class DIVERSession : IDisposable
     /// <summary>
     /// 处理 WireTap 串口数据
     /// </summary>
-    private void HandleWireTapSerialData(string uuid, byte portIndex, byte direction, byte[] data)
+    private void HandleWireTapSerialData(string uuid, byte portIndex, byte direction, byte[] data, uint mcuTimestampMs)
     {
         if (!_nodes.TryGetValue(uuid, out var entry))
             return;
 
-        // 记录接收时间（在回调被触发时立即记录）
         var timestamp = DateTime.Now;
 
         var args = new WireTapDataEventArgs(
@@ -1582,11 +1580,11 @@ public sealed class DIVERSession : IDisposable
             PortType: MCUSerialBridgeCLR.PortType.Serial,
             RawData: data,
             CANMessage: null,
-            Timestamp: timestamp
+            Timestamp: timestamp,
+            McuTimestampMs: mcuTimestampMs
         );
 
-        // 存储日志
-        StoreWireTapLog(uuid, entry.NodeName, portIndex, direction, "Serial", data, null, timestamp);
+        StoreWireTapLog(uuid, entry.NodeName, portIndex, direction, "Serial", data, null, timestamp, mcuTimestampMs);
 
         OnWireTapData?.Invoke(args);
     }
@@ -1594,12 +1592,11 @@ public sealed class DIVERSession : IDisposable
     /// <summary>
     /// 处理 WireTap CAN 数据
     /// </summary>
-    private void HandleWireTapCANData(string uuid, byte portIndex, byte direction, CANMessage canMsg)
+    private void HandleWireTapCANData(string uuid, byte portIndex, byte direction, CANMessage canMsg, uint mcuTimestampMs)
     {
         if (!_nodes.TryGetValue(uuid, out var entry))
             return;
 
-        // 记录接收时间（在回调被触发时立即记录）
         var timestamp = DateTime.Now;
 
         var args = new WireTapDataEventArgs(
@@ -1610,11 +1607,11 @@ public sealed class DIVERSession : IDisposable
             PortType: MCUSerialBridgeCLR.PortType.CAN,
             RawData: canMsg.ToBytes(),
             CANMessage: canMsg,
-            Timestamp: timestamp
+            Timestamp: timestamp,
+            McuTimestampMs: mcuTimestampMs
         );
 
-        // 存储日志
-        StoreWireTapLog(uuid, entry.NodeName, portIndex, direction, "CAN", canMsg.ToBytes(), canMsg, timestamp);
+        StoreWireTapLog(uuid, entry.NodeName, portIndex, direction, "CAN", canMsg.ToBytes(), canMsg, timestamp, mcuTimestampMs);
 
         OnWireTapData?.Invoke(args);
     }
@@ -1622,7 +1619,7 @@ public sealed class DIVERSession : IDisposable
     /// <summary>
     /// 存储 WireTap 日志条目
     /// </summary>
-    private void StoreWireTapLog(string uuid, string nodeName, byte portIndex, byte direction, string portType, byte[] rawData, CANMessage? canMessage, DateTime timestamp)
+    private void StoreWireTapLog(string uuid, string nodeName, byte portIndex, byte direction, string portType, byte[] rawData, CANMessage? canMessage, DateTime timestamp, uint mcuTimestampMs)
     {
         var logEntry = new WireTapLogEntry(
             UUID: uuid,
@@ -1632,7 +1629,8 @@ public sealed class DIVERSession : IDisposable
             PortType: portType,
             RawData: rawData,
             CANMessage: canMessage,
-            Timestamp: timestamp
+            Timestamp: timestamp,
+            McuTimestampMs: mcuTimestampMs
         );
         
         var logs = _wireTapLogs.GetOrAdd(uuid, _ => new List<WireTapLogEntry>());

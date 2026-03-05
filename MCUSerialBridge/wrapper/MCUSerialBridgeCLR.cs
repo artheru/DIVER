@@ -872,6 +872,7 @@ namespace MCUSerialBridgeCLR
             byte direction,
             IntPtr dst_data,
             uint dst_data_size,
+            uint timestamp_ms,
             IntPtr user_ctx
         );
 
@@ -937,6 +938,7 @@ namespace MCUSerialBridgeCLR
         internal delegate void msb_on_console_writeline_callback_function_t(
             IntPtr message,
             uint message_len,
+            uint timestamp_ms,
             IntPtr user_ctx
         );
 
@@ -1368,7 +1370,7 @@ namespace MCUSerialBridgeCLR
         /// </remarks>
         public MCUSerialBridgeError RegisterSerialPortCallback(
             byte portIndex,
-            Action<byte, byte, byte[]> callback
+            Action<byte, byte, byte[], uint> callback
         )
         {
             if (callback == null)
@@ -1378,11 +1380,11 @@ namespace MCUSerialBridgeCLR
                 return MCUSerialBridgeError.Config_PortNumOver;
 
             // 包装 C# 回调为 P/Invoke 委托
-            void del(byte port_index, byte direction, IntPtr dst_data, uint dst_data_size, IntPtr user_ctx)
+            void del(byte port_index, byte direction, IntPtr dst_data, uint dst_data_size, uint timestamp_ms, IntPtr user_ctx)
             {
                 byte[] data = new byte[dst_data_size];
                 Marshal.Copy(dst_data, data, 0, (int)dst_data_size);
-                callback(port_index, direction, data);
+                callback(port_index, direction, data, timestamp_ms);
             }
 
             // 保存引用，防止 GC 回收
@@ -1418,7 +1420,7 @@ namespace MCUSerialBridgeCLR
         /// </remarks>
         public MCUSerialBridgeError RegisterCANPortCallback(
             byte portIndex,
-            Action<byte, byte, CANMessage> callback
+            Action<byte, byte, CANMessage, uint> callback
         )
         {
             if (callback == null)
@@ -1428,14 +1430,14 @@ namespace MCUSerialBridgeCLR
                 return MCUSerialBridgeError.Config_PortNumOver;
 
             // 包装 C# 回调为 P/Invoke 委托
-            void del(byte port_index, byte direction, IntPtr dst_data, uint dst_data_size, IntPtr user_ctx)
+            void del(byte port_index, byte direction, IntPtr dst_data, uint dst_data_size, uint timestamp_ms, IntPtr user_ctx)
             {
                 try
                 {
                     byte[] data = new byte[dst_data_size];
                     Marshal.Copy(dst_data, data, 0, (int)dst_data_size);
                     CANMessage msg = CANMessage.FromBytes(data, dst_data_size);
-                    callback(port_index, direction, msg);
+                    callback(port_index, direction, msg, timestamp_ms);
                 }
                 catch
                 {
@@ -1624,7 +1626,7 @@ namespace MCUSerialBridgeCLR
         /// 4. 若需要复杂处理，请**将数据入队到另一个线程**，再在后台处理。
         /// 5. 数据可能随时到来，请保证回调尽快返回，避免影响后续帧接收。
         /// </remarks>
-        public MCUSerialBridgeError RegisterConsoleWriteLineCallback(Action<string> callback)
+        public MCUSerialBridgeError RegisterConsoleWriteLineCallback(Action<string, uint> callback)
         {
             if (callback == null)
                 return MCUSerialBridgeError.Win_InvalidParam;
@@ -1633,12 +1635,12 @@ namespace MCUSerialBridgeCLR
                 return MCUSerialBridgeError.Win_HandleNotFound;
 
             // 包装 C# 回调为 P/Invoke 委托
-            void del(IntPtr message, uint message_len, IntPtr user_ctx)
+            void del(IntPtr message, uint message_len, uint timestamp_ms, IntPtr user_ctx)
             {
                 try
                 {
                     string msg = Marshal.PtrToStringAnsi(message, (int)message_len);
-                    callback(msg);
+                    callback(msg, timestamp_ms);
                 }
                 catch
                 {

@@ -525,7 +525,8 @@ public static class ApiRoutes
                     rtr = e.CANMessage.RTR,
                     data = e.CANMessage.Payload
                 } : null,
-                timestamp = e.Timestamp.ToString("HH:mm:ss.fff")
+                timestamp = e.Timestamp.ToString("HH:mm:ss.fff"),
+                mcuTimestampMs = e.McuTimestampMs
             }).ToArray();
             
             return JsonHelper.Json(new { ok = true, entries = logs, latestIndex });
@@ -553,11 +554,44 @@ public static class ApiRoutes
                         rtr = e.CANMessage.RTR,
                         data = e.CANMessage.Payload
                     } : null,
-                    timestamp = e.Timestamp.ToString("HH:mm:ss.fff")
+                    timestamp = e.Timestamp.ToString("HH:mm:ss.fff"),
+                    mcuTimestampMs = e.McuTimestampMs
                 }).ToArray()
             );
             
             return JsonHelper.Json(new { ok = true, logs = result });
+        });
+
+        // 导出节点的所有 WireTap 日志为 CSV（所有端口合并，最多 10000 条）
+        app.MapGet("/api/node/{uuid}/wiretap/export", (string uuid) =>
+        {
+            var (entries, _) = DIVERSession.Instance.GetNodeWireTapLogs(uuid, null, 10000);
+            if (entries.Length == 0)
+                return Results.NotFound(new { ok = false, error = "No logs found" });
+
+            var info = DIVERSession.Instance.GetNodeInfo(uuid);
+            var nodeName = info?.NodeName ?? uuid[..Math.Min(8, uuid.Length)];
+            var fileName = $"{nodeName}_{uuid[..Math.Min(8, uuid.Length)]}_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
+
+            var sb = new StringBuilder();
+            sb.AppendLine("Timestamp,MCU_Timestamp_Ms,PortIndex,PortType,Direction,DataLength,HexData,CAN_ID,CAN_DLC,CAN_RTR");
+
+            foreach (var e in entries)
+            {
+                var dir = e.Direction == 0 ? "RX" : "TX";
+                var hex = BitConverter.ToString(e.RawData).Replace("-", " ");
+                var canId = e.CANMessage != null ? $"0x{e.CANMessage.ID:X3}" : "";
+                var canDlc = e.CANMessage?.DLC.ToString() ?? "";
+                var canRtr = e.CANMessage != null ? e.CANMessage.RTR.ToString().ToLower() : "";
+
+                sb.AppendLine($"{e.Timestamp:O},{e.McuTimestampMs},{e.PortIndex},{e.PortType},{dir},{e.RawData.Length},{hex},{canId},{canDlc},{canRtr}");
+            }
+
+            return Results.File(
+                Encoding.UTF8.GetBytes(sb.ToString()),
+                "text/csv",
+                fileName
+            );
         });
 
         // ============================================

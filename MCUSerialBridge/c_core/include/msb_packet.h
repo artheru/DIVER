@@ -38,7 +38,7 @@ MCUSerialBridgeError mcu_send_packet_and_wait(
         uint32_t return_data_len,
         uint32_t timeout_ms);
 
-void msb_parse_upload_data(msb_handle* handle, const DataPacket* data_packet);
+void msb_parse_upload_data(msb_handle* handle, const DataPacket* data_packet, uint32_t timestamp_ms);
 
 
 #ifdef __cplusplus

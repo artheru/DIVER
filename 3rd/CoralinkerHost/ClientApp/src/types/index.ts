@@ -303,6 +303,7 @@ export interface WireTapDataEvent {
   rawData: number[]  // byte array
   canMessage?: CANMessageData
   timestamp: string
+  mcuTimestampMs: number  // MCU 端时间戳（毫秒，相对时间）
 }
 
 /**
@@ -321,12 +322,44 @@ export interface CANMessageData {
  */
 export interface WireTapLogEntry {
   timestamp: string
+  mcuTimestamp: string  // MCU 相对时间格式化后的字符串 (+mm:ss.mmm)
   direction: 'TX' | 'RX'
   hexData: string
   rawBytes: number[]  // 原始字节数据（用于 Inspect）
   dataLength: number  // 原始数据长度
   textData?: string  // Unicode 解码尝试
   canMessage?: CANMessageData
+}
+
+/**
+ * CAN 聚合组（后端 WireTapAggregatorService 推送）
+ */
+export interface CANAggregatedGroup {
+  uuid: string
+  nodeName: string
+  portIndex: number
+  direction: number  // 0=RX, 1=TX
+  canId: number
+  dlc: number
+  rtr: boolean
+  lastReceived: string  // ISO timestamp
+  frameRate: number
+  totalFrames: number
+  recentFrames: Array<{ data: number[]; timestamp: string; mcuTimestampMs: number }>
+}
+
+/**
+ * CAN 聚合快照事件
+ */
+export interface WireTapCanAggregatedEvent {
+  groups: CANAggregatedGroup[]
+}
+
+/**
+ * Serial 批量事件
+ */
+export interface WireTapSerialBatchEvent {
+  entries: WireTapDataEvent[]
 }
 
 // ============================================

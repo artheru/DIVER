@@ -37,6 +37,8 @@ internal static class Program
         builder.Services.AddSingleton<RuntimeSessionService>();
         builder.Services.AddSingleton<FirmwareUpgradeService>();
         builder.Services.AddHostedService<VariableInspectorPushService>();
+        builder.Services.AddSingleton<WireTapAggregatorService>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<WireTapAggregatorService>());
 
         var app = builder.Build();
 

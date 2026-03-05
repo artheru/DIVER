@@ -141,7 +141,7 @@ DWORD WINAPI parse_thread_func(LPVOID param)
                     continue;  // Length mismatch
                 }
 
-                msb_parse_upload_data(handle, data_packet);
+                msb_parse_upload_data(handle, data_packet, payload_header->timestamp_ms);
             } else if (command == CommandMemoryLowerIO) {
                 // Memory LowerIO Data (MCU -> PC, DIVER mode output)
                 if (len <
@@ -187,6 +187,7 @@ DWORD WINAPI parse_thread_func(LPVOID param)
                     handle->console_writeline_callback(
                             msg_buf,
                             msg_len,
+                            payload_header->timestamp_ms,
                             handle->console_writeline_callback_ctx);
                 }
             } else if (command == CommandError) {

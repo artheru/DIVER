@@ -147,7 +147,7 @@ class Program
 
         // 注册事件
         session.OnStateChanged += state => Console.WriteLine($"[Session] State changed: {state}");
-        session.OnNodeLog += (uuid, msg) => Console.WriteLine($"[{uuid[..8]}] {msg}");
+        session.OnNodeLog += (uuid, hostTs, msg, _) => Console.WriteLine($"[{uuid[..8]}] [{hostTs}] {msg}");
         session.OnFatalError += (uuid, errorJson) =>
         {
             Console.WriteLine();

@@ -113,7 +113,8 @@ dotnet run
 │   ├── ProjectStore.cs           # 项目文件管理 (调用 DIVERSession.Export/Import)
 │   ├── DiverBuildService.cs      # C# → MCU 编译
 │   ├── TerminalBroadcaster.cs    # SignalR 消息推送
-│   └── VariableInspectorPushService.cs  # 定时推送变量和节点状态
+│   ├── VariableInspectorPushService.cs  # 定时推送变量和节点状态
+│   └── WireTapAggregatorService.cs     # WireTap CAN 聚合 + Serial 节流推送
 ├── Web/
 │   └── ApiRoutes.cs         # REST API 端点
 ├── data/                    # 运行时数据 (gitignored)
@@ -267,6 +268,7 @@ dotnet run
 | `/api/wiretap/configs` | GET | 获取所有节点的 WireTap 配置 |
 | `/api/node/{uuid}/wiretap/logs` | GET | 获取节点的 WireTap 日志 |
 | `/api/wiretap/logs` | GET | 获取所有节点的 WireTap 日志 |
+| `/api/node/{uuid}/wiretap/export` | GET | 导出节点所有端口 WireTap 日志为 CSV（最多 10000 条） |
 
 ### 项目管理
 
@@ -385,11 +387,12 @@ dotnet run
 
 | 服务 | 职责 |
 |------|------|
-| `RuntimeSessionService` | DIVERSession 异步封装 + 日志广播 |
+| `RuntimeSessionService` | DIVERSession 异步封装 + Start/Stop/Probe/Program 操作，Start 时调用 Aggregator.Reset() |
 | `ProjectStore` | 项目文件管理，调用 DIVERSession.Export/Import |
 | `DiverBuildService` | C# → MCU 编译，输出到 Build 日志面板 |
 | `TerminalBroadcaster` | SignalR 消息推送 (Terminal/Build/节点日志分离) |
 | `VariableInspectorPushService` | 每 200ms 推送变量，每 500ms 推送节点状态 |
+| `WireTapAggregatorService` | 数据聚合与节流：CAN 帧按 ID/DLC/方向分组，Serial 帧批量推送，节点日志批量推送（均 ~250ms） |
 | `JsonHelper` | 统一 JSON 序列化配置 (PascalCase ↔ camelCase) |
 
 ### JSON 序列化
@@ -504,9 +507,42 @@ WireTap 功能允许实时监听 MCU 端口（Serial/CAN）的通信数据，用
 - 选中十六进制数据可 Inspect 查看多种数据解析（u16/i16/u32/f32 等）
 - 日志存储在 DIVERSession 内存中（最大 10000 条），刷新页面不丢失
 - Start 时清空日志，Stop 时保留日志和计数器
+- WireTap 开关只控制嵌入式实时传送，关闭后已有数据的日志面板不会消失
+
+**CAN 聚合显示**：
+- CAN 报文按 `(方向, RTR, DLC, CAN_ID)` 分组聚合显示为表格行
+- 行按 CAN ID 升序 → 方向 (RX 先) → DLC 排序，位置稳定不跳动
+- 默认只显示最新 1 条报文数据，点击展开可查看最近 5 条
+- 每行显示帧率（近 1 秒内）、总帧数、最后接收时间
+- 行颜色根据最新接收时间渐变：活跃报文鲜艳，>3 秒未更新变灰
+- 聚合由后端 `WireTapAggregatorService` 处理，~250ms 推送一次快照
+
+**Serial 节流**：
+- Serial 帧由后端批量推送（~250ms 节流），前端保持平铺列表显示
+- Modbus 等协议数据不做内容聚合，仅减少 SignalR 推送频率
+
+**CSV 导出**：
+- 按节点导出所有端口的原始 WireTap 日志，最多 10000 条
+- CSV 格式：`Timestamp,MCU_Timestamp_Ms,PortIndex,PortType,Direction,DataLength,HexData,CAN_ID,CAN_DLC,CAN_RTR`
+- 通过日志面板工具栏的 📥 Export 按钮（节点 Tab 激活时显示）或 `GET /api/node/{uuid}/wiretap/export` 导出
+
+**MCU 硬件时间戳**：
+- 所有上行数据包（Serial/CAN/Console）携带 MCU 端硬件时间戳（`PayloadHeader.timestamp_ms`，来源于 `g_hal_timestamp_us / 1000`）
+- 时间戳在 MCU 侧 caller 函数入口处捕获，避免 USB 批量传输导致的时间聚簇
+- 前端双时间显示：灰色 Host PC 接收时间 + 紫色 MCU 相对时间（`+mm:ss.mmm` 格式）
+- 节点日志通过结构化字段 `{ hostTimestamp, message, mcuTimestampMs }` 传递，不嵌入消息正文
+
+**节点日志节流**：
+- `Console.WriteLine` 产生的节点日志由 `WireTapAggregatorService` 批量推送（~250ms 节流）
+- 避免高频日志导致的 SignalR 推送风暴和前端卡顿
+
+**Start 时数据清空**：
+- Start 时前端清空所有 WireTap 日志和节点日志
+- 后端 `WireTapAggregatorService.Reset()` 同步清空 CAN 聚合数据、Serial 队列和日志队列
 
 **协议解析功能**：
 - 点击日志条目旁的 🔍 按钮可进行协议解析
+- CAN 聚合视图中展开的每条帧也支持协议解析和 Inspect
 - 支持的协议：
   - **MODBUS RTU** (Serial)：功能码解析、CRC 校验、寄存器值解析
   - **CANOpen** (CAN)：NMT、SDO、PDO、Heartbeat、Emergency 解析
@@ -523,7 +559,10 @@ WireTap 功能允许实时监听 MCU 端口（Serial/CAN）的通信数据，用
 | `nodeLogLine` | Server→Client | 节点日志 (uuid, message)（实时） |
 | `varsSnapshot` | Server→Client | 变量快照（**200ms**） |
 | `nodeSnapshot` | Server→Client | 节点状态快照（**500ms**，含 TX/RX/IO） |
-| `wiretapdata` | Server→Client | WireTap 端口数据（实时，含 Serial/CAN 数据） |
+| `nodeLogBatch` | Server→Client | 节点日志批量推送（~250ms 节流，每条为 `{hostTimestamp, message, mcuTimestampMs}`） |
+| `wireTapData` | Server→Client | WireTap 逐帧数据（旧接口，保留兼容） |
+| `wireTapCanAggregated` | Server→Client | CAN 聚合快照（~250ms，按 ID/DLC/方向/RTR 分组） |
+| `wireTapSerialBatch` | Server→Client | Serial 批量数据（~250ms 节流） |
 | `fatalError` | Server→Client | MCU Fatal Error (HardFault/ASSERT)（实时） |
 | `upgradeProgress` | Server→Client | 固件升级进度（实时） |
 

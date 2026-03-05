@@ -19,6 +19,7 @@ extern "C" {
 typedef struct {
     uint8_t data[PACKET_MAX_DATALEN];
     uint16_t len;
+    uint32_t timestamp_ms;
 } PortDataFrame;
 typedef struct {
     PortDataFrame queue[0x100];

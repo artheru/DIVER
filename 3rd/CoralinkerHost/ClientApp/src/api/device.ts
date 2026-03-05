@@ -229,6 +229,7 @@ export interface WireTapLogEntryFromBackend {
     data: number[] | string
   }
   timestamp: string
+  mcuTimestampMs: number  // MCU 端时间戳（毫秒，相对时间）
 }
 
 /**
@@ -257,4 +258,17 @@ export async function getAllWireTapLogs(): Promise<{
   logs: Record<string, WireTapLogEntryFromBackend[]> 
 }> {
   return get('/api/wiretap/logs')
+}
+
+/**
+ * 导出节点的 WireTap 日志为 CSV（所有端口合并，最多 10000 条）
+ * @param uuid 节点 UUID
+ * @returns CSV 文件 Blob
+ */
+export async function exportNodeWireTapCsv(uuid: string): Promise<Blob> {
+  const resp = await fetch(`/api/node/${uuid}/wiretap/export`)
+  if (!resp.ok) {
+    throw new Error(`Export failed: ${resp.statusText}`)
+  }
+  return resp.blob()
 }

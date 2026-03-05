@@ -194,20 +194,20 @@ namespace MCUTest
             // 回调参数：(portIndex, direction, data) - direction: 0=RX, 1=TX
             err = bridge.RegisterSerialPortCallback(
                 BKBoardPortIndex.RS232_1,
-                (portIndex, direction, data) =>
+                (portIndex, direction, data, mcuTs) =>
                 {
                     string dir = direction == 0 ? "RX" : "TX";
-                    Log("Callback Serial Port{0} {1}: {2}", portIndex, dir, BitConverter.ToString(data));
+                    Log("Callback Serial Port{0} {1} (MCU ts={2}ms): {3}", portIndex, dir, mcuTs, BitConverter.ToString(data));
                 }
             );
             // 注册回调函数，当 Port5 (CAN2) 收到数据的时候，会自动调用下面的回调
-            // 回调参数：(portIndex, direction, canMessage) - direction: 0=RX, 1=TX
+            // 回调参数：(portIndex, direction, canMessage, mcuTimestampMs) - direction: 0=RX, 1=TX
             err = bridge.RegisterCANPortCallback(
                 BKBoardPortIndex.CAN2,
-                (portIndex, direction, canMessage) =>
+                (portIndex, direction, canMessage, mcuTs) =>
                 {
                     string dir = direction == 0 ? "RX" : "TX";
-                    Log("Callback CAN Port{0} {1}: {2}", portIndex, dir, canMessage.ToString());
+                    Log("Callback CAN Port{0} {1} (MCU ts={2}ms): {3}", portIndex, dir, mcuTs, canMessage.ToString());
                 }
             );
 
