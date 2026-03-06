@@ -61,7 +61,7 @@
         :disabled="isProbing"
         title="Firmware Upgrade"
       >{{ isProbing ? '...' : '⬆' }}</button>
-      <span class="status-badge" :class="runStateBadgeClass">
+      <span v-if="showStatusBadge" class="status-badge" :class="runStateBadgeClass">
         {{ runStateText }}
       </span>
     </div>
@@ -233,13 +233,26 @@ const logicList = ref<LogicInfo[]>([])
 // 是否可编辑（非运行状态）
 const canEdit = computed(() => !isRunning.value)
 
-// 运行状态 Badge 样式
-const runStateBadgeClass = computed(() => {
-  const state = props.data.runState?.toLowerCase() || 'offline'
-  return state
+// 节点状态显示：
+// 1) 全局非 running 时不显示节点状态
+// 2) running 时显示节点真实状态（Running / Idle / Disconnected / Error）
+const showStatusBadge = computed(() => appState.value === 'running')
+
+const normalizedRunState = computed(() => {
+  const state = (props.data.runState || '').toLowerCase()
+  if (state === 'running') return 'running'
+  if (state === 'idle') return 'idle'
+  if (state === 'error') return 'error'
+  if (state === 'offline') return 'disconnected'
+  if (state === 'disconnected') return 'disconnected'
+  return 'disconnected'
 })
 
-const runStateText = computed(() => props.data.runState || 'Offline')
+const runStateBadgeClass = computed(() => normalizedRunState.value)
+const runStateText = computed(() => {
+  const s = normalizedRunState.value
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase()
+})
 
 // 解析 URI 显示
 const parsedUri = computed(() => {
@@ -695,7 +708,8 @@ watch(buildVersion, () => {
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 10px;
-  font-weight: 500;
+  font-weight: 700;
+  letter-spacing: 0.4px;
   background: rgba(100, 116, 139, 0.3);
   color: #94a3b8;
   white-space: nowrap;
@@ -708,25 +722,25 @@ watch(buildVersion, () => {
 }
 
 /* 运行状态样式 */
-.status-badge.offline {
-  background: rgba(113, 128, 150, 0.3);
-  color: #a0aec0;
-}
-
 .status-badge.idle {
-  background: rgba(245, 158, 11, 0.2);
-  color: #f59e0b;
+  background: rgba(234, 179, 8, 0.2);
+  color: #eab308;
 }
 
 .status-badge.running {
-  background: rgba(34, 197, 94, 0.2);
-  color: #22c55e;
+  background: rgba(16, 185, 129, 0.22);
+  color: #34d399;
   animation: badge-pulse 1.5s infinite;
 }
 
+.status-badge.disconnected {
+  background: rgba(148, 163, 184, 0.2);
+  color: #cbd5e1;
+}
+
 .status-badge.error {
-  background: rgba(239, 68, 68, 0.2);
-  color: #ef4444;
+  background: rgba(244, 63, 94, 0.2);
+  color: #fb7185;
 }
 
 @keyframes badge-pulse {

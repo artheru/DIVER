@@ -15,7 +15,7 @@ The typical deployment consists of a host system (PC/Server or powerful embedded
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              Host System (.NET)                              │
 │  ┌───────────────────────┐    ┌───────────────────────┐                     │
@@ -58,7 +58,7 @@ The typical deployment consists of a host system (PC/Server or powerful embedded
 ### 3. Execution Cycle
 
 Each scan interval (e.g., 50ms):
-```
+```text
 1. MCU collects hardware IO (GPIO, CAN, Serial)
 2. MCU receives UpperIO from host
 3. DIVER runtime executes Operation(iteration)
@@ -68,7 +68,7 @@ Each scan interval (e.g., 50ms):
 
 ## Project Structure
 
-```
+```text
 DIVER/
 ├── DiverCompiler/          # C# to MCU bytecode compiler (Fody weaver)
 │   ├── Processor.cs        # Main compilation logic
@@ -92,7 +92,7 @@ DIVER/
 
 ## Class Hierarchy
 
-```
+```text
 CartDefinition (abstract)
     └── DIVERVehicle (abstract) - Communication interface
             │   SetMCUProgram(mcuUri, program)   // Download program to MCU
@@ -310,35 +310,29 @@ See `3rd/CoralinkerHost/README.md` for details.
 
 ## Reliability Updates (2026-03)
 
-This round includes two reliability-oriented updates across the transport and session layers.
+This release aligns three layers (`MCUSerialBridge` C-core -> `MCUSerialBridgeCLR` -> `CoralinkerSDK`) to make disconnect/reconnect behavior both observable and deterministic.
 
-### 1) Serial transport error observability and reconnect reporting
+### Quick Overview
 
-`MCUSerialBridge` now exposes transport/reconnect logs from native C core to upper layers:
+- **Transport observability**: first transport failure, reconnect scheduled/failed/success are surfaced end-to-end to node logs.
+- **Fast-fail on broken handle**: send path returns `MSB_Error_Win_HandleNotFound` immediately when handle is not ready.
+- **SafeDispose and state mapping**: session state is derived from structured results (`error` / `disconnected` / `running` / `idle`), not log text parsing.
+
+### Transport Layer (`MCUSerialBridge`)
 
 - New C API: `msb_register_error_callback(...)`
 - Wrapper API: `MCUSerialBridge.RegisterErrorCallback(Action<string>)`
 - SDK chain: `MCUNode.OnError` -> `DIVERSession` node log (`OnNodeLog`)
+- Read/Write failures are deduplicated by Win32 error code (`winerr`)
+- Reconnect success clears fault and dedup state
+- Reconnect delay profile: `0.2s x 5 -> 1s x 5 -> 2s` (fixed afterwards)
 
-Behavior policy:
+### Session Layer (`CoralinkerSDK`)
 
-- Read/Write transport failures are deduplicated by Win32 error code (`winerr`)
-- Same consecutive `winerr` is not repeatedly pushed
-- Reconnect success clears fault/dedup state
-- After a successful reconnect, a new failure can be reported again
-
-This allows front-end users to see first-failure and reconnect state transitions without changing existing log channels.
-
-### 2) MCUNode SafeDispose concurrency guard
-
-`CoralinkerSDK` now includes a safer bridge disposal path in `MCUNode`:
-
-- Tracks active native bridge calls
-- Blocks disposal while calls are in flight
-- Prevents entering new calls during dispose window
-- Uses `SafeDisposeBridge()` in `Disconnect()`
-
-This reduces race conditions between polling/callback threads and connection teardown.
+- `MCUNode` SafeDispose guards bridge teardown against concurrent native calls
+- Session maps run state from structured data (`error`, `disconnected`, `running`, `idle`)
+- Disconnect is inferred from error-code/null-state path, not transport message text
+- Front-end node badge shows real states only and keeps Title Case labels
 
 ## Troubleshooting
 

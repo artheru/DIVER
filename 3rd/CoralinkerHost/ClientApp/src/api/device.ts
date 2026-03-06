@@ -163,7 +163,7 @@ export async function pollNodeState(mcuUri: string): Promise<{
   
   const node = result.nodes.find(n => n.mcuUri === mcuUri)
   if (!node) {
-    return { ok: true, mcuUri, runState: 'Offline', isConfigured: false, isProgrammed: false, mode: 'Unknown' }
+    return { ok: true, mcuUri, runState: 'disconnected', isConfigured: false, isProgrammed: false, mode: 'Unknown' }
   }
   
   return {

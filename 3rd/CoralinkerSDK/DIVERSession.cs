@@ -24,7 +24,7 @@ public record NodeStateSnapshot(
     string McuUri,
     string NodeName,
     bool IsConnected,
-    string RunState, // "idle" | "running" | "error" | "offline"
+    string RunState, // "idle" | "running" | "error" | "disconnected"
     bool IsConfigured,
     bool IsProgrammed,
     RuntimeStatsSnapshot? Stats
@@ -175,6 +175,7 @@ internal class NodeEntry : IDisposable
     public MCUNode? Handle { get; set; }
     public MCUState? State { get; set; }
     public RuntimeStats? Stats { get; set; }
+    public bool HasFatalError { get; set; }
     
     /// <summary>最后一次运行的统计数据（Stop后保留，用于显示TX/RX计数）</summary>
     public RuntimeStats? LastStats { get; set; }
@@ -934,6 +935,7 @@ public sealed class DIVERSession : IDisposable
         {
             entry.LogBuffer.Clear();
             entry.LastStats = null;
+            entry.HasFatalError = false;
         }
 
         var errors = new List<NodeStartError>();
@@ -1088,6 +1090,7 @@ public sealed class DIVERSession : IDisposable
 
             entry.Handle = handle;
             entry.State = handle.State;
+            entry.HasFatalError = false;
 
             Console.WriteLine($"[DIVERSession] Started node {entry.NodeName}");
             return null;
@@ -1463,6 +1466,8 @@ public sealed class DIVERSession : IDisposable
     {
         if (!_nodes.TryGetValue(uuid, out var entry))
             return;
+
+        entry.HasFatalError = true;
 
         // 记录到日志
         var errorMsg = payload.Layout == CoreDumpLayout.String
@@ -1937,15 +1942,22 @@ public sealed class DIVERSession : IDisposable
 
     private static NodeStateSnapshot BuildNodeStateSnapshot(NodeEntry entry)
     {
-        var runState = "offline";
-        if (entry.Handle?.IsConnected == true)
+        var runState = "disconnected";
+        if (entry.HasFatalError)
         {
-            runState = entry.State?.RunningState switch
+            runState = "error";
+        }
+        else if (entry.Handle?.IsConnected == true)
+        {
+            if (entry.State != null)
             {
-                MCURunState.Running => "running",
-                MCURunState.Error => "error",
-                _ => "idle",
-            };
+                runState = entry.State.Value.RunningState switch
+                {
+                    MCURunState.Running => "running",
+                    MCURunState.Error => "error",
+                    _ => "idle",
+                };
+            }
         }
 
         RuntimeStatsSnapshot? statsSnapshot = null;

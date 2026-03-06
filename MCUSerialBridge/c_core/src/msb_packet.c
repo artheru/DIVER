@@ -10,6 +10,20 @@
 #include "msb_protocol.h"
 #include "msb_thread.h"
 
+static BOOL msb_is_comm_ready(msb_handle* handle)
+{
+    BOOL ready = FALSE;
+    if (!handle) {
+        return FALSE;
+    }
+
+    EnterCriticalSection(&handle->comm_lock);
+    ready = handle->is_open && handle->hComm != NULL &&
+            handle->hComm != INVALID_HANDLE_VALUE;
+    LeaveCriticalSection(&handle->comm_lock);
+    return ready;
+}
+
 // --------------------
 // 构建并发送协议包
 // --------------------
@@ -23,6 +37,8 @@ MCUSerialBridgeError mcu_send_packet_and_wait(
         uint32_t timeout_ms)
 {
     if (!handle || !handle->is_open)
+        return MSB_Error_Win_HandleNotFound;
+    if (!msb_is_comm_ready(handle))
         return MSB_Error_Win_HandleNotFound;
 
     // --------------------

@@ -129,7 +129,7 @@ export interface NodeStateSnapshot {
   mcuUri: string
   nodeName: string
   isConnected: boolean
-  runState: string  // "idle" | "running" | "error" | "offline"
+  runState: string  // "idle" | "running" | "error" | "disconnected"
   isConfigured: boolean
   isProgrammed: boolean
   stats?: RuntimeStats

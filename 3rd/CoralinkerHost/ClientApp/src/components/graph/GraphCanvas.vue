@@ -185,7 +185,7 @@ async function pollAllNodeStates() {
         if (needsUpdate) {
           node.data = {
             ...node.data,
-            runState: state.runState || 'Offline',
+            runState: state.runState || 'disconnected',
             isConnected: state.isConnected,
             isConfigured: state.isConfigured,
             isProgrammed: state.isProgrammed
@@ -253,8 +253,8 @@ function addNode(nodeData?: AddNodeData) {
       nodeName: nodeData.nodeName,
       mcuUri: nodeData.mcuUri,
       logicName: '',
-      runState: 'idle',  // 添加成功后节点状态为 idle
-      isConnected: true,
+      runState: 'disconnected',  // 初始未运行时统一按 disconnected 处理
+      isConnected: false,
       isConfigured: false,
       isProgrammed: false,
       ports: nodeData.ports || [],
@@ -462,7 +462,7 @@ async function loadFromStore() {
           logicName: n.logicName || '',
           ports: n.portConfigs || [],
           // 运行时状态：优先保留现有状态，否则使用默认值
-          runState: existingState?.runState || 'Offline',
+          runState: existingState?.runState || 'disconnected',
           isConnected: existingState?.isConnected || false,
           isConfigured: existingState?.isConfigured || false,
           isProgrammed: existingState?.isProgrammed || false,
@@ -540,9 +540,10 @@ function miniMapNodeColor(node: Node): string {
   if (node.type === 'root-node') return '#3b82f6'
   if (node.type === 'coral-node') {
     const state = node.data?.runState?.toLowerCase()
-    if (state === 'running') return '#22c55e'
-    if (state === 'error') return '#ff4f6d'
-    if (state === 'idle') return '#f59e0b'
+    if (state === 'running') return '#34d399'
+    if (state === 'error') return '#fb7185'
+    if (state === 'idle') return '#eab308'
+    if (state === 'disconnected' || state === 'offline') return '#cbd5e1'
     return '#64748b'
   }
   return '#64748b'
@@ -574,7 +575,7 @@ watch(nodeStates, (newStates) => {
           ...currentNode,
           data: {
             ...currentData,
-            runState: snapshot.runState || 'Offline',
+            runState: snapshot.runState || 'disconnected',
             isConnected: snapshot.isConnected,
             isConfigured: snapshot.isConfigured,
             isProgrammed: snapshot.isProgrammed

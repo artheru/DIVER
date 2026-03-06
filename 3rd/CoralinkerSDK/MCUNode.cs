@@ -237,7 +237,6 @@ public class MCUNode : IDisposable
             );
             _bridge.RegisterFatalErrorCallback(payload => OnFatalError?.Invoke(payload));
             _bridge.RegisterErrorCallback(message => OnError?.Invoke(message));
-
             LastError = null;
             return true;
         }

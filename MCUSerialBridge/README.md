@@ -36,8 +36,8 @@
    * 提供 `MCUSerialBridgeError` 枚举、`VersionInfo`、`MCUState`、`PortConfig` 等结构
    * 封装 `ReadSerial` / `WriteSerial` / `ReadCAN` / `WriteCAN` 等操作
    * 可直接在 C# WPF、WinForms 或控制台程序中使用
-* 路径示例：`wrapper/MCUSerialBridgeCLR.cs`、`wrapper/MCUSerialBridgeError.cs`、`wrapper/Test.cs`
-* 构建方式：使用 `dotnet build`（已迁移为 csproj）
+   * 路径示例：`wrapper/MCUSerialBridgeCLR.cs`、`wrapper/MCUSerialBridgeError.cs`、`wrapper/Test.cs`
+   * 构建方式：使用 `dotnet build`（已迁移为 csproj）
 
 ---
 
@@ -75,6 +75,14 @@ C# 上位机应用（可直接调用 MCUSerialBridge 类）
 
 ## 各模块详细职责
 
+### 2026-03 可靠性综述
+
+本轮更新围绕“断链可观测 + 调用快速失败”两条主线展开：
+
+* 可观测：传输失败、重连调度、重连成功/失败均可通过回调上送到上层日志。
+* 可恢复：重连策略采用 `0.2s × 5 -> 1s × 5 -> 2s`，兼顾瞬断恢复与长断链压力控制。
+* 可预期：句柄失效时发送入口直接返回 `MSB_Error_Win_HandleNotFound`，避免长时间阻塞。
+
 ### 1. MCU 固件（mcu）
 
 * 负责与真实硬件直接交互（RS232/485、CAN、GPIO 等）
@@ -107,6 +115,11 @@ C# 上位机应用（可直接调用 MCUSerialBridge 类）
 * 自动重连失败
 * 自动重连计划首次建立（scheduled）
 
+自动重连节奏：
+
+* 重试间隔按 `0.2s × 5` -> `1s × 5` -> `2s`（后续固定）执行
+* 目标是短暂拔插时快速恢复，持续断链时降低无效重试压力
+
 去重与复位策略：
 
 * 失败日志按 `winerr`（Win32 错误码）去重：相同错误码连续出现不重复回调
@@ -118,6 +131,18 @@ C# 上位机应用（可直接调用 MCUSerialBridge 类）
 * `c_core/src/msb_thread.c`：失败记录、重连状态机、回调触发
 * `c_core/include/msb_bridge.h`：回调类型与注册函数声明
 * `c_core/src/msb_bridge.c`：注册函数导出与 API 表挂接
+
+### 2.2 断链句柄快速失败（Fast-Fail）
+
+为避免串口已断链时上层调用长期阻塞，发送请求入口新增了句柄可用性门禁：
+
+* 在命令发送路径先判断通信句柄是否有效/可用
+* 若句柄已失效，立即返回 `MSB_Error_Win_HandleNotFound`
+* 不再等待底层超时后才失败，便于上层快速进入断链处理分支
+
+实现位置：
+
+* `c_core/src/msb_packet.c`：`mcu_send_packet_and_wait` 中的通信就绪检查
 
 ### 3. C# 封装层（wrapper）
 
