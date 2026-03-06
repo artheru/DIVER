@@ -91,6 +91,33 @@ internal class NodeEntry
 }
 ```
 
+### MCUNode 并发释放保护（SafeDispose）
+
+`MCUNode` 在本轮更新中加入了面向并发场景的安全释放机制，解决“后台线程仍在调用桥接接口时对象被释放”带来的竞争问题。
+
+关键点：
+
+* 通过 `_bridgeCallLock`、`_activeBridgeCalls`、`_isDisposingBridge` 协调并发调用
+* 对桥接调用统一走 `TryEnterBridgeCall()` / `ExitBridgeCall()`
+* `Disconnect()` 走 `SafeDisposeBridge()`，会等待活跃调用结束再释放底层句柄
+* `IsConnected` 会同时检查 `IsOpen` 与 `!_isDisposingBridge`，避免释放窗口误判在线
+
+收益：
+
+* 降低回调线程、状态轮询线程、业务线程并发下的释放竞态
+* 避免释放过程中继续进入 native 调用导致不稳定行为
+
+### 串口错误上报接入 DIVERSession
+
+本轮同时将 MSB 的传输错误回调链路接入到会话层日志：
+
+* `MCUSerialBridge.RegisterErrorCallback(...)`
+* `MCUNode.OnError`（内部事件）
+* `DIVERSession` 在 `StartNode()` 中订阅 `OnError`
+* 最终写入 `OnNodeLog`（消息前缀为 `[Transport]`），前端沿用现有节点日志通道显示
+
+这样串口异常与重连状态（scheduled/failed/success）可直接在前端节点日志中观察。
+
 ---
 
 ## API 参考
@@ -363,3 +390,5 @@ CoralinkerSDK/
 |------|------|------|
 | `OnStateChanged` | `Action<DIVERSessionState>` | 状态变更 |
 | `OnNodeLog` | `Action<string, string, string, uint>` | 节点日志 (uuid, hostTimestamp, message, mcuTimestampMs) |
+| `OnFatalError` | `Action<string, string>` | 节点致命错误 (uuid, errorJson) |
+| `OnWireTapData` | `Action<WireTapDataEventArgs>` | WireTap 数据事件 |

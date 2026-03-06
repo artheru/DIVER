@@ -962,6 +962,19 @@ namespace MCUSerialBridgeCLR
             IntPtr user_ctx
         );
 
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate void msb_on_error_callback_function_t(
+            IntPtr message,
+            IntPtr user_ctx
+        );
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern MCUSerialBridgeError msb_register_error_callback(
+            IntPtr handle,
+            msb_on_error_callback_function_t callback,
+            IntPtr user_ctx
+        );
+
         [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
         internal static extern MCUSerialBridgeError msb_get_stats(
             IntPtr handle,
@@ -1348,6 +1361,7 @@ namespace MCUSerialBridgeCLR
         private MCUSerialBridgeCoreAPI.msb_on_memory_lower_io_callback_function_t _memoryLowerIOCallback;
         private MCUSerialBridgeCoreAPI.msb_on_console_writeline_callback_function_t _consoleWriteLineCallback;
         private MCUSerialBridgeCoreAPI.msb_on_fatal_error_callback_function_t _fatalErrorCallback;
+        private MCUSerialBridgeCoreAPI.msb_on_error_callback_function_t? _errorCallback;
 
         /// <summary>
         /// 注册指定端口(Serial)的回调函数
@@ -1700,6 +1714,41 @@ namespace MCUSerialBridgeCLR
             return MCUSerialBridgeCoreAPI.msb_register_fatal_error_callback(
                 nativeHandle,
                 _fatalErrorCallback,
+                IntPtr.Zero
+            );
+        }
+
+        /// <summary>
+        /// 注册串口传输错误回调（首次失败、重连成功、重连失败）
+        /// </summary>
+        /// <param name="callback">接收错误日志回调，string 为格式化后的错误消息</param>
+        /// <returns>错误码</returns>
+        public MCUSerialBridgeError RegisterErrorCallback(Action<string> callback)
+        {
+            if (callback == null)
+                return MCUSerialBridgeError.Win_InvalidParam;
+
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            void del(IntPtr message, IntPtr user_ctx)
+            {
+                try
+                {
+                    string msg = Marshal.PtrToStringAnsi(message) ?? string.Empty;
+                    callback(msg);
+                }
+                catch
+                {
+                    // 回调中吞掉异常，避免影响 native 线程
+                }
+            }
+
+            _errorCallback = del;
+
+            return MCUSerialBridgeCoreAPI.msb_register_error_callback(
+                nativeHandle,
+                _errorCallback,
                 IntPtr.Zero
             );
         }

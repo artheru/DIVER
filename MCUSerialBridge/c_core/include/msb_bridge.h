@@ -412,6 +412,21 @@ typedef void (*msb_on_fatal_error_callback_function_t)(
         void* user_ctx);
 
 /**
+ * @brief 串口传输错误回调函数类型定义
+ *
+ * 当串口传输发生错误或自动重连状态变化时触发：
+ * - 首次检测到传输失败
+ * - 自动重连成功
+ * - 自动重连失败
+ *
+ * @param message 指向错误消息字符串（以 '\0' 结尾）
+ * @param user_ctx 用户注册的上下文参数
+ */
+typedef void (*msb_on_error_callback_function_t)(
+        const char* message,
+        void* user_ctx);
+
+/**
  * @brief 注册致命错误回调函数
  *
  * MCU 上报致命错误时，会调用用户提供的回调函数。
@@ -425,6 +440,54 @@ DLL_EXPORT MCUSerialBridgeError msb_register_fatal_error_callback(
         msb_handle* handle,
         msb_on_fatal_error_callback_function_t callback,
         void* user_ctx);
+
+/**
+ * @brief 注册串口传输错误回调函数
+ *
+ * 串口传输异常与自动重连状态变更时，调用用户提供的回调函数。
+ *
+ * @param handle MCU 句柄
+ * @param callback 用户提供的回调函数指针
+ * @param user_ctx 用户上下文参数
+ * @return MCUSerialBridgeError 错误码
+ */
+DLL_EXPORT MCUSerialBridgeError msb_register_error_callback(
+        msb_handle* handle,
+        msb_on_error_callback_function_t callback,
+        void* user_ctx);
+
+/**
+ * @brief 串口传输错误状态快照
+ *
+ * 用于调试串口收发异常。当前先用于 C 层诊断日志，
+ * 后续可供上层查询并展示。
+ */
+typedef struct {
+    uint8_t faulted;  // 是否进入错误态（0=正常，1=出现过失败）
+    uint8_t last_op;  // 最近一次失败操作（'R' / 'W'）
+    uint16_t reserved;
+    uint32_t read_fail_count;
+    uint32_t write_fail_count;
+    uint32_t last_winerr;
+    uint32_t last_read_winerr;
+    uint32_t last_write_winerr;
+    char last_msg[256];
+    char last_read_msg[256];
+    char last_write_msg[256];
+} TransportErrorStateC;
+
+/**
+ * @brief 获取当前串口传输错误状态
+ */
+DLL_EXPORT MCUSerialBridgeError msb_get_transport_error_state(
+        msb_handle* handle,
+        TransportErrorStateC* state);
+
+/**
+ * @brief 清空当前串口传输错误状态
+ */
+DLL_EXPORT MCUSerialBridgeError
+msb_clear_transport_error_state(msb_handle* handle);
 
 /**
  * @brief 获取 MCU 运行时统计数据
@@ -509,10 +572,18 @@ typedef struct MCUSerialBridgeAPI {
             msb_handle*,
             msb_on_fatal_error_callback_function_t,
             void*);
+    MCUSerialBridgeError (*msb_register_error_callback)(
+            msb_handle*,
+            msb_on_error_callback_function_t,
+            void*);
     MCUSerialBridgeError (*msb_get_stats)(
             msb_handle*,
             RuntimeStatsC*,
             uint32_t);
+    MCUSerialBridgeError (*msb_get_transport_error_state)(
+            msb_handle*,
+            TransportErrorStateC*);
+    MCUSerialBridgeError (*msb_clear_transport_error_state)(msb_handle*);
 } MCUSerialBridgeAPI;
 
 DLL_EXPORT void mcu_serial_bridge_get_api(MCUSerialBridgeAPI* api);

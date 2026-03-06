@@ -61,6 +61,7 @@ typedef struct msb_handle {
 
     bool is_open;
     HANDLE hComm;
+    CRITICAL_SECTION comm_lock;  // 保护 hComm 读写与重连切换
 
     // 线程相关
     void* recv_thread;
@@ -95,6 +96,20 @@ typedef struct msb_handle {
     msb_on_fatal_error_callback_function_t fatal_error_callback;
     void* fatal_error_callback_ctx;
     uint64_t last_fatal_error_time_ms;  // 上次触发时间戳（用于去重，5秒内不重复触发）
+
+    // Transport Error 回调（串口传输异常与重连状态）
+    msb_on_error_callback_function_t error_callback;
+    void* error_callback_ctx;
+
+    // 串口传输错误状态（ReadFile / WriteFile）
+    CRITICAL_SECTION transport_error_lock;
+    TransportErrorStateC transport_error;
+    uint32_t transport_last_reported_winerr;
+    uint8_t transport_last_reported_valid;
+
+    // 串口自动重连状态（MSB 内部）
+    uint32_t reconnect_attempt;
+    uint64_t reconnect_next_retry_ms;
 
     // 用户自定义回调
     void (*error_cb)(MCUSerialBridgeError err, const char* msg, int len);

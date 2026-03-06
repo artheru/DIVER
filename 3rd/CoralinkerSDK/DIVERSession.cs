@@ -1048,6 +1048,7 @@ public sealed class DIVERSession : IDisposable
             handle.OnLowerIOReceived += data => HandleLowerIO(entry.UUID, data);
             handle.OnConsoleOutput += (msg, mcuTs) => HandleConsoleOutput(entry.UUID, msg, mcuTs);
             handle.OnFatalError += payload => HandleFatalError(entry.UUID, payload);
+            handle.OnError += message => HandleTransportError(entry.UUID, message);
 
             // Connect
             if (!handle.Connect())
@@ -1438,6 +1439,14 @@ public sealed class DIVERSession : IDisposable
             return;
 
         LogToNode(entry, message, mcuTimestampMs);
+    }
+
+    private void HandleTransportError(string uuid, string message)
+    {
+        if (!_nodes.TryGetValue(uuid, out var entry))
+            return;
+
+        LogToNode(entry, $"[Transport] {message}");
     }
     
     /// <summary>

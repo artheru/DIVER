@@ -1,6 +1,8 @@
+using System;
 using CoralinkerHost.Services;
 using CoralinkerHost.Web;
 using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.Extensions.Logging;
 
 namespace CoralinkerHost;
 
@@ -11,6 +13,22 @@ internal static class Program
         var builder = WebApplication.CreateBuilder(args);
 
         builder.WebHost.UseUrls("http://0.0.0.0:4499");
+        // Reduce framework noise in terminal:
+        // - default: Warning+
+        // - app categories: keep Information for runtime diagnostics
+        builder.Logging.AddFilter((category, level) =>
+        {
+            if (!string.IsNullOrEmpty(category) &&
+                (category.StartsWith("CoralinkerHost", StringComparison.Ordinal) ||
+                 category.StartsWith("CoralinkerSDK", StringComparison.Ordinal) ||
+                 category.StartsWith("DIVERSession", StringComparison.Ordinal))) {
+                return level >= LogLevel.Information;
+            }
+
+            return level >= LogLevel.Warning;
+        });
+        builder.Logging.AddFilter("Microsoft.WebTools.BrowserLink", LogLevel.Error);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.Watch.BrowserRefresh", LogLevel.Error);
 
         // 配置全局 JSON 序列化选项（使用 JsonHelper.Options）
         builder.Services.ConfigureHttpJsonOptions(options =>

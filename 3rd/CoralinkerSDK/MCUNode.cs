@@ -15,54 +15,81 @@ public class MCUNode : IDisposable
 
     private MCUSerialBridge? _bridge;
     private bool _disposed;
+    private readonly object _bridgeCallLock = new();
+    private bool _isDisposingBridge;
+    private int _activeBridgeCalls;
 
     /// <summary>节点唯一标识</summary>
     public string NodeId { get; }
-    
+
     /// <summary>MCU 串口 URI</summary>
     public string McuUri { get; }
-    
+
     /// <summary>是否已连接</summary>
-    public bool IsConnected => _bridge?.IsOpen ?? false;
-    
+    public bool IsConnected
+    {
+        get
+        {
+            lock (_bridgeCallLock)
+            {
+                return !_isDisposingBridge && (_bridge?.IsOpen ?? false);
+            }
+        }
+    }
+
+    /// <summary>是否正在释放底层句柄</summary>
+    public bool IsDisposing
+    {
+        get
+        {
+            lock (_bridgeCallLock)
+            {
+                return _isDisposingBridge;
+            }
+        }
+    }
+
     /// <summary>是否正在运行</summary>
     public bool IsRunning => State?.IsRunning ?? false;
-    
+
     /// <summary>MCU 版本信息</summary>
     public VersionInfo? Version { get; private set; }
-    
+
     /// <summary>MCU 硬件布局信息</summary>
     public LayoutInfo? Layout { get; private set; }
-    
+
     /// <summary>MCU 状态</summary>
     public MCUState? State { get; private set; }
-    
+
     /// <summary>MCU 运行时统计数据（由 DIVERSession 定期刷新）</summary>
     public RuntimeStats? Stats { get; private set; }
-    
+
     /// <summary>最后一次错误信息</summary>
     public string? LastError { get; private set; }
-    
+
     /// <summary>DIVER 程序字节码</summary>
     public byte[] ProgramBytes { get; set; } = Array.Empty<byte>();
-    
+
     /// <summary>端口配置（如果为空，Connect 后会根据 Layout 初始化）</summary>
     public PortConfig[] PortConfigs { get; set; } = Array.Empty<PortConfig>();
-    
+
     /// <summary>PortConfigs 是否由用户显式设置（用于判断是否需要初始化）</summary>
     private bool _portConfigsExplicitlySet;
-    
+
     /// <summary>Cart 字段元数据（从 MetaJson 解析）</summary>
     public CartFieldInfo[] CartFields { get; set; } = Array.Empty<CartFieldInfo>();
-    
+
     /// <summary>LowerIO 数据接收事件（由 DIVERSession 订阅）</summary>
     internal event Action<byte[]>? OnLowerIOReceived;
-    
+
     /// <summary>控制台输出事件 (message, mcuTimestampMs)</summary>
     internal event Action<string, uint>? OnConsoleOutput;
-    
+
     /// <summary>致命错误事件（MCU HardFault 或 ASSERT 失败）</summary>
     internal event Action<ErrorPayload>? OnFatalError;
+
+    /// <summary>串口传输错误事件（首次失败、重连成功、重连失败）</summary>
+    internal event Action<string>? OnError;
 
     public MCUNode(string nodeId, string mcuUri)
     {
@@ -70,12 +97,79 @@ public class MCUNode : IDisposable
         McuUri = mcuUri;
     }
 
+    private bool TryEnterBridgeCall(out MCUSerialBridge? bridge)
+    {
+        lock (_bridgeCallLock)
+        {
+            if (_isDisposingBridge || _bridge == null || !_bridge.IsOpen)
+            {
+                bridge = null;
+                return false;
+            }
+
+            _activeBridgeCalls++;
+            bridge = _bridge;
+            return true;
+        }
+    }
+
+    private void ExitBridgeCall()
+    {
+        lock (_bridgeCallLock)
+        {
+            if (_activeBridgeCalls > 0)
+            {
+                _activeBridgeCalls--;
+            }
+
+            if (_isDisposingBridge && _activeBridgeCalls == 0)
+            {
+                Monitor.PulseAll(_bridgeCallLock);
+            }
+        }
+    }
+
+    private void SafeDisposeBridge()
+    {
+        MCUSerialBridge? bridgeToDispose;
+        lock (_bridgeCallLock)
+        {
+            _isDisposingBridge = true;
+            while (_activeBridgeCalls > 0)
+            {
+                Monitor.Wait(_bridgeCallLock);
+            }
+
+            bridgeToDispose = _bridge;
+            _bridge = null;
+        }
+
+        if (bridgeToDispose != null)
+        {
+            try
+            {
+                bridgeToDispose.Dispose();
+            }
+            catch { }
+        }
+
+        State = null;
+        Stats = null;
+        Version = null;
+        Layout = null;
+
+        lock (_bridgeCallLock)
+        {
+            _isDisposingBridge = false;
+        }
+    }
+
     /// <summary>
     /// 连接到 MCU (Open + Reset + GetVersion)
     /// </summary>
     public bool Connect()
     {
-        if (_bridge?.IsOpen == true)
+        if (IsConnected)
         {
             LastError = "Already connected";
             return true;
@@ -84,7 +178,7 @@ public class MCUNode : IDisposable
         try
         {
             var (portName, baudRate) = ParseUri(McuUri);
-            
+
             _bridge = new MCUSerialBridge();
             var err = _bridge.Open(portName, baudRate);
             if (err != MCUSerialBridgeError.OK)
@@ -124,7 +218,9 @@ public class MCUNode : IDisposable
             else
             {
                 // Layout not available (older firmware), continue without it
-                Console.WriteLine($"[MCUNode] GetLayout failed: {err.ToDescription()} - using default config");
+                Console.WriteLine(
+                    $"[MCUNode] GetLayout failed: {err.ToDescription()} - using default config"
+                );
             }
 
             // Get state
@@ -136,8 +232,11 @@ public class MCUNode : IDisposable
 
             // Register callbacks
             _bridge.RegisterMemoryLowerIOCallback(data => OnLowerIOReceived?.Invoke(data));
-            _bridge.RegisterConsoleWriteLineCallback((msg, mcuTs) => OnConsoleOutput?.Invoke(msg, mcuTs));
+            _bridge.RegisterConsoleWriteLineCallback(
+                (msg, mcuTs) => OnConsoleOutput?.Invoke(msg, mcuTs)
+            );
             _bridge.RegisterFatalErrorCallback(payload => OnFatalError?.Invoke(payload));
+            _bridge.RegisterErrorCallback(message => OnError?.Invoke(message));
 
             LastError = null;
             return true;
@@ -155,15 +254,7 @@ public class MCUNode : IDisposable
     /// </summary>
     public void Disconnect()
     {
-        if (_bridge != null)
-        {
-            try { _bridge.Dispose(); } catch { }
-            _bridge = null;
-        }
-        State = null;
-        Stats = null;
-        Version = null;
-        Layout = null;
+        SafeDisposeBridge();
     }
 
     /// <summary>
@@ -172,14 +263,17 @@ public class MCUNode : IDisposable
     private void InitializeOrValidatePortConfigs(LayoutInfo layout)
     {
         var validPorts = layout.GetValidPorts();
-        if (validPorts.Length == 0) return;
+        if (validPorts.Length == 0)
+            return;
 
         // 如果已有 PortConfigs，验证数量是否匹配
         if (PortConfigs.Length > 0)
         {
             if (PortConfigs.Length != validPorts.Length)
             {
-                Console.WriteLine($"[MCUNode] Warning: PortConfigs count ({PortConfigs.Length}) doesn't match Layout ({validPorts.Length}), reinitializing");
+                Console.WriteLine(
+                    $"[MCUNode] Warning: PortConfigs count ({PortConfigs.Length}) doesn't match Layout ({validPorts.Length}), reinitializing"
+                );
                 PortConfigs = Array.Empty<PortConfig>();
             }
             else
@@ -192,7 +286,9 @@ public class MCUNode : IDisposable
                     var expectedByte = expectedType == PortType.CAN ? (byte)0x02 : (byte)0x01;
                     if (actualType != expectedByte)
                     {
-                        Console.WriteLine($"[MCUNode] Warning: Port[{i}] type mismatch (expected {expectedType}, got {actualType}), reinitializing");
+                        Console.WriteLine(
+                            $"[MCUNode] Warning: Port[{i}] type mismatch (expected {expectedType}, got {actualType}), reinitializing"
+                        );
                         PortConfigs = Array.Empty<PortConfig>();
                         break;
                     }
@@ -234,24 +330,31 @@ public class MCUNode : IDisposable
     /// </summary>
     public bool Configure()
     {
-        if (_bridge == null || !_bridge.IsOpen)
+        if (!TryEnterBridgeCall(out var bridge))
         {
-            LastError = "Not connected";
+            LastError = IsDisposing ? "Bridge is disposing" : "Not connected";
             return false;
         }
 
-        if (PortConfigs.Length == 0)
+        try
         {
-            // 无端口配置，跳过
-            LastError = null;
-            return true;
-        }
+            if (PortConfigs.Length == 0)
+            {
+                // 无端口配置，跳过
+                LastError = null;
+                return true;
+            }
 
-        var err = _bridge.Configure(PortConfigs, DefaultTimeout);
-        if (err != MCUSerialBridgeError.OK)
+            var err = bridge!.Configure(PortConfigs, DefaultTimeout);
+            if (err != MCUSerialBridgeError.OK)
+            {
+                LastError = $"Configure failed: {err.ToDescription()}";
+                return false;
+            }
+        }
+        finally
         {
-            LastError = $"Configure failed: {err.ToDescription()}";
-            return false;
+            ExitBridgeCall();
         }
 
         RefreshState();
@@ -264,23 +367,30 @@ public class MCUNode : IDisposable
     /// </summary>
     public bool Program()
     {
-        if (_bridge == null || !_bridge.IsOpen)
+        if (!TryEnterBridgeCall(out var bridge))
         {
-            LastError = "Not connected";
+            LastError = IsDisposing ? "Bridge is disposing" : "Not connected";
             return false;
         }
 
-        if (ProgramBytes.Length == 0)
+        try
         {
-            LastError = "No program bytes";
-            return false;
-        }
+            if (ProgramBytes.Length == 0)
+            {
+                LastError = "No program bytes";
+                return false;
+            }
 
-        var err = _bridge.Program(ProgramBytes, ProgramTimeout);
-        if (err != MCUSerialBridgeError.OK)
+            var err = bridge!.Program(ProgramBytes, ProgramTimeout);
+            if (err != MCUSerialBridgeError.OK)
+            {
+                LastError = $"Program failed: {err.ToDescription()}";
+                return false;
+            }
+        }
+        finally
         {
-            LastError = $"Program failed: {err.ToDescription()}";
-            return false;
+            ExitBridgeCall();
         }
 
         RefreshState();
@@ -293,17 +403,24 @@ public class MCUNode : IDisposable
     /// </summary>
     public bool Start()
     {
-        if (_bridge == null || !_bridge.IsOpen)
+        if (!TryEnterBridgeCall(out var bridge))
         {
-            LastError = "Not connected";
+            LastError = IsDisposing ? "Bridge is disposing" : "Not connected";
             return false;
         }
 
-        var err = _bridge.Start(DefaultTimeout);
-        if (err != MCUSerialBridgeError.OK)
+        try
         {
-            LastError = $"Start failed: {err.ToDescription()}";
-            return false;
+            var err = bridge!.Start(DefaultTimeout);
+            if (err != MCUSerialBridgeError.OK)
+            {
+                LastError = $"Start failed: {err.ToDescription()}";
+                return false;
+            }
+        }
+        finally
+        {
+            ExitBridgeCall();
         }
 
         RefreshState();
@@ -316,17 +433,24 @@ public class MCUNode : IDisposable
     /// </summary>
     public bool Stop()
     {
-        if (_bridge == null || !_bridge.IsOpen)
+        if (!TryEnterBridgeCall(out var bridge))
         {
-            LastError = "Not connected";
+            LastError = IsDisposing ? "Bridge is disposing" : "Not connected";
             return false;
         }
 
-        var err = _bridge.Reset(DefaultTimeout);
-        if (err != MCUSerialBridgeError.OK)
+        try
         {
-            LastError = $"Stop (Reset) failed: {err.ToDescription()}";
-            return false;
+            var err = bridge!.Reset(DefaultTimeout);
+            if (err != MCUSerialBridgeError.OK)
+            {
+                LastError = $"Stop (Reset) failed: {err.ToDescription()}";
+                return false;
+            }
+        }
+        finally
+        {
+            ExitBridgeCall();
         }
 
         RefreshState();
@@ -339,17 +463,24 @@ public class MCUNode : IDisposable
     /// </summary>
     internal bool SendUpperIO(byte[] data, uint timeoutMs = 20)
     {
-        if (_bridge == null || !_bridge.IsOpen)
+        if (!TryEnterBridgeCall(out var bridge))
         {
-            LastError = "Not connected";
+            LastError = IsDisposing ? "Bridge is disposing" : "Not connected";
             return false;
         }
 
-        var err = _bridge.MemoryUpperIO(data, timeoutMs);
-        if (err != MCUSerialBridgeError.OK)
+        try
         {
-            LastError = $"UpperIO failed: {err.ToDescription()}";
-            return false;
+            var err = bridge!.MemoryUpperIO(data, timeoutMs);
+            if (err != MCUSerialBridgeError.OK)
+            {
+                LastError = $"UpperIO failed: {err.ToDescription()}";
+                return false;
+            }
+        }
+        finally
+        {
+            ExitBridgeCall();
         }
 
         LastError = null;
@@ -367,19 +498,26 @@ public class MCUNode : IDisposable
     /// <returns>是否成功</returns>
     public bool SetWireTap(byte portIndex, WireTapFlags flags, uint timeoutMs = 200)
     {
-        if (_bridge == null || !_bridge.IsOpen)
+        if (!TryEnterBridgeCall(out var bridge))
         {
-            LastError = "Not connected";
+            LastError = IsDisposing ? "Bridge is disposing" : "Not connected";
             return false;
         }
 
-        // 转换为底层类型
-        var clrFlags = (MCUSerialBridgeCLR.WireTapFlags)(int)flags;
-        var err = _bridge.SetWireTap(portIndex, clrFlags, timeoutMs);
-        if (err != MCUSerialBridgeError.OK)
+        try
         {
-            LastError = $"SetWireTap failed: {err.ToDescription()}";
-            return false;
+            // 转换为底层类型
+            var clrFlags = (MCUSerialBridgeCLR.WireTapFlags)(int)flags;
+            var err = bridge!.SetWireTap(portIndex, clrFlags, timeoutMs);
+            if (err != MCUSerialBridgeError.OK)
+            {
+                LastError = $"SetWireTap failed: {err.ToDescription()}";
+                return false;
+            }
+        }
+        finally
+        {
+            ExitBridgeCall();
         }
 
         LastError = null;
@@ -396,19 +534,29 @@ public class MCUNode : IDisposable
     /// - data: 原始数据
     /// </param>
     /// <returns>是否成功</returns>
-    public bool RegisterSerialPortCallback(byte portIndex, Action<byte, byte, byte[], uint> callback)
+    public bool RegisterSerialPortCallback(
+        byte portIndex,
+        Action<byte, byte, byte[], uint> callback
+    )
     {
-        if (_bridge == null || !_bridge.IsOpen)
+        if (!TryEnterBridgeCall(out var bridge))
         {
-            LastError = "Not connected";
+            LastError = IsDisposing ? "Bridge is disposing" : "Not connected";
             return false;
         }
 
-        var err = _bridge.RegisterSerialPortCallback(portIndex, callback);
-        if (err != MCUSerialBridgeError.OK)
+        try
         {
-            LastError = $"RegisterSerialPortCallback failed: {err.ToDescription()}";
-            return false;
+            var err = bridge!.RegisterSerialPortCallback(portIndex, callback);
+            if (err != MCUSerialBridgeError.OK)
+            {
+                LastError = $"RegisterSerialPortCallback failed: {err.ToDescription()}";
+                return false;
+            }
+        }
+        finally
+        {
+            ExitBridgeCall();
         }
 
         LastError = null;
@@ -425,19 +573,29 @@ public class MCUNode : IDisposable
     /// - msg: CANMessage
     /// </param>
     /// <returns>是否成功</returns>
-    public bool RegisterCANPortCallback(byte portIndex, Action<byte, byte, CANMessage, uint> callback)
+    public bool RegisterCANPortCallback(
+        byte portIndex,
+        Action<byte, byte, CANMessage, uint> callback
+    )
     {
-        if (_bridge == null || !_bridge.IsOpen)
+        if (!TryEnterBridgeCall(out var bridge))
         {
-            LastError = "Not connected";
+            LastError = IsDisposing ? "Bridge is disposing" : "Not connected";
             return false;
         }
 
-        var err = _bridge.RegisterCANPortCallback(portIndex, callback);
-        if (err != MCUSerialBridgeError.OK)
+        try
         {
-            LastError = $"RegisterCANPortCallback failed: {err.ToDescription()}";
-            return false;
+            var err = bridge!.RegisterCANPortCallback(portIndex, callback);
+            if (err != MCUSerialBridgeError.OK)
+            {
+                LastError = $"RegisterCANPortCallback failed: {err.ToDescription()}";
+                return false;
+            }
+        }
+        finally
+        {
+            ExitBridgeCall();
         }
 
         LastError = null;
@@ -449,23 +607,30 @@ public class MCUNode : IDisposable
     /// </summary>
     public void RefreshState()
     {
-        if (_bridge == null || !_bridge.IsOpen)
+        if (!TryEnterBridgeCall(out var bridge))
         {
             State = null; // Mark as offline
             return;
         }
-        
-        var err = _bridge.GetState(out var state, DefaultTimeout);
-        if (err == MCUSerialBridgeError.OK)
+
+        try
         {
-            State = state;
-            LastError = null;
+            var err = bridge!.GetState(out var state, DefaultTimeout);
+            if (err == MCUSerialBridgeError.OK)
+            {
+                State = state;
+                LastError = null;
+            }
+            else
+            {
+                // Timeout or communication error - mark as offline
+                State = null;
+                LastError = $"GetState failed: {err.ToDescription()}";
+            }
         }
-        else
+        finally
         {
-            // Timeout or communication error - mark as offline
-            State = null;
-            LastError = $"GetState failed: {err.ToDescription()}";
+            ExitBridgeCall();
         }
     }
 
@@ -474,21 +639,28 @@ public class MCUNode : IDisposable
     /// </summary>
     internal void RefreshStats()
     {
-        if (_bridge == null || !_bridge.IsOpen)
+        if (!TryEnterBridgeCall(out var bridge))
         {
             Stats = null;
             return;
         }
-        
-        var err = _bridge.GetStats(out var stats, DefaultTimeout);
-        if (err == MCUSerialBridgeError.OK)
+
+        try
         {
-            Stats = stats;
+            var err = bridge!.GetStats(out var stats, DefaultTimeout);
+            if (err == MCUSerialBridgeError.OK)
+            {
+                Stats = stats;
+            }
+            else
+            {
+                // 统计获取失败不影响连接状态，只清除缓存
+                Stats = null;
+            }
         }
-        else
+        finally
         {
-            // 统计获取失败不影响连接状态，只清除缓存
-            Stats = null;
+            ExitBridgeCall();
         }
     }
 
@@ -502,13 +674,16 @@ public class MCUNode : IDisposable
 
         // URI 格式: serial://name=COM3&baudrate=2000000
         var paramString = uri.Substring("serial://".Length);
-        var parameters = paramString.Split('&')
+        var parameters = paramString
+            .Split('&')
             .Select(p => p.Split('='))
             .Where(p => p.Length == 2)
             .ToDictionary(p => p[0], p => p[1], StringComparer.OrdinalIgnoreCase);
 
         uint baudRate = DefaultBaudRate;
-        if (parameters.TryGetValue("baudrate", out var baudStr) && uint.TryParse(baudStr, out var b))
+        if (
+            parameters.TryGetValue("baudrate", out var baudStr) && uint.TryParse(baudStr, out var b)
+        )
         {
             baudRate = b;
         }
@@ -519,7 +694,9 @@ public class MCUNode : IDisposable
         }
 
         // 如果指定了 VID/PID，使用 SerialPortResolver 解析
-        if (parameters.TryGetValue("vid", out var vid) && parameters.TryGetValue("pid", out var pid))
+        if (
+            parameters.TryGetValue("vid", out var vid) && parameters.TryGetValue("pid", out var pid)
+        )
         {
             var ports = SerialPortResolver.ResolveByVidPid(vid, pid);
             if (ports.Length > 0)
@@ -533,7 +710,8 @@ public class MCUNode : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
+        if (_disposed)
+            return;
         _disposed = true;
         Disconnect();
     }

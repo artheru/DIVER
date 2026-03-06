@@ -91,6 +91,34 @@ C# 上位机应用（可直接调用 MCUSerialBridge 类）
 * **跨平台潜力**：当前实现 Windows 串口 API，后续可轻松移植到 Linux
 * **不依赖任何托管环境**：可在纯 C 程序、DLL、甚至嵌入式上位机中使用
 
+### 2.1 串口传输错误与自动重连上报（2026-03）
+
+本轮更新为 C 核心库增加了“传输错误可观测”能力，并将结果通过回调暴露给上层。
+
+新增 C API：
+
+* `msb_register_error_callback(handle, callback, user_ctx)`
+* 回调类型：`msb_on_error_callback_function_t(const char* message, void* user_ctx)`
+
+触发时机：
+
+* 串口传输失败（ReadFile/WriteFile 失败）
+* 自动重连成功
+* 自动重连失败
+* 自动重连计划首次建立（scheduled）
+
+去重与复位策略：
+
+* 失败日志按 `winerr`（Win32 错误码）去重：相同错误码连续出现不重复回调
+* 错误码发生变化时会再次回调
+* 自动重连成功后清零错误态与去重状态，后续再次故障会重新触发回调
+
+实现位置（便于排查）：
+
+* `c_core/src/msb_thread.c`：失败记录、重连状态机、回调触发
+* `c_core/include/msb_bridge.h`：回调类型与注册函数声明
+* `c_core/src/msb_bridge.c`：注册函数导出与 API 表挂接
+
 ### 3. C# 封装层（wrapper）
 
 * 直接 P/Invoke 调用 `mcu_serial_bridge.dll`，封装为面向对象 C# API
@@ -99,6 +127,7 @@ C# 上位机应用（可直接调用 MCUSerialBridge 类）
 * 提供串口与 CAN 的读写方法：`ReadSerial`、`WriteSerial`、`ReadCAN`、`WriteCAN`
 * 提供端口配置、MCU 状态、版本信息等结构体
 * 提供完整的错误码枚举 `MCUSerialBridgeError`，并可直接 `ToString()`
+* 新增错误回调封装：`MCUSerialBridge.RegisterErrorCallback(Action<string>)`
 
 ### 4. C# 示例 / 测试
 

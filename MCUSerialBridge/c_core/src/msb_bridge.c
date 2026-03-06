@@ -42,6 +42,8 @@ MCUSerialBridgeError msb_open(
     (*handle)->port_name[sizeof((*handle)->port_name) - 1] = '\0';
 
     (*handle)->baud = baud;
+    (*handle)->reconnect_attempt = 0;
+    (*handle)->reconnect_next_retry_ms = 0;
 
     // 打开串口
     (*handle)->hComm = CreateFileA(
@@ -155,8 +157,12 @@ MCUSerialBridgeError msb_close(msb_handle* handle)
         CloseHandle(handle->send_thread);
     }
 
-    if (handle->hComm)
+    EnterCriticalSection(&handle->comm_lock);
+    if (handle->hComm && handle->hComm != INVALID_HANDLE_VALUE) {
         CloseHandle(handle->hComm);
+    }
+    handle->hComm = INVALID_HANDLE_VALUE;
+    LeaveCriticalSection(&handle->comm_lock);
 
     return msb_handle_deinit(handle);
 }
@@ -753,6 +759,68 @@ MCUSerialBridgeError msb_register_fatal_error_callback(
 }
 
 // --------------------
+// 注册 Transport Error 回调
+// --------------------
+MCUSerialBridgeError msb_register_error_callback(
+        msb_handle* handle,
+        msb_on_error_callback_function_t callback,
+        void* user_ctx)
+{
+    if (!handle)
+        return MSB_Error_Win_HandleNotFound;
+
+    handle->error_callback = NULL;
+    handle->error_callback_ctx = user_ctx;
+    handle->error_callback = callback;
+
+    DBG_PRINT(
+            "Registered transport_error callback to[0x%08X]",
+            (uint32_t)(size_t)(void*)callback);
+
+    return MSB_Error_OK;
+}
+
+// --------------------
+// 获取串口传输错误状态
+// --------------------
+MCUSerialBridgeError msb_get_transport_error_state(
+        msb_handle* handle,
+        TransportErrorStateC* state)
+{
+    if (!handle) {
+        return MSB_Error_Win_HandleNotFound;
+    }
+    if (!state) {
+        return MSB_Error_Win_InvalidParam;
+    }
+
+    EnterCriticalSection(&handle->transport_error_lock);
+    *state = handle->transport_error;
+    LeaveCriticalSection(&handle->transport_error_lock);
+
+    return MSB_Error_OK;
+}
+
+// --------------------
+// 清空串口传输错误状态
+// --------------------
+MCUSerialBridgeError msb_clear_transport_error_state(msb_handle* handle)
+{
+    if (!handle) {
+        return MSB_Error_Win_HandleNotFound;
+    }
+
+    EnterCriticalSection(&handle->transport_error_lock);
+    memset(&handle->transport_error, 0, sizeof(handle->transport_error));
+    handle->transport_last_reported_winerr = 0;
+    handle->transport_last_reported_valid = 0;
+    LeaveCriticalSection(&handle->transport_error_lock);
+
+    DBG_PRINT("TransportError: cleared for port[%s]", handle->port_name);
+    return MSB_Error_OK;
+}
+
+// --------------------
 // 获取运行时统计数据
 // --------------------
 DLL_EXPORT MCUSerialBridgeError msb_get_stats(
@@ -812,5 +880,8 @@ void mcu_serial_bridge_get_api(MCUSerialBridgeAPI* api)
     api->msb_register_memory_lower_io_callback = msb_register_memory_lower_io_callback;
     api->msb_register_console_writeline_callback = msb_register_console_writeline_callback;
     api->msb_register_fatal_error_callback = msb_register_fatal_error_callback;
+    api->msb_register_error_callback = msb_register_error_callback;
     api->msb_get_stats = msb_get_stats;
+    api->msb_get_transport_error_state = msb_get_transport_error_state;
+    api->msb_clear_transport_error_state = msb_clear_transport_error_state;
 }

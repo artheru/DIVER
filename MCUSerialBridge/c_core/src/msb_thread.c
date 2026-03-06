@@ -14,8 +14,334 @@
 
 #define READ_SLEEP_MS 1
 #define WRITE_SLEEP_MS 2
+#define RECONNECT_BACKOFF_COUNT 11
 
 static uint16_t calculate_crc16(const uint8_t* data, uint32_t len);
+static const char* win32_error_name(DWORD err);
+static void msb_emit_transport_error(msb_handle* handle, const char* message);
+static void msb_reset_transport_error_state(msb_handle* handle);
+static const uint32_t RECONNECT_BACKOFF_MS[RECONNECT_BACKOFF_COUNT] =
+        {200, 200, 200, 200, 200, 1000, 1000, 1000, 1000, 1000, 2000};
+
+static BOOL is_comm_valid(HANDLE h)
+{
+    return h != NULL && h != INVALID_HANDLE_VALUE;
+}
+
+static void msb_clear_reconnect_state(msb_handle* handle)
+{
+    EnterCriticalSection(&handle->comm_lock);
+    handle->reconnect_attempt = 0;
+    handle->reconnect_next_retry_ms = 0;
+    LeaveCriticalSection(&handle->comm_lock);
+}
+
+static BOOL msb_reopen_comm_locked(msb_handle* handle, DWORD* out_err)
+{
+    HANDLE new_comm = CreateFileA(
+            handle->port_name,
+            GENERIC_READ | GENERIC_WRITE,
+            0,
+            NULL,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            NULL);
+    if (!is_comm_valid(new_comm)) {
+        if (out_err) {
+            *out_err = GetLastError();
+        }
+        return FALSE;
+    }
+
+    DCB dcb = {0};
+    dcb.DCBlength = sizeof(dcb);
+    if (!GetCommState(new_comm, &dcb)) {
+        if (out_err) {
+            *out_err = GetLastError();
+        }
+        CloseHandle(new_comm);
+        return FALSE;
+    }
+
+    dcb.BaudRate = handle->baud;
+    dcb.ByteSize = 8;
+    dcb.StopBits = ONESTOPBIT;
+    dcb.Parity = NOPARITY;
+    if (!SetCommState(new_comm, &dcb)) {
+        if (out_err) {
+            *out_err = GetLastError();
+        }
+        CloseHandle(new_comm);
+        return FALSE;
+    }
+
+    COMMTIMEOUTS timeouts = {0};
+    timeouts.ReadIntervalTimeout = MAXDWORD;
+    timeouts.ReadTotalTimeoutConstant = 0;
+    timeouts.ReadTotalTimeoutMultiplier = 0;
+    timeouts.WriteTotalTimeoutConstant = 0;
+    timeouts.WriteTotalTimeoutMultiplier = 0;
+    if (!SetCommTimeouts(new_comm, &timeouts)) {
+        if (out_err) {
+            *out_err = GetLastError();
+        }
+        CloseHandle(new_comm);
+        return FALSE;
+    }
+
+    handle->hComm = new_comm;
+    if (out_err) {
+        *out_err = 0;
+    }
+    return TRUE;
+}
+
+static void msb_emit_transport_error(msb_handle* handle, const char* message)
+{
+    if (!handle || !message) {
+        return;
+    }
+
+    if (handle->error_callback) {
+        handle->error_callback(message, handle->error_callback_ctx);
+    }
+}
+
+static void msb_reset_transport_error_state(msb_handle* handle)
+{
+    if (!handle) {
+        return;
+    }
+
+    EnterCriticalSection(&handle->transport_error_lock);
+    memset(&handle->transport_error, 0, sizeof(handle->transport_error));
+    handle->transport_last_reported_winerr = 0;
+    handle->transport_last_reported_valid = 0;
+    LeaveCriticalSection(&handle->transport_error_lock);
+}
+
+static void msb_try_auto_reconnect(msb_handle* handle, char from_op, DWORD from_err)
+{
+    if (!handle || !handle->is_open) {
+        return;
+    }
+
+    uint64_t now = GetTickCount64();
+    uint32_t attempt_no = 0;
+    uint32_t next_delay_ms = 0;
+    DWORD reopen_err = 0;
+
+    EnterCriticalSection(&handle->comm_lock);
+    if (!handle->is_open) {
+        LeaveCriticalSection(&handle->comm_lock);
+        return;
+    }
+
+    if (handle->reconnect_attempt == 0 && handle->reconnect_next_retry_ms == 0) {
+        handle->reconnect_attempt = 1;
+        handle->reconnect_next_retry_ms = now + RECONNECT_BACKOFF_MS[0];
+        LeaveCriticalSection(&handle->comm_lock);
+        char callback_msg[256];
+        snprintf(
+                callback_msg,
+                sizeof(callback_msg),
+                "Transport: reconnect scheduled from[%c], winerr=%lu(%s), retry#1 in %ums",
+                from_op,
+                (unsigned long)from_err,
+                win32_error_name(from_err),
+                RECONNECT_BACKOFF_MS[0]);
+        callback_msg[sizeof(callback_msg) - 1] = '\0';
+        DBG_PRINT("%s", callback_msg);
+        msb_emit_transport_error(handle, callback_msg);
+        return;
+    }
+
+    if (now < handle->reconnect_next_retry_ms) {
+        // 如果上层仍在主动发请求（写线程），在早期重试阶段允许加速下一次探测，
+        // 但高回退阶段（>前几次）严格遵守 backoff，避免出现日志显示 16s
+        // 实际却更快重试的时间语义不一致。
+        if (from_op == 'W' && handle->reconnect_attempt <= 4) {
+            uint64_t accelerated_retry_ms = now + 200;
+            if (accelerated_retry_ms < handle->reconnect_next_retry_ms) {
+                handle->reconnect_next_retry_ms = accelerated_retry_ms;
+            }
+        }
+        LeaveCriticalSection(&handle->comm_lock);
+        return;
+    }
+
+    attempt_no = handle->reconnect_attempt;
+    if (is_comm_valid(handle->hComm)) {
+        CloseHandle(handle->hComm);
+    }
+    handle->hComm = INVALID_HANDLE_VALUE;
+
+    if (msb_reopen_comm_locked(handle, &reopen_err)) {
+        handle->reconnect_attempt = 0;
+        handle->reconnect_next_retry_ms = 0;
+        LeaveCriticalSection(&handle->comm_lock);
+        msb_reset_transport_error_state(handle);
+        char callback_msg[256];
+        snprintf(
+                callback_msg,
+                sizeof(callback_msg),
+                "Transport: reconnect success on attempt#%u, from[%c], port=%s",
+                attempt_no,
+                from_op,
+                handle->port_name);
+        callback_msg[sizeof(callback_msg) - 1] = '\0';
+        DBG_PRINT("%s", callback_msg);
+        msb_emit_transport_error(handle, callback_msg);
+        return;
+    }
+
+    uint32_t idx = handle->reconnect_attempt;
+    if (idx >= RECONNECT_BACKOFF_COUNT) {
+        idx = RECONNECT_BACKOFF_COUNT - 1;
+    }
+    next_delay_ms = RECONNECT_BACKOFF_MS[idx];
+    handle->reconnect_attempt++;
+    handle->reconnect_next_retry_ms = now + next_delay_ms;
+    LeaveCriticalSection(&handle->comm_lock);
+
+    char callback_msg[256];
+    snprintf(
+            callback_msg,
+            sizeof(callback_msg),
+            "Transport: reconnect failed on attempt#%u, err=%lu(%s), next in %ums",
+            attempt_no,
+            (unsigned long)reopen_err,
+            win32_error_name(reopen_err),
+            next_delay_ms);
+    callback_msg[sizeof(callback_msg) - 1] = '\0';
+    DBG_PRINT("%s", callback_msg);
+    msb_emit_transport_error(handle, callback_msg);
+}
+
+static const char* win32_error_name(DWORD err)
+{
+    switch (err) {
+        case ERROR_FILE_NOT_FOUND:
+            return "ERROR_FILE_NOT_FOUND";
+        case ERROR_PATH_NOT_FOUND:
+            return "ERROR_PATH_NOT_FOUND";
+        case ERROR_INVALID_HANDLE:
+            return "ERROR_INVALID_HANDLE";
+        case ERROR_SHARING_VIOLATION:
+            return "ERROR_SHARING_VIOLATION";
+        case ERROR_DEVICE_NOT_CONNECTED:
+            return "ERROR_DEVICE_NOT_CONNECTED";
+        case ERROR_GEN_FAILURE:
+            return "ERROR_GEN_FAILURE";
+        case ERROR_OPERATION_ABORTED:
+            return "ERROR_OPERATION_ABORTED";
+        case ERROR_ACCESS_DENIED:
+            return "ERROR_ACCESS_DENIED";
+        case ERROR_INVALID_USER_BUFFER:
+            return "ERROR_INVALID_USER_BUFFER";
+        case ERROR_NOT_ENOUGH_MEMORY:
+            return "ERROR_NOT_ENOUGH_MEMORY";
+        default:
+            return "ERROR_UNKNOWN";
+    }
+}
+
+static void msb_transport_record_error(
+        msb_handle* handle,
+        char op,
+        DWORD winerr,
+        DWORD requested,
+        DWORD processed,
+        DWORD comm_errors,
+        BOOL has_comm_status)
+{
+    if (!handle) {
+        return;
+    }
+
+    char message[256];
+    if (has_comm_status) {
+        snprintf(
+                message,
+                sizeof(message),
+                "Transport[%c] failed, port=%s, winerr=%lu(%s), req=%lu, done=%lu, comm=0x%08lX",
+                op,
+                handle->port_name,
+                (unsigned long)winerr,
+                win32_error_name(winerr),
+                (unsigned long)requested,
+                (unsigned long)processed,
+                (unsigned long)comm_errors);
+    } else {
+        snprintf(
+                message,
+                sizeof(message),
+                "Transport[%c] failed, port=%s, winerr=%lu(%s), req=%lu, done=%lu, comm=NA",
+                op,
+                handle->port_name,
+                (unsigned long)winerr,
+                win32_error_name(winerr),
+                (unsigned long)requested,
+                (unsigned long)processed);
+    }
+    message[sizeof(message) - 1] = '\0';
+
+    BOOL first_fault = FALSE;
+    BOOL should_emit = FALSE;
+    EnterCriticalSection(&handle->transport_error_lock);
+    first_fault = (handle->transport_error.faulted == 0);
+
+    handle->transport_error.faulted = 1;
+    handle->transport_error.last_op = (uint8_t)op;
+    handle->transport_error.last_winerr = (uint32_t)winerr;
+
+    strncpy(
+            handle->transport_error.last_msg,
+            message,
+            sizeof(handle->transport_error.last_msg) - 1);
+    handle->transport_error.last_msg[sizeof(handle->transport_error.last_msg) - 1] =
+            '\0';
+
+    if (op == 'R') {
+        handle->transport_error.read_fail_count++;
+        handle->transport_error.last_read_winerr = (uint32_t)winerr;
+        strncpy(
+                handle->transport_error.last_read_msg,
+                message,
+                sizeof(handle->transport_error.last_read_msg) - 1);
+        handle->transport_error
+                .last_read_msg[sizeof(handle->transport_error.last_read_msg) - 1] =
+                '\0';
+    } else if (op == 'W') {
+        handle->transport_error.write_fail_count++;
+        handle->transport_error.last_write_winerr = (uint32_t)winerr;
+        strncpy(
+                handle->transport_error.last_write_msg,
+                message,
+                sizeof(handle->transport_error.last_write_msg) - 1);
+        handle->transport_error
+                .last_write_msg[sizeof(handle->transport_error.last_write_msg) -
+                                1] = '\0';
+    }
+
+    if (first_fault) {
+        should_emit = TRUE;
+        handle->transport_last_reported_winerr = (uint32_t)winerr;
+        handle->transport_last_reported_valid = 1;
+    } else if (!handle->transport_last_reported_valid ||
+               handle->transport_last_reported_winerr != (uint32_t)winerr) {
+        should_emit = TRUE;
+        handle->transport_last_reported_winerr = (uint32_t)winerr;
+        handle->transport_last_reported_valid = 1;
+    }
+
+    LeaveCriticalSection(&handle->transport_error_lock);
+
+    DBG_PRINT("%s", message);
+    if (should_emit) {
+        msb_emit_transport_error(handle, message);
+    }
+}
 
 // --------------------
 // 接收无锁入队
@@ -286,21 +612,85 @@ DWORD WINAPI recv_thread_func(LPVOID param)
     msb_handle* handle = (msb_handle*)param;
     uint8_t linear_buffer[LINEAR_BUFFER_SIZE];  // 线性缓冲区
     uint32_t head = 0, tail = 0;                // 读写指针
+    DWORD last_read_err = 0;
+    uint64_t last_read_log_ms = 0;
+    uint32_t suppressed_read_errors = 0;
 
     while (handle && handle->is_open) {
         DWORD bytesRead = 0;
         uint32_t max_read = LINEAR_BUFFER_SIZE - head;
 
         // 调用Windows API读取串口
-        if (!ReadFile(
+        BOOL read_ok = FALSE;
+        EnterCriticalSection(&handle->comm_lock);
+        if (is_comm_valid(handle->hComm)) {
+            read_ok = ReadFile(
                     handle->hComm,
                     linear_buffer + head,
                     (DWORD)max_read,
                     &bytesRead,
-                    NULL)) {
-            Sleep(READ_SLEEP_MS);
+                    NULL);
+        } else {
+            SetLastError(ERROR_INVALID_HANDLE);
+            read_ok = FALSE;
+        }
+        LeaveCriticalSection(&handle->comm_lock);
+
+        if (!read_ok) {
+            DWORD winerr = GetLastError();
+            DWORD comm_errors = 0;
+            BOOL has_comm_status = FALSE;
+            uint64_t now_ms = GetTickCount64();
+            BOOL should_log = FALSE;
+
+            EnterCriticalSection(&handle->comm_lock);
+            if (is_comm_valid(handle->hComm)) {
+                COMSTAT comm_stat = {0};
+                has_comm_status =
+                        ClearCommError(handle->hComm, &comm_errors, &comm_stat);
+            }
+            LeaveCriticalSection(&handle->comm_lock);
+
+            // 节流重复读失败日志，避免断线期间每 1ms 刷屏
+            if (last_read_log_ms == 0 || winerr != last_read_err ||
+                (now_ms - last_read_log_ms) >= 250) {
+                should_log = TRUE;
+            }
+
+            if (should_log) {
+                if (suppressed_read_errors > 0) {
+                    DBG_PRINT(
+                            "Transport[R] suppressed %u repeated errors before this log",
+                            suppressed_read_errors);
+                    suppressed_read_errors = 0;
+                }
+                msb_transport_record_error(
+                        handle,
+                        'R',
+                        winerr,
+                        (DWORD)max_read,
+                        bytesRead,
+                        comm_errors,
+                        has_comm_status);
+                last_read_err = winerr;
+                last_read_log_ms = now_ms;
+            } else {
+                suppressed_read_errors++;
+            }
+
+            msb_try_auto_reconnect(handle, 'R', winerr);
+            Sleep(10);
             continue;
         }
+
+        if (suppressed_read_errors > 0) {
+            DBG_PRINT(
+                    "Transport[R] recovered after suppressing %u repeated errors",
+                    suppressed_read_errors);
+            suppressed_read_errors = 0;
+        }
+
+        msb_clear_reconnect_state(handle);
 
         if (bytesRead == 0) {
             Sleep(READ_SLEEP_MS);
@@ -435,14 +825,43 @@ DWORD WINAPI send_thread_func(LPVOID param)
 
             // 发送
             DWORD bytesWritten = 0;
-            if (!WriteFile(
+            BOOL write_ok = FALSE;
+            EnterCriticalSection(&handle->comm_lock);
+            if (is_comm_valid(handle->hComm)) {
+                write_ok = WriteFile(
                         handle->hComm,
                         entry->header,
                         total_len,
                         &bytesWritten,
-                        NULL)) {
-                DBG_PRINT("Send: ERROR, can not write file!");
-                // TODO Call OnError
+                        NULL);
+            } else {
+                SetLastError(ERROR_INVALID_HANDLE);
+                write_ok = FALSE;
+            }
+            LeaveCriticalSection(&handle->comm_lock);
+
+            if (!write_ok) {
+                DWORD winerr = GetLastError();
+                DWORD comm_errors = 0;
+                BOOL has_comm_status = FALSE;
+                EnterCriticalSection(&handle->comm_lock);
+                if (is_comm_valid(handle->hComm)) {
+                    COMSTAT comm_stat = {0};
+                    has_comm_status =
+                            ClearCommError(handle->hComm, &comm_errors, &comm_stat);
+                }
+                LeaveCriticalSection(&handle->comm_lock);
+                msb_transport_record_error(
+                        handle,
+                        'W',
+                        winerr,
+                        (DWORD)total_len,
+                        bytesWritten,
+                        comm_errors,
+                        has_comm_status);
+                msb_try_auto_reconnect(handle, 'W', winerr);
+            } else {
+                msb_clear_reconnect_state(handle);
             }
             Sleep(WRITE_SLEEP_MS);
 

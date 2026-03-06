@@ -21,6 +21,8 @@ MCUSerialBridgeError msb_handle_init(msb_handle** handle)
 
     // 初始化序号锁
     InitializeCriticalSection(&(*handle)->seq_lock);
+    InitializeCriticalSection(&(*handle)->comm_lock);
+    InitializeCriticalSection(&(*handle)->transport_error_lock);
 
     // 初始化 SeqWaiter 的锁和条件变量
     for (int i = 0; i < MAX_PENDING_SEQ; i++) {
@@ -50,6 +52,8 @@ MCUSerialBridgeError msb_handle_init(msb_handle** handle)
                 CloseHandle((*handle)->ports[j].data_event);
                 (*handle)->ports[j].data_event = NULL;
             }
+            DeleteCriticalSection(&(*handle)->transport_error_lock);
+            DeleteCriticalSection(&(*handle)->comm_lock);
             DeleteCriticalSection(&(*handle)->seq_lock);
             free(*handle);
             *handle = NULL;
@@ -79,6 +83,8 @@ MCUSerialBridgeError msb_handle_deinit(msb_handle* handle)
     }
 
     DeleteCriticalSection(&handle->seq_lock);
+    DeleteCriticalSection(&handle->comm_lock);
+    DeleteCriticalSection(&handle->transport_error_lock);
 
     free(handle);
     return MSB_Error_OK;

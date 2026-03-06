@@ -308,6 +308,38 @@ The `3rd/CoralinkerHost` project provides a web interface for:
 
 See `3rd/CoralinkerHost/README.md` for details.
 
+## Reliability Updates (2026-03)
+
+This round includes two reliability-oriented updates across the transport and session layers.
+
+### 1) Serial transport error observability and reconnect reporting
+
+`MCUSerialBridge` now exposes transport/reconnect logs from native C core to upper layers:
+
+- New C API: `msb_register_error_callback(...)`
+- Wrapper API: `MCUSerialBridge.RegisterErrorCallback(Action<string>)`
+- SDK chain: `MCUNode.OnError` -> `DIVERSession` node log (`OnNodeLog`)
+
+Behavior policy:
+
+- Read/Write transport failures are deduplicated by Win32 error code (`winerr`)
+- Same consecutive `winerr` is not repeatedly pushed
+- Reconnect success clears fault/dedup state
+- After a successful reconnect, a new failure can be reported again
+
+This allows front-end users to see first-failure and reconnect state transitions without changing existing log channels.
+
+### 2) MCUNode SafeDispose concurrency guard
+
+`CoralinkerSDK` now includes a safer bridge disposal path in `MCUNode`:
+
+- Tracks active native bridge calls
+- Blocks disposal while calls are in flight
+- Prevents entering new calls during dispose window
+- Uses `SafeDisposeBridge()` in `Disconnect()`
+
+This reduces race conditions between polling/callback threads and connection teardown.
+
 ## Troubleshooting
 
 | Issue | Solution |
