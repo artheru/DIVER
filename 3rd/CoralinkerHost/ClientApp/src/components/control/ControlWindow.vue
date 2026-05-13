@@ -690,11 +690,14 @@ const widgetResizeStartH = ref(0)
 
 // 窗口大小根据网格自动计算
 // header高度约44px，canvas margin 8px*2=16px，border 2px
+const windowWidth = computed(() => gridCols.value * CELL_SIZE + 18)
+const windowHeight = computed(() => gridRows.value * CELL_SIZE + 62)
+
 const windowStyle = computed(() => ({
   left: `${windowX.value}px`,
   top: `${windowY.value}px`,
-  width: `${gridCols.value * CELL_SIZE + 18}px`,  // margin 16px + border 2px
-  height: `${gridRows.value * CELL_SIZE + 62}px`  // header 44px + margin 16px + border 2px
+  width: `${windowWidth.value}px`,  // margin 16px + border 2px
+  height: `${windowHeight.value}px`  // header 44px + margin 16px + border 2px
 }))
 
 // 嵌入模式下的样式（无定位，自动填充）
@@ -835,15 +838,27 @@ function onDrag(event: MouseEvent) {
   const dx = event.clientX - dragStartX.value
   const dy = event.clientY - dragStartY.value
   
-  windowX.value = dragOffsetX.value + dx
-  windowY.value = dragOffsetY.value + dy
+  setWindowPosition(dragOffsetX.value + dx, dragOffsetY.value + dy)
 }
 
 function stopDrag() {
   isDragging.value = false
   document.removeEventListener('mousemove', onDrag)
   document.removeEventListener('mouseup', stopDrag)
+  clampWindowPosition()
   saveLayout()
+}
+
+function setWindowPosition(x: number, y: number) {
+  const maxX = Math.max(0, window.innerWidth - windowWidth.value)
+  const maxY = Math.max(0, window.innerHeight - windowHeight.value)
+  windowX.value = Math.max(0, Math.min(maxX, x))
+  windowY.value = Math.max(0, Math.min(maxY, y))
+}
+
+function clampWindowPosition() {
+  if (props.embedded) return
+  setWindowPosition(windowX.value, windowY.value)
 }
 
 // ============================================
@@ -1266,6 +1281,7 @@ function loadLayout() {
   gridRows.value = layout.gridRows ?? 12
   isLocked.value = layout.isLocked ?? false
   widgets.value = layout.widgets ?? []
+  clampWindowPosition()
 }
 
 // ============================================
