@@ -179,3 +179,197 @@
   - `3rd/CoralinkerHost/bin/Debug/net8.0/mcu_serial_bridge.dll`
 - 未重新构建前端，按用户要求只尝试运行。
 - 用户随后确认当前 Host 已开着并且网页能访问。
+
+### [plan] 输入源文件 Git 历史与 Build 版本信息
+- 用户提出前端编辑/构建/运行页面需要引入源文件历史追踪：
+  - 保存输入源文件时自动形成 Git 记录。
+  - 编辑页查看总体日志、单文件日志、左右 diff、临时 checkout、永久 revert。
+  - 多人编辑时轮询 HEAD 并提示后端已有新版本。
+  - Build 前有未保存内容必须保存，否则不能编译。
+  - Build 和运行需要携带版本号和时间。
+- 已与用户确认：
+  - 使用 `3rd/CoralinkerHost/data/.git` 独立仓库。
+  - 只跟踪 `data/assets/inputs/*.cs`。
+- 计划文件：`input_git_history_3ba33a1a.plan.md`。
+- 追加细化：
+  - History UI 为右侧抽屉/Modal，左侧 commit 列表，右侧 Monaco DiffEditor，支持 `All Changes` / `Current File`。
+  - 前端每 10 秒调用 `/api/history/status` 刷新 HEAD。
+  - Build 期间编辑器只读，并禁用保存、新建、删除、上传输入源文件；后端写接口也需拒绝 Build 中写入。
+  - Build 产物文件名保持现状，但 `.bin.json` 等生成元信息写入 `sourceCommit`、`sourceCommitShort`、`sourceCommitTime`、`buildTime`、`buildId`。
+  - Node 运行加载最新一次成功 Build 的生成产物；Graph 节点另起一行显示 Commit 和 Build time。
+
+### [implement] 输入源文件 Git 历史
+- 新增后端 `GitHistoryService`：
+  - 在 `3rd/CoralinkerHost/data/.git` 初始化独立 Git 仓库。
+  - 只允许操作 `assets/inputs/*.cs`。
+  - 使用 git 命令实现 status/log/diff/show/checkout/revert/commit。
+  - 提交时通过环境变量设置 author/committer，未修改全局 git config。
+- 后端接入：
+  - `Program.cs` 注册 `GitHistoryService`。
+  - `/api/files/write` 写入 input 源文件后自动 commit，返回 `headBefore/headAfter/committed`。
+  - `/api/files/write` 支持 `baseHead` 和 `force`；HEAD 不一致且非 force 时返回 409。
+  - `/api/files/newInput` 和 `/api/files/delete` 也会提交 inputs 变更。
+  - Build 中 `/api/files/write`、new/delete 会返回 409，避免编译期间修改输入。
+  - 新增 `/api/history/status`、`/api/history/log`、`/api/history/diff`、`/api/history/file`、`/api/history/checkout`、`/api/history/revert`。
+- Build/Run 版本信息：
+  - `DiverBuildService` 注入 `GitHistoryService`，Build 前检查 inputs 是否有未提交变更、是否存在 HEAD。
+  - Build 成功后生成 `<logic>.build.json`，包含 `sourceCommit`、`sourceCommitShort`、`sourceCommitTime`、`buildTime`、`buildId`。
+  - `BuildResult` 返回 commit/time 信息并写入 Build 日志。
+  - `RuntimeSessionService.ProgramNodeAsync` 与 `DIVERSession.ProgramNode` 接收 `buildInfo`。
+  - `NodeEntry` / `NodeFullInfo` / `NodeExportData` 保存 `BuildInfo`，Graph 节点可展示。
+  - `/api/start` 返回 `runStartedAt`、当前 source commit 和 commit time。
+- 前端接入：
+  - 新增 `api/history.ts`、`stores/history.ts`，支持 status/log/diff/file/checkout/revert 和 10 秒 HEAD 轮询。
+  - 新增 `components/history/HistoryPanel.vue`，右侧抽屉展示总体/当前文件提交列表、Monaco DiffEditor、临时 checkout、永久 revert。
+  - `stores/files.ts` 的 `EditorTab` 增加 `baseHead`；保存时传 `baseHead`，保存成功后刷新 HEAD。
+  - `HomeView.vue` 增加 History 按钮、远端 HEAD 变化 warning bar、保存冲突覆盖确认。
+  - Build 前检查 dirty tabs，提示 `Save All and Build`；Build 中编辑器只读，Ctrl+S/保存按钮/新建/上传/删除被禁用。
+  - Build 成功后显示 commit/time，Start 成功后显示 run commit/time。
+  - `CoralNodeView.vue` 增加 Build 版本行，显示 `Commit: <short> Build: <time>`。
+- 验证：
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release --no-restore` 成功，只有既有 warning。
+  - `npm run build` 成功，只有 Vite chunk/动态导入 warning。
+  - `ReadLints` 检查新增/修改关键文件无 linter 错误。
+  - Debug 构建仍被旧 `CoralinkerHost (24968)` 锁定 Debug 输出目录；Release 构建已验证代码通过。
+
+### [verify] CoralinkerHost 后端/前端构建
+- 用户要求构建后端和前端，并提供运行命令。
+- 执行后端 Release 构建：
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release --no-restore`
+  - 结果：成功，0 warning / 0 error。
+- 执行前端构建：
+  - `npm run build`（工作目录 `3rd/CoralinkerHost/ClientApp`）
+  - 结果：成功；Vite 仅报告既有 chunk size / 动态导入 warning。
+- 运行建议：
+  - 后端构建产物：`3rd/CoralinkerHost/bin/Release/net8.0/CoralinkerHost.exe`
+  - 前端构建产物：`3rd/CoralinkerHost/wwwroot`
+
+### [fix] History UI 显示与 Diff 展示
+- 用户反馈 `http://localhost:4499/` 上没有明显看到前端修改，且 diff 展示不好看，希望左右两栏方式。
+- 修改：
+  - `HomeView.vue`：将 History 入口移到主 Tab 栏，紧邻 `Graph`，不再依赖当前是否有打开文件；按钮文字直接显示 `History`。
+  - `HistoryPanel.vue`：移除 Monaco DiffEditor 依赖，改为固定左右两栏文本对比。
+    - 左栏 Old，右栏 New。
+    - 删除行红色背景，新增行绿色背景，hunk 行蓝色背景。
+- 验证：
+  - `npm run build` 成功。
+  - 构建产物包含新 UI：`wwwroot/assets/HomeView-BkE_xc_y.js` 中可搜索到 `Input History` / `All Changes`。
+- 说明：
+  - 如果浏览器仍看不到变化，优先 `Ctrl+F5` 强刷；新版前端代码已经进入 `wwwroot`。
+- 二次修正：
+  - 用户明确要求 diff 按 VSCode 方式展示：左右联动、行号、不要显示 `+/-`。
+  - `HistoryPanel.vue` 改回真正的 Monaco DiffEditor，配置 `renderSideBySide=true`、`lineNumbers=on`、`automaticLayout=true`、`enableSplitViewResizing=true`。
+  - `All Changes` 模式点击 commit 后，自动选择该 commit 的第一个变更文件；也可通过文件下拉框切换文件。
+  - 重新执行 `npm run build` 成功。
+  - 确认新产物 `wwwroot/assets/HomeView-Hr8o3NF_.js` 包含 diff editor 相关实现。
+- 三次修正：
+  - History 面板的 `All Changes` / `Current File` 改为更明显的 Scope 胶囊按钮，并显示当前范围提示。
+  - 从 Graph 进入时若当前有打开文件，仍默认 Current File，但用户可以稳定切换到 All Changes。
+  - 增加两个 commit 间对比：选中目标 commit 后，可通过 base commit 下拉选择任意基准 commit；默认仍为 previous commit。
+  - 重新执行 `npm run build` 成功，新产物为 `wwwroot/assets/HomeView-DkvcpmLD.js`。
+- 四次修正：
+  - 用户认为 From/To 不应从右侧下拉选择，应都从左侧 commit 列表选择。
+  - History 左侧每条 commit 增加 `From` / `To` 按钮，列表项用左侧色条标出当前 From/To。
+  - 右侧 toolbar 改为显示 `From <hash> -> To <hash>`，只保留文件选择和操作按钮。
+  - 面板字体统一为 Inter，diff editor 字体显式设置为 `JetBrains Mono/Fira Code/Consolas`，字号 13、行高 20。
+  - 重新执行 `npm run build` 成功，新产物为 `wwwroot/assets/HomeView-CKS3r0y2.js`。
+- 五次修正：
+  - 用户指出正常 Save 会立刻落盘并 commit，因此和磁盘 dirty 比较意义不大；真正需要比较的是前端编辑器内存 dirty 内容。
+  - `HomeView.vue` 向 `HistoryPanel` 传入当前 active tab 的 `currentContent` 和 `currentDirty`。
+  - `HistoryPanel.vue` 增加 `Compare With Unsaved` 按钮，仅当前文件有未保存内容且选中文件匹配时启用。
+  - 该对比不落盘、不提交；左侧为选中 commit 的文件内容，右侧为前端内存中的未保存文本。
+  - 重新执行 `npm run build` 成功，新产物为 `wwwroot/assets/HomeView-BR5RweYO.js`。
+- 六次修正：
+  - 用户询问删除文件是否会 commit，以及新建文件后 10 秒内编辑会误报“后端有新版本”。
+  - 删除 `.cs` 后端已会 commit：`/api/files/delete` 对 `assets/inputs/*.cs` 调用 `CommitInputsIfChanged`。
+  - 修复新建后的前端 HEAD 同步：
+    - `historyStore` 新增 `markHeadKnown(head)`。
+    - `filesStore.createNewInput()` 使用后端 `/api/files/newInput` 返回的 `head` 立即标记为已知 HEAD，并设置新 tab 的 `baseHead`。
+    - `filesStore.deleteFile()` 使用删除 API 返回的 `head` 标记为已知 HEAD，避免删除后误报远端更新。
+  - 重新执行 `npm run build` 成功，新产物为 `wwwroot/assets/HomeView-D_IMbK53.js`。
+
+### [fix] Build 后 Graph 节点 BuildTime 不刷新
+- 用户指出 Logic 名字来自编译产物，一个源文件可以生成多个 Logic；Build 后实际执行版本已更新，但 Graph 节点上的 BuildTime 不更新，必须重新选择 Logic 才刷新。
+- 结论：
+  - Logic 名字来自 `/api/logic/list`，后端扫描 `data/assets/generated/*.bin`，因此一个源文件编译出多个 Logic 时会出现多个 Logic 下拉项。
+  - Build 后 `HomeView.reprogramAllNodes()` 会调用 `programNode()` 重新下发最新生成产物，后端 `DIVERSession` 的 `buildInfo` 已更新。
+  - 但前端只执行了 `runtimeStore.refreshNodes()`，没有刷新 `GraphCanvas` 的本地 node data，所以节点卡片仍显示旧 buildInfo。
+- 修复：
+  - `HomeView.vue` 的 `reprogramAllNodes()` 在重新编程并 `runtimeStore.refreshNodes()` 后，额外调用 `graphCanvasRef.value?.refreshNodes()`。
+  - 该方法会从后端 `DIVERSession.GetNodeInfo()` 重新加载节点数据，包括 `buildInfo`，从而刷新 Graph 节点 BuildTime。
+- 验证：
+  - `npm run build` 成功，新产物为 `wwwroot/assets/HomeView-BuU-0mr-.js`。
+
+### [fix] Git 中文路径 diff 崩溃
+- 用户新建 `小黄瓜屁股大.cs` 后开始编辑，前端提示后端有新版本，点击 View Diff 后后端崩溃：
+  - `GitHistoryService.NormalizeInputPath`
+  - `Path must be under assets/inputs and end with .cs`
+- 判断：
+  - 不是中文文件名本身不能用。
+  - 更可能是 Git 默认 `core.quotepath=true`，`git diff-tree --name-only` 等命令会把非 ASCII 路径转成带引号/反斜杠转义的形式。
+  - 前端把这个被转义的路径传回 `/api/history/diff`，后端校验不再识别为 `assets/inputs/*.cs`。
+- 修复：
+  - `GitHistoryService.RunGitAllowFailure` 中，所有 git 命令统一加参数：
+    - `-c core.quotepath=false`
+  - 这样中文路径以 UTF-8 原样输出，前端拿到的仍是 `assets/inputs/小黄瓜屁股大.cs`。
+- 验证：
+  - `npm run build` 成功。
+  - 后端 Release 构建尝试时被当前运行的 `CoralinkerHost (27416)` 锁住 `bin/Release/net8.0/CoralinkerHost.exe`；需停止当前 Host 后再构建。此前同代码线 Release 已通过，当前修改点很小且为 git 参数注入。
+
+### [plan] PEAM Lite 客户说明书方向修正
+- 用户指出上一版 CORAL-NODE-V2.1 用户手册规划偏离意图：
+  - 客户不能看到电路图、MCU 引脚、DMA、BSP、`scons` 等内部细节。
+  - 客户手册不采用 Markdown，应复用现有 TeX 工程 `CORAL-NODE-V2.1/Coralink_Node_Manual/` 与 `macro.tex`。
+  - 对外产品名为 `PEAM Lite (DIVER Node V0.1)`；`CORAL-NODE-V2.1` 仅为内部硬件标识号。
+  - 核心能力应为 DIVER Runtime、动态加载、多节点联合控制、神经末梢结构、变量表编程；DI/DO/RS485/CAN 仅作为对外接口能力。
+  - CoralinkerHost 面向客户是使用工具，不是开发对象。
+- 已更新计划文件 `coral_node_manual_48a4499c.plan.md`：
+  - 改为基于 TeX 工程重构。
+  - 删除新增 Markdown 手册方案。
+  - 将 `sch.md` 限定为内部校对来源，不在客户正文展开。
+  - 重排大纲为产品命名、DIVER Runtime、适用边界、接口能力、开箱上电、Host 用户操作、多节点、维护排障、客户可见规格。
+
+### [plan] PEAM Lite 正面接口补充
+- 用户提供 PEAM Lite (DIVER Node V0.1) 正面接口照片与口头说明。
+- 已补充到计划文件 `coral_node_manual_48a4499c.plan.md` 的“已收到的硬件接口补充”：
+  - 黑色接口多为 `2EDGKS` 系列，适配 `15EDGKNH`。
+  - 接口顺序：急停、电源、单输入 x4、单输出 x4、多输入 x2、多输出 x1、4 输入 4 输出 x2、485 x3、CAN x2、USB、100M 网口、灯带。
+  - 颜色标识：紫色急停、红色 24V、蓝色 0V、绿色输入、黄色输出；485/CAN 的草绿与橙黄色深浅区分 H/A 与 L/B；灯带白色为信号。
+  - 产品价值表达：每个传感器、执行器、开关、继电器等尽量独占一个接口，同一接口内带电源、地和信号，使线束清爽、接线直观、便于排障。
+
+### [plan] PEAM Lite 前面板接口补充
+- 用户提供 PEAM Lite (DIVER Node V0.1) 前面板照片与口头说明。
+- 已补充到计划文件 `coral_node_manual_48a4499c.plan.md`：
+  - `POWER IN` 为 XT30 24V 电源接口，允许电压 `18-28VDC`。
+  - `UPLINK` 用于连接上一节点；实际使用网线中的 USB 差分对，其他 3 对走急停和触边信号，只能使用标准 `T568B` 直通网线。
+  - `TYPE-C` 用于连接根节点；`TYPE-C` 与 `UPLINK` 的 USB Data 是同一路，不能同时连接。
+  - 拨码开关用于急停设置：`First` 第一个节点、`Last` 最后一个节点、`Short` 短接当前节点急停（当前节点没有接急停开关时使用）。
+  - 红灯为触边灯，触边触发时亮起；绿灯为急停灯，急停未按下且全链路导通时亮起。
+
+### [plan] PEAM Lite 后面板接口补充
+- 用户提供 PEAM Lite (DIVER Node V0.1) 后面板照片与口头说明。
+- 已补充到计划文件 `coral_node_manual_48a4499c.plan.md`：
+  - `DOWNLINK` 用于连接下一节节点。
+  - `POWER OUT` 直接从 `POWER IN` 连出，可用于电源级联。
+  - `Upgrade` 用于进入固件升级模式；具体方法不在接口一览中展开，应放入维护/升级章节。
+  - `Reset` 用于重启节点，并可辅助 `Upgrade` 完成升级操作。
+  - `UPLINK` 与 `DOWNLINK` 是节点级联接口，不是普通以太网口，不要连接交换机、路由器、电脑网口等其他网络设备。
+
+### [draft] 新建 PEAM Lite TeX 手册草稿
+- 用户要求在 `CORAL-NODE-V2.1` 下新建文件夹开始落盘，每个文件先写，后面再补全。
+- 新建目录：`CORAL-NODE-V2.1/PEAM_Lite_DIVER_Node_Manual/`。
+- 新建 TeX 文件：
+  - `main.tex`
+  - `macro.tex`（复用 `../Coralink_Node_Manual/macro`）
+  - `section1_product.tex`
+  - `section2_runtime.tex`
+  - `section3_interfaces.tex`
+  - `section4_power_on.tex`
+  - `section5_host.tex`
+  - `section6_maintenance.tex`
+  - `glossary.tex`
+- 初稿已覆盖：
+  - 对外产品名 `PEAM Lite (DIVER Node V0.1)` 与内部硬件标识 `CORAL-NODE-V2.1` 的区分。
+  - DIVER Runtime、动态加载、多节点、变量表、神经末梢/脊髓式架构。
+  - 正面、前面板、后面板客户可见接口信息。
+  - 开箱上电检查、CoralinkerHost 客户使用流程、维护与常见故障排查。

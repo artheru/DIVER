@@ -460,6 +460,7 @@ async function loadFromStore() {
           nodeName: n.nodeName || 'Node',
           mcuUri: n.mcuUri || '',
           logicName: n.logicName || '',
+          buildInfo: n.buildInfo || null,
           ports: n.portConfigs || [],
           // 运行时状态：优先保留现有状态，否则使用默认值
           runState: existingState?.runState || 'disconnected',

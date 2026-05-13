@@ -51,6 +51,7 @@ internal static class Program
         builder.Services.AddSingleton<ProjectStore>();
         builder.Services.AddSingleton<FileTreeService>();
         builder.Services.AddSingleton<TerminalBroadcaster>();
+        builder.Services.AddSingleton<GitHistoryService>();
         builder.Services.AddSingleton<DiverBuildService>();
         builder.Services.AddSingleton<RuntimeSessionService>();
         builder.Services.AddSingleton<FirmwareUpgradeService>();

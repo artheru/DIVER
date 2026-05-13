@@ -4,10 +4,55 @@
 
 ## 最近一次支持
 
-- 时间：2026-05-14 00:46 UTC+8
-- 事项：验证 `CoralinkerHost` 脱离 VS 运行。
-- 结果：用户确认当前 Host 已开着，并且网页可以访问。
-- 备注：启动过程未重新构建前端；当前使用已有前端构建产物/现有 Host 输出。
+- 时间：2026-05-14 02:42 UTC+8
+- 事项：在 `CORAL-NODE-V2.1` 下新建 PEAM Lite (DIVER Node V0.1) TeX 手册草稿目录并开始落盘。
+- 新建目录：`CORAL-NODE-V2.1/PEAM_Lite_DIVER_Node_Manual/`
+- 已新建文件：
+  - `main.tex`
+  - `macro.tex`（复用 `../Coralink_Node_Manual/macro`）
+  - `section1_product.tex`
+  - `section2_runtime.tex`
+  - `section3_interfaces.tex`
+  - `section4_power_on.tex`
+  - `section5_host.tex`
+  - `section6_maintenance.tex`
+  - `glossary.tex`
+- 当前状态：先写入产品命名、DIVER Runtime、客户可见接口、开箱上电、CoralinkerHost 使用、维护排障的初稿，后续再补全细节与版式。
+
+## 本次工作记录
+
+- 时间：2026-05-14 01:57 UTC+8
+- 事项：实现 CoralinkerHost 前端编辑/构建/运行页面的输入源文件 Git 历史追踪能力。
+- 范围：
+  - 使用 `3rd/CoralinkerHost/data/.git` 独立仓库。
+  - 只跟踪 `data/assets/inputs/*.cs`。
+- 已实现：
+  - 后端 `GitHistoryService`：初始化 `data/.git`、保存自动 commit、status/log/diff/file/checkout/revert API。
+  - `/api/files/write` / 新建 / 删除输入源文件接入自动提交和 Build 中写入锁。
+  - Build 前后端检查 inputs 是否有未提交变更；Build 成功生成 `<logic>.build.json`，包含 `sourceCommit`、`sourceCommitShort`、`sourceCommitTime`、`buildTime`、`buildId`。
+  - Program 节点时读取 `<logic>.build.json`，保存到节点 `buildInfo`；Graph 节点另起一行显示 Commit 和 Build time。
+  - 前端新增 `history` API/store、HistoryPanel 右侧历史抽屉、10 秒 HEAD 轮询、远端变更提示、保存冲突覆盖确认。
+  - Build 期间编辑器只读，保存/新建/上传/删除输入文件被禁用或后端拒绝。
+- 验证：
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release --no-restore` 成功，只有既有 warning。
+  - `npm run build` 成功，只有 Vite chunk/动态导入 warning。
+  - `ReadLints` 检查新增/修改关键文件无 linter 错误。
+  - Debug 构建仍受旧 `CoralinkerHost (24968)` 锁定 `bin/Debug/net8.0/CoralinkerSDK.dll` 影响；Release 已验证代码可编译。
+- 最新验证（2026-05-14 02:07 UTC+8）：
+  - 后端 Release 再次构建成功：`dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release --no-restore`。
+  - 前端再次构建成功：`npm run build`。
+  - 前端产物输出到 `3rd/CoralinkerHost/wwwroot`。
+- UI 修正（2026-05-14 02:17 UTC+8）：
+  - History 入口移到主编辑区域左上 Tab 栏，紧邻 `Graph`，始终可见。
+  - History diff 改为固定左右两栏文本对比：左旧右新，删除红色，新增绿色，不再依赖 Monaco DiffEditor 渲染。
+  - 重新执行 `npm run build` 成功。
+  - 已确认构建产物 `wwwroot/assets/HomeView-BkE_xc_y.js` 包含 `Input History` / `All Changes` 等新 UI 文案。
+- 中文路径修复（2026-05-14 02:29 UTC+8）：
+  - 用户新建 `小黄瓜屁股大.cs` 后点 View Diff，后端抛出 `Path must be under assets/inputs and end with .cs`。
+  - 判断根因是 Git 默认 `core.quotepath=true` 会把中文文件名转义为带引号/反斜杠的路径，前端拿到后再传回 diff API 时不再满足路径校验。
+  - 修复 `GitHistoryService`：所有 git 命令统一加 `-c core.quotepath=false`，让中文路径以 UTF-8 原样返回。
+  - 同时将 History diff 改回 Monaco DiffEditor：左右编辑器、行号、联动滚动、原生红绿高亮，不再显示 `+/-` 文本前缀。
+  - `npm run build` 成功；后端 Release 构建被当前运行的 `CoralinkerHost (27416)` 锁住 exe，代码此前 Release 可编译，需重启 Host 后再验证后端构建。
 
 ## 任务背景
 用户在 CORAL-NODE-V2.0 板基础上做了 PCB 改版，得到 CORAL-NODE-V2.1。需要在

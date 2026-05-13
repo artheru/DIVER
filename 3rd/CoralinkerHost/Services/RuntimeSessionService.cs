@@ -1,4 +1,5 @@
 using CoralinkerSDK;
+using System.Text.Json.Nodes;
 
 namespace CoralinkerHost.Services;
 
@@ -140,10 +141,10 @@ public sealed class RuntimeSessionService
     /// <summary>
     /// 设置节点代码
     /// </summary>
-    public async Task<bool> ProgramNodeAsync(string uuid, byte[] programBytes, string metaJson, string? logicName, CancellationToken ct)
+    public async Task<bool> ProgramNodeAsync(string uuid, byte[] programBytes, string metaJson, string? logicName, JsonObject? buildInfo, CancellationToken ct)
     {
         var info = _session.GetNodeInfo(uuid);
-        var result = _session.ProgramNode(uuid, programBytes, metaJson, logicName);
+        var result = _session.ProgramNode(uuid, programBytes, metaJson, logicName, buildInfo);
         
         if (result)
         {

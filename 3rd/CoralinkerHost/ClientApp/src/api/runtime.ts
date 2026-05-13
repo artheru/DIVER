@@ -26,6 +26,10 @@ export async function start(): Promise<{
   successNodes?: number
   errors?: Array<{ uuid: string; nodeName: string; error: string }>
   error?: string
+  runStartedAt?: string
+  sourceCommit?: string
+  sourceCommitShort?: string
+  sourceCommitTime?: string
 }> {
   return post('/api/start')
 }

@@ -124,36 +124,67 @@ public static class ApiRoutes
             return JsonHelper.Json(new { path, kind = "binary", base64 = Convert.ToBase64String(bytes), sizeBytes = fi.Length });
         });
 
-        app.MapPost("/api/files/write", async (ProjectStore store, FileWriteRequest req, CancellationToken ct) =>
+        app.MapPost("/api/files/write", async (ProjectStore store, GitHistoryService history, DiverBuildService builder, FileWriteRequest req, CancellationToken ct) =>
         {
             if (req == null || string.IsNullOrWhiteSpace(req.Path))
                 return Results.BadRequest(new { error = "Missing path" });
+            if (builder.IsBuilding)
+                return Results.Conflict(new { ok = false, error = "Build is running; editing is temporarily locked." });
 
             var full = store.ResolveDataPath(req.Path);
             var dir = Path.GetDirectoryName(full);
             if (!string.IsNullOrWhiteSpace(dir))
                 Directory.CreateDirectory(dir);
 
+            var isInputSource = req.Path.Replace('\\', '/').StartsWith("assets/inputs/", StringComparison.OrdinalIgnoreCase)
+                && req.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
+            var headBefore = history.GetStatus().Head;
+            if (isInputSource && !req.Force && !string.IsNullOrWhiteSpace(req.BaseHead) &&
+                !string.Equals(req.BaseHead, headBefore, StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.Conflict(new
+                {
+                    ok = false,
+                    conflict = true,
+                    error = "Remote HEAD changed. Refresh or explicitly overwrite.",
+                    currentHead = headBefore,
+                    baseHead = req.BaseHead
+                });
+            }
+
             if (string.Equals(req.Kind, "text", StringComparison.OrdinalIgnoreCase))
             {
                 await File.WriteAllTextAsync(full, req.Text ?? "", Encoding.UTF8, ct);
-                return Results.Ok(new { ok = true });
             }
-            if (string.Equals(req.Kind, "binary", StringComparison.OrdinalIgnoreCase))
+            else if (string.Equals(req.Kind, "binary", StringComparison.OrdinalIgnoreCase))
             {
                 if (string.IsNullOrWhiteSpace(req.Base64)) return Results.BadRequest(new { error = "Missing base64" });
                 var bytes = Convert.FromBase64String(req.Base64);
                 await File.WriteAllBytesAsync(full, bytes, ct);
-                return Results.Ok(new { ok = true });
+            }
+            else
+            {
+                return Results.BadRequest(new { error = "Invalid kind" });
             }
 
-            return Results.BadRequest(new { error = "Invalid kind" });
+            var commit = isInputSource
+                ? history.CommitInputsIfChanged($"save {DateTime.Now:yyyy-MM-dd HH:mm:ss}")
+                : new GitCommitResult(headBefore, headBefore, false);
+            return Results.Ok(new
+            {
+                ok = true,
+                headBefore = commit.HeadBefore,
+                headAfter = commit.HeadAfter,
+                committed = commit.Committed
+            });
         });
 
-        app.MapPost("/api/files/delete", (ProjectStore store, FileDeleteRequest req) =>
+        app.MapPost("/api/files/delete", (ProjectStore store, GitHistoryService history, DiverBuildService builder, FileDeleteRequest req) =>
         {
             if (req == null || string.IsNullOrWhiteSpace(req.Path))
                 return Results.BadRequest(new { error = "Missing path" });
+            if (builder.IsBuilding)
+                return Results.Conflict(new { ok = false, error = "Build is running; editing is temporarily locked." });
 
             if (!req.Path.Replace('\\', '/').StartsWith("assets/", StringComparison.OrdinalIgnoreCase))
                 return Results.BadRequest(new { error = "Delete allowed only under assets/." });
@@ -161,13 +192,20 @@ public static class ApiRoutes
             var full = store.ResolveDataPath(req.Path);
             if (!File.Exists(full)) return Results.NotFound();
             File.Delete(full);
-            return Results.Ok(new { ok = true });
+            var isInputSource = req.Path.Replace('\\', '/').StartsWith("assets/inputs/", StringComparison.OrdinalIgnoreCase)
+                && req.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
+            var commit = isInputSource
+                ? history.CommitInputsIfChanged($"save {DateTime.Now:yyyy-MM-dd HH:mm:ss}")
+                : new GitCommitResult(null, history.GetStatus().Head, false);
+            return Results.Ok(new { ok = true, head = commit.HeadAfter, committed = commit.Committed });
         });
 
-        app.MapPost("/api/files/newInput", async (ProjectStore store, NewInputRequest req, CancellationToken ct) =>
+        app.MapPost("/api/files/newInput", async (ProjectStore store, GitHistoryService history, DiverBuildService builder, NewInputRequest req, CancellationToken ct) =>
         {
             if (req == null || string.IsNullOrWhiteSpace(req.Name))
                 return Results.BadRequest(new { error = "Missing name" });
+            if (builder.IsBuilding)
+                return Results.Conflict(new { ok = false, error = "Build is running; editing is temporarily locked." });
 
             var name = Path.GetFileName(req.Name);
             if (!name.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
@@ -180,15 +218,26 @@ public static class ApiRoutes
             var className = Path.GetFileNameWithoutExtension(name);
             var content = req.Template ?? GenerateDefaultTemplate(className);
             await File.WriteAllTextAsync(full, content, Encoding.UTF8, ct);
-            return Results.Ok(new { ok = true, path = $"assets/inputs/{name}" });
+            var commit = history.CommitInputsIfChanged($"save {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            return Results.Ok(new { ok = true, path = $"assets/inputs/{name}", head = commit.HeadAfter, committed = commit.Committed });
         });
 
         // ============================================
         // 构建 API
         // ============================================
 
-        app.MapPost("/api/build", async (ProjectStore store, DiverBuildService builder, CancellationToken ct) =>
+        app.MapPost("/api/build", async (ProjectStore store, DiverBuildService builder, GitHistoryService history, CancellationToken ct) =>
         {
+            var gitStatus = history.GetStatus();
+            if (gitStatus.IsDirty)
+            {
+                return Results.BadRequest(new { ok = false, error = "Input files have uncommitted changes. Save before building.", dirtyFiles = gitStatus.DirtyFiles });
+            }
+            if (string.IsNullOrWhiteSpace(gitStatus.Head))
+            {
+                return Results.BadRequest(new { ok = false, error = "No saved input version found. Save before building." });
+            }
+
             var state = store.Get();
             if (string.IsNullOrWhiteSpace(state.SelectedAsset))
             {
@@ -216,6 +265,10 @@ public static class ApiRoutes
                     ok = true,
                     buildRoot = result.BuildRoot,
                     buildId = result.BuildId,
+                    sourceCommit = result.SourceCommit,
+                    sourceCommitShort = result.SourceCommitShort,
+                    sourceCommitTime = result.SourceCommitTime,
+                    buildTime = result.BuildTime,
                     artifacts = result.Artifacts.Keys.OrderBy(k => k).ToArray()
                 });
             }
@@ -229,6 +282,10 @@ public static class ApiRoutes
                     logPath = ex.LogPath.Replace(store.HostRoot + Path.DirectorySeparatorChar, ""),
                     tail = ex.Tail
                 });
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { ok = false, error = ex.Message });
             }
         });
 
@@ -340,6 +397,7 @@ public static class ApiRoutes
             // 从 generated 目录读取编译产物
             var binPath = Path.Combine(store.GeneratedDir, $"{payload.LogicName}.bin");
             var metaPath = Path.Combine(store.GeneratedDir, $"{payload.LogicName}.bin.json");
+            var buildInfoPath = Path.Combine(store.GeneratedDir, $"{payload.LogicName}.build.json");
             Console.WriteLine($"[API /program] binPath={binPath}, exists={File.Exists(binPath)}");
             Console.WriteLine($"[API /program] metaPath={metaPath}, exists={File.Exists(metaPath)}");
 
@@ -351,8 +409,13 @@ public static class ApiRoutes
 
             var programBytes = await File.ReadAllBytesAsync(binPath, ct);
             var metaJson = await File.ReadAllTextAsync(metaPath, ct);
+            JsonObject? buildInfo = null;
+            if (File.Exists(buildInfoPath))
+            {
+                buildInfo = JsonNode.Parse(await File.ReadAllTextAsync(buildInfoPath, ct)) as JsonObject;
+            }
 
-            var result = await runtime.ProgramNodeAsync(uuid, programBytes, metaJson, payload.LogicName, ct);
+            var result = await runtime.ProgramNodeAsync(uuid, programBytes, metaJson, payload.LogicName, buildInfo, ct);
             Console.WriteLine($"[API /program] ProgramNodeAsync result={result}, size={programBytes.Length}");
             return JsonHelper.Json(new { ok = result, programSize = programBytes.Length });
         });
@@ -421,17 +484,23 @@ public static class ApiRoutes
         // 会话控制 API
         // ============================================
 
-        app.MapPost("/api/start", async (RuntimeSessionService runtime, CancellationToken ct) =>
+        app.MapPost("/api/start", async (RuntimeSessionService runtime, GitHistoryService history, CancellationToken ct) =>
         {
             try
             {
+                var runStartedAt = DateTimeOffset.Now;
+                var head = history.GetHead();
                 var result = await runtime.StartAsync(ct);
                 return JsonHelper.Json(new
                 {
                     ok = result.Success,
                     totalNodes = result.TotalNodes,
                     successNodes = result.SuccessNodes,
-                    errors = result.Errors.Select(e => new { uuid = e.UUID, nodeName = e.NodeName, error = e.Error })
+                    errors = result.Errors.Select(e => new { uuid = e.UUID, nodeName = e.NodeName, error = e.Error }),
+                    runStartedAt,
+                    sourceCommit = head?.Hash,
+                    sourceCommitShort = head?.ShortHash,
+                    sourceCommitTime = head?.CommitTime
                 });
             }
             catch (Exception ex)
@@ -456,6 +525,50 @@ public static class ApiRoutes
                 isRunning = session.IsRunning,
                 nodeCount = session.GetNodeStates().Count
             });
+        });
+
+        // ============================================
+        // Git History API
+        // ============================================
+
+        app.MapGet("/api/history/status", (GitHistoryService history) =>
+        {
+            var status = history.GetStatus();
+            return JsonHelper.Json(new { ok = true, status });
+        });
+
+        app.MapGet("/api/history/log", (GitHistoryService history, string? path, int? maxCount) =>
+        {
+            var result = history.GetLog(path, maxCount ?? 100);
+            return JsonHelper.Json(new { ok = true, commits = result.Commits });
+        });
+
+        app.MapGet("/api/history/diff", (GitHistoryService history, string? from, string? to, string? path) =>
+        {
+            var result = history.GetDiff(from, to, path);
+            return JsonHelper.Json(new { ok = true, diff = result });
+        });
+
+        app.MapGet("/api/history/file", (GitHistoryService history, string commit, string path) =>
+        {
+            var result = history.GetFile(commit, path);
+            return JsonHelper.Json(new { ok = true, file = result });
+        });
+
+        app.MapPost("/api/history/checkout", (GitHistoryService history, HistoryCheckoutRequest req) =>
+        {
+            if (req == null || string.IsNullOrWhiteSpace(req.Commit))
+                return Results.BadRequest(new { ok = false, error = "Missing commit" });
+            var result = history.Checkout(req.Commit, req.Path);
+            return JsonHelper.Json(new { ok = true, result });
+        });
+
+        app.MapPost("/api/history/revert", (GitHistoryService history, HistoryCheckoutRequest req) =>
+        {
+            if (req == null || string.IsNullOrWhiteSpace(req.Commit))
+                return Results.BadRequest(new { ok = false, error = "Missing commit" });
+            var result = history.RevertAsCurrent(req.Commit, req.Path);
+            return JsonHelper.Json(new { ok = true, result });
         });
 
         // ============================================
@@ -1038,9 +1151,10 @@ public static class ApiRoutes
 
 // Request DTOs
 public sealed record CommandRequest(string Command);
-public sealed record FileWriteRequest(string Path, string Kind, string? Text, string? Base64);
+public sealed record FileWriteRequest(string Path, string Kind, string? Text, string? Base64, string? BaseHead = null, bool Force = false);
 public sealed record FileDeleteRequest(string Path);
 public sealed record NewInputRequest(string Name, string? Template);
+public sealed record HistoryCheckoutRequest(string Commit, string? Path);
 public sealed record NodeProbeRequest(string McuUri);
 public sealed record NodeConfigureRequest(string? NodeName, PortConfigItem[]? PortConfigs, JsonObject? ExtraInfo);
 public sealed record NodeProgramRequest(string LogicName);

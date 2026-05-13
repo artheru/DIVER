@@ -40,7 +40,7 @@
         class="hidden"
         @change="handleFileInput"
       />
-      <button class="upload-btn" @click="fileInputRef?.click()">
+      <button class="upload-btn" :disabled="disabled" @click="fileInputRef?.click()">
         📤 Upload Asset
       </button>
     </div>
@@ -53,6 +53,10 @@ import { NSpin } from 'naive-ui'
 import { storeToRefs } from 'pinia'
 import { useFilesStore, useUiStore } from '@/stores'
 import TreeNode from './TreeNode.vue'
+
+const props = defineProps<{
+  disabled?: boolean
+}>()
 
 // ============================================
 // Emits
@@ -91,6 +95,10 @@ function handleSelect(path: string) {
  * 处理文件删除
  */
 async function handleDelete(path: string) {
+  if (props.disabled) {
+    uiStore.error('Build Running', 'Cannot delete files while building')
+    return
+  }
   try {
     await filesStore.deleteFile(path)
     uiStore.success('Deleted', path)
@@ -104,6 +112,7 @@ async function handleDelete(path: string) {
  */
 async function handleDrop(event: DragEvent) {
   event.preventDefault()
+  if (props.disabled) return
   
   const files = event.dataTransfer?.files
   if (!files || files.length === 0) return
@@ -122,6 +131,7 @@ async function handleDrop(event: DragEvent) {
  * 处理文件输入
  */
 async function handleFileInput(event: Event) {
+  if (props.disabled) return
   const input = event.target as HTMLInputElement
   const files = input.files
   

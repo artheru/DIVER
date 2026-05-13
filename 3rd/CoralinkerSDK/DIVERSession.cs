@@ -59,6 +59,7 @@ public record NodeFullInfo(
     int ProgramSize,
     string? LogicName, // 程序名称，用于前端匹配
     CartFieldSnapshot[] CartFields,
+    JsonObject? BuildInfo,
     JsonObject? ExtraInfo
 );
 
@@ -104,6 +105,7 @@ public record NodeExportData
     public string? ProgramBase64 { get; init; }
     public string? MetaJson { get; init; }
     public string? LogicName { get; init; }
+    public JsonObject? BuildInfo { get; init; }
     public JsonObject? ExtraInfo { get; init; }
 }
 
@@ -169,6 +171,7 @@ internal class NodeEntry : IDisposable
     public byte[] ProgramBytes { get; set; } = Array.Empty<byte>();
     public string? MetaJson { get; set; }
     public string? LogicName { get; set; }
+    public JsonObject? BuildInfo { get; set; }
     public CartFieldInfo[] CartFields { get; set; } = Array.Empty<CartFieldInfo>();
 
     // === 运行时状态（Start后才有）===
@@ -748,7 +751,8 @@ public sealed class DIVERSession : IDisposable
         string uuid,
         byte[] programBytes,
         string metaJson,
-        string? logicName = null
+        string? logicName = null,
+        JsonObject? buildInfo = null
     )
     {
         EnsureIdle("ProgramNode");
@@ -761,6 +765,7 @@ public sealed class DIVERSession : IDisposable
         entry.ProgramBytes = programBytes;
         entry.MetaJson = metaJson;
         entry.LogicName = logicName;
+        entry.BuildInfo = buildInfo;
 
         // 解析 MetaJson
         entry.CartFields = HostRuntime.ParseMetaJson(metaJson);
@@ -841,6 +846,7 @@ public sealed class DIVERSession : IDisposable
                         : null,
                 MetaJson = entry.MetaJson,
                 LogicName = entry.LogicName,
+                BuildInfo = entry.BuildInfo,
                 ExtraInfo = entry.ExtraInfo,
             };
         }
@@ -883,6 +889,7 @@ public sealed class DIVERSession : IDisposable
                     : Array.Empty<byte>(),
                 MetaJson = d.MetaJson,
                 LogicName = d.LogicName,
+                BuildInfo = d.BuildInfo,
                 ExtraInfo = d.ExtraInfo,
             };
 
@@ -2032,6 +2039,7 @@ public sealed class DIVERSession : IDisposable
                     f.IsMutual
                 ))
                 .ToArray(),
+            entry.BuildInfo,
             entry.ExtraInfo
         );
     }

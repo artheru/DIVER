@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace CoralinkerHost.Services;
 
@@ -9,16 +11,36 @@ public sealed class DiverBuildService
 {
     private readonly TerminalBroadcaster _terminal;
     private readonly ProjectStore _store;
+    private readonly GitHistoryService _history;
+    private int _isBuilding;
 
-    public DiverBuildService(TerminalBroadcaster terminal, ProjectStore store)
+    public DiverBuildService(TerminalBroadcaster terminal, ProjectStore store, GitHistoryService history)
     {
         _terminal = terminal;
         _store = store;
+        _history = history;
     }
+
+    public bool IsBuilding => Volatile.Read(ref _isBuilding) != 0;
 
     public async Task<BuildResult> BuildFromLogicCsAsync(string logicFileName, string logicCs, CancellationToken ct)
     {
+        if (Interlocked.Exchange(ref _isBuilding, 1) == 1)
+        {
+            throw new InvalidOperationException("Build is already running.");
+        }
+
+        try
+        {
         _store.EnsureDataLayout();
+        if (_history.HasDirtyInputs())
+        {
+            throw new InvalidOperationException("Input files have uncommitted changes. Save all inputs before building.");
+        }
+
+        var sourceHead = _history.GetHead()
+            ?? throw new InvalidOperationException("No saved input commit found. Save an input file before building.");
+        var buildTime = DateTimeOffset.Now;
         
         // 清空 Build 日志缓冲区
         _terminal.ClearBuildHistory();
@@ -26,6 +48,8 @@ public sealed class DiverBuildService
         await _terminal.BuildLineAsync($"========== Starting Build Process ==========", ct);
         await _terminal.BuildLineAsync($"Target file: {logicFileName}", ct);
         await _terminal.BuildLineAsync($"Source length: {logicCs.Length} characters", ct);
+        await _terminal.BuildLineAsync($"Source commit: {sourceHead.ShortHash} ({sourceHead.CommitTime:yyyy-MM-dd HH:mm:ss zzz})", ct);
+        await _terminal.BuildLineAsync($"Build time: {buildTime:yyyy-MM-dd HH:mm:ss zzz}", ct);
 
         // Use single fixed build folder - clear it before each build
         var buildRoot = Path.Combine(_store.BuildsDir, "current");
@@ -264,7 +288,14 @@ public sealed class DiverBuildService
 
         // Extract artifacts directly into generated folder (no subfolders)
         await _terminal.BuildLineAsync($"Extracting DIVER artifacts from assembly...", ct);
-        var artifacts = ExtractArtifacts(dllPath, _store.GeneratedDir);
+        var versionInfo = new BuildVersionInfo(
+            sourceHead.Hash,
+            sourceHead.ShortHash,
+            sourceHead.CommitTime,
+            buildTime,
+            buildId
+        );
+        var artifacts = ExtractArtifacts(dllPath, _store.GeneratedDir, versionInfo);
         
         foreach (var kv in artifacts)
         {
@@ -279,7 +310,19 @@ public sealed class DiverBuildService
         await _terminal.BuildLineAsync($"========== Build Complete ==========", ct);
         await _terminal.BuildLineAsync($"Successfully extracted {artifacts.Count} logic artifact set(s)", ct);
 
-        return new BuildResult(buildRoot, projDir, dllPath, artifacts) { BuildId = buildId };
+        return new BuildResult(buildRoot, projDir, dllPath, artifacts)
+        {
+            BuildId = buildId,
+            SourceCommit = sourceHead.Hash,
+            SourceCommitShort = sourceHead.ShortHash,
+            SourceCommitTime = sourceHead.CommitTime,
+            BuildTime = buildTime
+        };
+        }
+        finally
+        {
+            Volatile.Write(ref _isBuilding, 0);
+        }
     }
 
     /// <summary>
@@ -302,7 +345,10 @@ public sealed class DiverBuildService
         }
     }
 
-    private static IReadOnlyDictionary<string, BuildArtifacts> ExtractArtifacts(string builtDllPath, string outDir)
+    private static IReadOnlyDictionary<string, BuildArtifacts> ExtractArtifacts(
+        string builtDllPath,
+        string outDir,
+        BuildVersionInfo versionInfo)
     {
         var dict = new Dictionary<string, BuildArtifacts>(StringComparer.OrdinalIgnoreCase);
 
@@ -376,11 +422,22 @@ public sealed class DiverBuildService
             var map = Path.Combine(outDir, ln + ".diver.map.json");
             if (File.Exists(bin) && File.Exists(meta) && File.Exists(diver) && File.Exists(map))
             {
-                dict[ln] = new BuildArtifacts(ln, bin, meta, diver, map);
+                var buildInfoPath = Path.Combine(outDir, ln + ".build.json");
+                WriteBuildMetadata(buildInfoPath, versionInfo);
+                dict[ln] = new BuildArtifacts(ln, bin, meta, diver, map, buildInfoPath);
             }
         }
 
         return dict;
+    }
+
+    private static void WriteBuildMetadata(string jsonPath, BuildVersionInfo versionInfo)
+    {
+        var json = JsonSerializer.Serialize(
+            versionInfo,
+            new JsonSerializerOptions { WriteIndented = false, PropertyNamingPolicy = JsonNamingPolicy.CamelCase }
+        );
+        File.WriteAllText(jsonPath, json, Encoding.UTF8);
     }
 }
 
@@ -436,13 +493,25 @@ public sealed record BuildResult(
     IReadOnlyDictionary<string, BuildArtifacts> Artifacts)
 {
     public string? BuildId { get; init; }
+    public string? SourceCommit { get; init; }
+    public string? SourceCommitShort { get; init; }
+    public DateTimeOffset? SourceCommitTime { get; init; }
+    public DateTimeOffset? BuildTime { get; init; }
 }
+
+public sealed record BuildVersionInfo(
+    string SourceCommit,
+    string SourceCommitShort,
+    DateTimeOffset? SourceCommitTime,
+    DateTimeOffset BuildTime,
+    string BuildId);
 
 public sealed record BuildArtifacts(
     string LogicName,
     string BinPath,
     string MetaJsonPath,
     string DiverPath,
-    string DiverMapPath);
+    string DiverMapPath,
+    string BuildInfoPath);
 
 

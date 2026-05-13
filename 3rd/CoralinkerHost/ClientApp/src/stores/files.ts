@@ -12,6 +12,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as filesApi from '@/api/files'
 import type { FileNode } from '@/types'
+import { useHistoryStore } from './history'
 
 /**
  * 编辑器 Tab 信息
@@ -31,6 +32,8 @@ export interface EditorTab {
   isBinary: boolean
   /** 是否有未保存的更改 */
   dirty: boolean
+  /** 打开/保存时对应的后端 Git HEAD */
+  baseHead?: string | null
   /** 文件大小 */
   size: number
 }
@@ -67,6 +70,7 @@ export const useFilesStore = defineStore('files', () => {
   
   /** 是否有打开的 Tab */
   const hasTabs = computed(() => tabs.value.length > 0)
+  const hasDirtyTabs = computed(() => tabs.value.some(t => t.dirty && !isReadonlyPath(t.path)))
   
   // ============================================
   // 操作方法
@@ -101,6 +105,10 @@ export const useFilesStore = defineStore('files', () => {
     }
     
     // 读取文件内容
+    const historyStore = useHistoryStore()
+    if (!historyStore.status) {
+      await historyStore.refreshStatus(true).catch(() => undefined)
+    }
     const response = await filesApi.readFile(path)
     
     // 创建新 Tab
@@ -112,6 +120,7 @@ export const useFilesStore = defineStore('files', () => {
       base64: response.base64,
       isBinary: response.kind === 'binary',
       dirty: false,
+      baseHead: historyStore.head,
       size: response.sizeBytes
     }
     
@@ -176,18 +185,23 @@ export const useFilesStore = defineStore('files', () => {
     if (!tab || !tab.dirty) return
     
     if (tab.isBinary) {
-      await filesApi.writeFile({
+      const result = await filesApi.writeFile({
         path: tab.path,
         kind: 'binary',
-        base64: tab.base64
+        base64: tab.base64,
+        baseHead: tab.baseHead
       })
+      tab.baseHead = result.headAfter ?? result.headBefore ?? tab.baseHead
     } else {
-      await filesApi.writeFile({
+      const result = await filesApi.writeFile({
         path: tab.path,
         kind: 'text',
-        text: tab.content
+        text: tab.content,
+        baseHead: tab.baseHead
       })
+      tab.baseHead = result.headAfter ?? result.headBefore ?? tab.baseHead
     }
+    await useHistoryStore().refreshStatus(true).catch(() => undefined)
     
     tab.dirty = false
     console.log(`[Files] Saved: ${tab.path}`)
@@ -199,13 +213,20 @@ export const useFilesStore = defineStore('files', () => {
    */
   async function createNewInput(name: string) {
     const result = await filesApi.createInputFile(name)
+    const historyStore = useHistoryStore()
+    if (result.head) {
+      historyStore.markHeadKnown(result.head)
+    } else {
+      await historyStore.refreshStatus(true).catch(() => undefined)
+    }
     
     // 刷新文件树
     await loadFileTree()
     
     // 打开新文件
     if (result.path) {
-      await openFile(result.path)
+      const tab = await openFile(result.path)
+      tab.baseHead = result.head ?? historyStore.head
     }
     
     return result
@@ -216,7 +237,13 @@ export const useFilesStore = defineStore('files', () => {
    * @param path 文件路径
    */
   async function deleteFile(path: string) {
-    await filesApi.deleteFile(path)
+    const result = await filesApi.deleteFile(path)
+    const historyStore = useHistoryStore()
+    if (result.head) {
+      historyStore.markHeadKnown(result.head)
+    } else {
+      await historyStore.refreshStatus(true).catch(() => undefined)
+    }
     
     // 关闭相关 Tab
     const tab = tabs.value.find(t => t.path === path)
@@ -258,7 +285,7 @@ export const useFilesStore = defineStore('files', () => {
    * 刷新所有打开的 Tab 的内容
    * 用于 Build 或 Upload 后更新文件内容
    */
-  async function refreshOpenTabs() {
+  async function refreshOpenTabs(options?: { force?: boolean }) {
     console.log(`[Files] Refreshing ${tabs.value.length} open tab(s)...`)
     
     for (const tab of tabs.value) {
@@ -267,15 +294,17 @@ export const useFilesStore = defineStore('files', () => {
         
         if (tab.isBinary) {
           // 二进制文件只在没有修改时刷新
-          if (!tab.dirty) {
+          if (!tab.dirty || options?.force) {
             tab.base64 = response.base64
             tab.size = response.sizeBytes
+            tab.dirty = false
           }
         } else {
           // 文本文件：如果没有修改，更新内容
-          if (!tab.dirty) {
+          if (!tab.dirty || options?.force) {
             tab.content = response.text
             tab.size = response.sizeBytes
+            tab.dirty = false
           } else {
             // 如果有未保存的修改，保留 dirty 状态但更新 size
             tab.size = response.sizeBytes
@@ -293,7 +322,7 @@ export const useFilesStore = defineStore('files', () => {
    * 保存指定 Tab
    * @param tabId Tab ID
    */
-  async function saveTab(tabId: string) {
+  async function saveTab(tabId: string, options?: { force?: boolean }) {
     const tab = tabs.value.find(t => t.id === tabId)
     if (!tab || !tab.dirty) return false
     
@@ -304,18 +333,25 @@ export const useFilesStore = defineStore('files', () => {
     }
     
     if (tab.isBinary) {
-      await filesApi.writeFile({
+      const result = await filesApi.writeFile({
         path: tab.path,
         kind: 'binary',
-        base64: tab.base64
+        base64: tab.base64,
+        baseHead: tab.baseHead,
+        force: options?.force
       })
+      tab.baseHead = result.headAfter ?? result.headBefore ?? tab.baseHead
     } else {
-      await filesApi.writeFile({
+      const result = await filesApi.writeFile({
         path: tab.path,
         kind: 'text',
-        text: tab.content
+        text: tab.content,
+        baseHead: tab.baseHead,
+        force: options?.force
       })
+      tab.baseHead = result.headAfter ?? result.headBefore ?? tab.baseHead
     }
+    await useHistoryStore().refreshStatus(true).catch(() => undefined)
     
     tab.dirty = false
     console.log(`[Files] Saved: ${tab.path}`)
@@ -336,6 +372,7 @@ export const useFilesStore = defineStore('files', () => {
     activeTabId,
     loading,
     buildVersion,
+    hasDirtyTabs,
     
     // 计算属性
     activeTab,

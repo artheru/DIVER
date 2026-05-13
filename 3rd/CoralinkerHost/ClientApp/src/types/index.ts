@@ -148,6 +148,7 @@ export interface NodeFullInfo {
   hasProgram: boolean
   programSize: number
   logicName?: string
+  buildInfo?: BuildVersionInfo
   cartFields: CartFieldInfo[]
   extraInfo?: Record<string, unknown>
 }
@@ -172,6 +173,7 @@ export interface NodeExportData {
   programBase64?: string
   metaJson?: string
   logicName?: string
+  buildInfo?: BuildVersionInfo
   extraInfo?: Record<string, unknown>
 }
 
@@ -418,6 +420,19 @@ export interface FileWriteRequest {
   kind: 'text' | 'binary'
   text?: string
   base64?: string
+  baseHead?: string | null
+  force?: boolean
+}
+
+export interface FileWriteResponse {
+  ok: boolean
+  headBefore?: string | null
+  headAfter?: string | null
+  committed?: boolean
+  conflict?: boolean
+  error?: string
+  currentHead?: string | null
+  baseHead?: string | null
 }
 
 // ============================================
@@ -431,10 +446,54 @@ export interface BuildResult {
   ok: boolean
   buildRoot?: string
   buildId?: string
+  sourceCommit?: string
+  sourceCommitShort?: string
+  sourceCommitTime?: string
+  buildTime?: string
   artifacts?: string[]
   error?: string
   exitCode?: number
   tail?: string
+}
+
+export interface BuildVersionInfo {
+  sourceCommit: string
+  sourceCommitShort: string
+  sourceCommitTime?: string
+  buildTime: string
+  buildId: string
+}
+
+export interface GitStatusSnapshot {
+  head?: string | null
+  shortHead?: string | null
+  commitTime?: string | null
+  isDirty: boolean
+  dirtyFiles: string[]
+}
+
+export interface GitCommitInfo {
+  hash: string
+  shortHash: string
+  commitTime?: string | null
+  author: string
+  subject: string
+  files: string[]
+}
+
+export interface GitDiffResult {
+  from: string
+  to: string
+  path?: string | null
+  unifiedDiff: string
+  oldText?: string | null
+  newText?: string | null
+}
+
+export interface GitFileAtCommitResult {
+  commit: string
+  path: string
+  text: string
 }
 
 /**

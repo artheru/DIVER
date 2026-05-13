@@ -32,6 +32,13 @@
                 >
                   Graph
                 </button>
+                <button
+                  class="tab history-entry"
+                  @click="showHistoryPanel = true"
+                  title="View input history"
+                >
+                  History
+                </button>
                 <div
                   v-for="tab in tabs" 
                   :key="tab.id"
@@ -50,6 +57,7 @@
                   <button 
                     v-if="tab.dirty && !isReadonlyFile(tab.path)" 
                     class="tab-save" 
+                    :disabled="isBuilding"
                     @click.stop="handleSaveTab(tab.id)"
                     title="Save (Ctrl+S)"
                   >💾</button>
@@ -58,7 +66,7 @@
                 
                 <!-- 工具按钮 -->
                 <div class="tab-spacer"></div>
-                
+
                 <!-- 运行控制组（始终显示） -->
                 <div class="runtime-controls">
                   <!-- 状态指示 -->
@@ -147,6 +155,13 @@
                   </button>
                 </div>
               </div>
+
+              <div v-if="remoteChanged" class="head-warning">
+                <span>后端已有新的保存版本。</span>
+                <button @click="showHistoryPanel = true">View Diff</button>
+                <button @click="reloadLatest">Reload Latest</button>
+                <button @click="historyStore.markCurrentHeadKnown()">Dismiss</button>
+              </div>
               
               <!-- 图画布 -->
               <div v-show="viewMode === 'graph'" class="graph-container">
@@ -160,7 +175,7 @@
                   v-if="activeTab && !activeTab.isBinary"
                   :content="activeTab.content || ''"
                   :language="getLanguage(activeTab.path)"
-                  :readonly="isReadonlyFile(activeTab.path)"
+                  :readonly="isReadonlyFile(activeTab.path) || isBuilding"
                   @update:content="updateContent"
                 />
                 <HexEditor 
@@ -191,9 +206,9 @@
             <div class="panel assets-panel">
               <div class="panel-header">
                 <span>Assets</span>
-                <n-button size="tiny" @click="showNewFileDialog = true">+ New</n-button>
+                <n-button size="tiny" :disabled="isBuilding" @click="showNewFileDialog = true">+ New</n-button>
               </div>
-              <AssetTree @select="handleFileSelect" />
+              <AssetTree :disabled="isBuilding" @select="handleFileSelect" />
             </div>
           </Pane>
           
@@ -236,6 +251,15 @@
     
     <!-- 遥控器浮动窗口 -->
     <ControlWindow v-model:visible="showControlWindow" />
+
+    <HistoryPanel
+      :show="showHistoryPanel"
+      :current-path="activeTab?.path"
+      :current-content="activeTab && !activeTab.isBinary ? activeTab.content || '' : null"
+      :current-dirty="!!activeTab?.dirty"
+      @close="showHistoryPanel = false"
+      @refresh="refreshAfterHistoryChange"
+    />
   </div>
 </template>
 
@@ -245,7 +269,7 @@ import { NButton, NModal, NCard, NInput } from 'naive-ui'
 import { storeToRefs } from 'pinia'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
-import { useFilesStore, useUiStore, useProjectStore, useLogStore, useRuntimeStore } from '@/stores'
+import { useFilesStore, useUiStore, useProjectStore, useLogStore, useRuntimeStore, useHistoryStore } from '@/stores'
 import { useAutoSave } from '@/composables'
 import * as projectApi from '@/api/project'
 import { programNode } from '@/api/device'
@@ -259,6 +283,7 @@ import TerminalPanel from '@/components/logs/TerminalPanel.vue'
 import VariablePanel from '@/components/variables/VariablePanel.vue'
 import AddNodeDialog from '@/components/graph/AddNodeDialog.vue'
 import ControlWindow from '@/components/control/ControlWindow.vue'
+import HistoryPanel from '@/components/history/HistoryPanel.vue'
 import type { AddNodeResult } from '@/components/graph/AddNodeDialog.vue'
 
 // ============================================
@@ -270,10 +295,12 @@ const uiStore = useUiStore()
 const projectStore = useProjectStore()
 const logStore = useLogStore()
 const runtimeStore = useRuntimeStore()
+const historyStore = useHistoryStore()
 
 const { tabs, activeTabId, activeTab, fileTree } = storeToRefs(filesStore)
 const { viewMode, sourceJumpRequest } = storeToRefs(uiStore)
 const { canEdit, isRunning, isBackendAvailable, sessionType, canStart, canStop } = storeToRefs(runtimeStore)
+const { remoteChanged } = storeToRefs(historyStore)
 
 // 自动保存
 useAutoSave()
@@ -289,6 +316,7 @@ const codeEditorRef = ref<{ goToLine: (line: number) => void, getValue: () => st
 const importFileRef = ref<HTMLInputElement | null>(null)
 const showAddNodeDialog = ref(false)
 const showControlWindow = ref(false)
+const showHistoryPanel = ref(false)
 
 // 运行控制状态
 const isBuilding = ref(false)
@@ -509,13 +537,27 @@ function isReadonlyFile(path: string): boolean {
  * 保存指定 Tab
  */
 async function handleSaveTab(tabId: string) {
+  if (isBuilding.value) {
+    uiStore.error('Build Running', 'Cannot save while building')
+    return
+  }
   try {
     const success = await filesStore.saveTab(tabId)
     if (success) {
       uiStore.success('Saved', 'File saved successfully')
     }
   } catch (error) {
-    uiStore.error('Save Failed', String(error))
+    const msg = String(error)
+    if (msg.includes('Remote HEAD changed') && confirm('后端已有新的保存版本。是否覆盖保存当前内容？')) {
+      try {
+        const success = await filesStore.saveTab(tabId, { force: true })
+        if (success) uiStore.success('Saved', 'File saved with overwrite')
+      } catch (overwriteError) {
+        uiStore.error('Save Failed', String(overwriteError))
+      }
+      return
+    }
+    uiStore.error('Save Failed', msg)
   }
 }
 
@@ -523,6 +565,7 @@ async function handleSaveTab(tabId: string) {
  * 保存当前活动 Tab (用于 Ctrl+S)
  */
 async function saveActiveTab() {
+  if (isBuilding.value) return
   if (!activeTabId.value) return
   
   const tab = activeTab.value
@@ -551,16 +594,30 @@ function handleKeydown(event: KeyboardEvent) {
 // 注册/注销键盘事件监听
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
+  historyStore.refreshStatus(true).catch(() => undefined)
+  historyStore.startPolling()
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
+  historyStore.stopPolling()
 })
+
+async function refreshAfterHistoryChange() {
+  await filesStore.loadFileTree()
+  await filesStore.refreshOpenTabs({ force: true })
+  historyStore.markCurrentHeadKnown()
+}
+
+async function reloadLatest() {
+  await refreshAfterHistoryChange()
+}
 
 /**
  * 更新编辑器内容
  */
 function updateContent(content: string) {
+  if (isBuilding.value) return
   if (activeTabId.value) {
     filesStore.updateTabContent(activeTabId.value, content)
   }
@@ -588,6 +645,7 @@ function getLanguage(path: string): string {
  * 创建新文件
  */
 async function createNewFile() {
+  if (isBuilding.value) return
   if (!newFileName.value.trim()) return
   
   try {
@@ -743,6 +801,21 @@ async function handleAddNodeConfirm(data: AddNodeResult) {
  */
 async function handleBuild() {
   if (isBuilding.value) return
+
+  if (filesStore.hasDirtyTabs) {
+    if (!confirm('There are unsaved input files. Save all and build?')) {
+      return
+    }
+    for (const tab of tabs.value) {
+      if (tab.dirty && !isReadonlyFile(tab.path)) {
+        const saved = await filesStore.saveTab(tab.id)
+        if (!saved) {
+          uiStore.error('Build Cancelled', `Could not save ${tab.name}`)
+          return
+        }
+      }
+    }
+  }
   
   isBuilding.value = true
   
@@ -754,9 +827,15 @@ async function handleBuild() {
     const result = await projectStore.build()
     if (result.ok) {
       uiStore.success('Build Success', `Build ID: ${result.buildId}`)
+      if (result.sourceCommitShort || result.buildTime) {
+        logStore.logBuild(`[Version] Commit: ${result.sourceCommitShort || result.sourceCommit}`)
+        logStore.logBuild(`[Version] Commit time: ${result.sourceCommitTime || 'unknown'}`)
+        logStore.logBuild(`[Version] Build time: ${result.buildTime || 'unknown'}`)
+      }
       await filesStore.loadFileTree()
       filesStore.notifyBuildComplete()
       await filesStore.refreshOpenTabs()
+      await historyStore.refreshStatus(true)
       // 先重新编程所有节点，然后再刷新变量和字段元信息
       // 否则会获取到旧的字段定义
       await reprogramAllNodes()
@@ -802,6 +881,7 @@ async function reprogramAllNodes() {
   }
   
   await runtimeStore.refreshNodes()
+  await graphCanvasRef.value?.refreshNodes()
   await projectStore.saveProject({ silent: true })
 }
 
@@ -819,6 +899,11 @@ async function handleStart() {
     const result = await runtimeStore.start()
     if (result.ok) {
       logStore.logUI('\x1b[32mExecution started\x1b[0m')
+      if (result.sourceCommitShort || result.runStartedAt) {
+        logStore.logUI(`[Run] Commit: ${result.sourceCommitShort || result.sourceCommit || 'unknown'}`)
+        logStore.logUI(`[Run] Commit time: ${result.sourceCommitTime || 'unknown'}`)
+        logStore.logUI(`[Run] Started at: ${result.runStartedAt || 'unknown'}`)
+      }
       uiStore.success('Started', 'Execution started')
     } else {
       logStore.logUI(`[Start] \x1b[31mERROR:\x1b[0m ${(result as { error?: string }).error || 'Start failed'}`)
@@ -859,6 +944,26 @@ async function handleStop() {
 .home-layout {
   height: 100vh;
   background: transparent;
+}
+
+.head-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(187, 128, 9, 0.18);
+  border-bottom: 1px solid rgba(187, 128, 9, 0.45);
+  color: #f0d98c;
+  font-size: 12px;
+}
+
+.head-warning button {
+  background: transparent;
+  border: 1px solid rgba(240, 217, 140, 0.4);
+  color: #f0d98c;
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
 }
 
 /* Splitpanes 样式覆盖 */
@@ -1100,6 +1205,19 @@ async function handleStop() {
 
 .tab.active {
   color: var(--text-color);
+}
+
+.tab.history-entry {
+  color: #79c0ff;
+  border-left: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+.tab.history-entry:hover {
+  background: rgba(79, 140, 255, 0.12);
+  color: #a5d6ff;
 }
 
 .tab.readonly {

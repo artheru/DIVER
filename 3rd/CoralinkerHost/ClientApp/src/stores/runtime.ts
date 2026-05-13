@@ -211,7 +211,14 @@ export const useRuntimeStore = defineStore('runtime', () => {
   /**
    * 启动会话
    */
-  async function start(): Promise<{ ok: boolean; error?: string }> {
+  async function start(): Promise<{
+    ok: boolean
+    error?: string
+    runStartedAt?: string
+    sourceCommit?: string
+    sourceCommitShort?: string
+    sourceCommitTime?: string
+  }> {
     if (!canStart.value) {
       return { ok: false, error: 'Cannot start in current state' }
     }
@@ -242,7 +249,13 @@ export const useRuntimeStore = defineStore('runtime', () => {
         // startStatePolling() - 已移除，改用 SignalR 推送
         
         console.log(`[Runtime] Started: ${result.successNodes}/${result.totalNodes} nodes`)
-        return { ok: true }
+        return {
+          ok: true,
+          runStartedAt: result.runStartedAt,
+          sourceCommit: result.sourceCommit,
+          sourceCommitShort: result.sourceCommitShort,
+          sourceCommitTime: result.sourceCommitTime
+        }
       } else {
         // 启动失败，同步后端状态确保一致
         await syncSessionState()

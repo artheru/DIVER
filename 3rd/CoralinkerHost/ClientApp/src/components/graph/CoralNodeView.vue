@@ -105,6 +105,11 @@
           />
           <span v-else class="config-value">{{ data.logicName || 'Not Set' }}</span>
         </div>
+
+        <div class="config-row readonly">
+          <span class="config-label">Build</span>
+          <span class="config-value version-display">{{ buildVersionText }}</span>
+        </div>
       </div>
 
       <!-- Port View (统一显示端口配置和统计) -->
@@ -164,6 +169,7 @@ import { Handle, Position } from '@vue-flow/core'
 import { NSelect, useDialog } from 'naive-ui'
 import { useRuntimeStore, useFilesStore, useProjectStore } from '@/stores'
 import { storeToRefs } from 'pinia'
+import * as deviceApi from '@/api/device'
 import { getLogicList, programNode, configureNode, removeNode, probeNode } from '@/api/device'
 import type { PortConfig, RuntimeStats, LogicInfo, LayoutInfo, VersionInfo } from '@/types'
 import PortConfigEdit from './PortConfigEdit.vue'
@@ -184,6 +190,10 @@ const props = defineProps<{
     isProgrammed: boolean
     ports: PortConfig[]
     layout: LayoutInfo | null
+    buildInfo?: {
+      sourceCommitShort?: string
+      buildTime?: string
+    } | null
   }
   selected: boolean
 }>()
@@ -214,6 +224,15 @@ const isCollapsed = ref(false)
 const localNodeName = ref(props.data.nodeName)
 const localLogicName = ref(props.data.logicName)
 const localPortConfigs = ref<PortConfig[]>(props.data.ports || [])
+
+const buildVersionText = computed(() => {
+  const info = props.data.buildInfo
+  if (!props.data.logicName) return 'Not programmed'
+  if (!info?.sourceCommitShort && !info?.buildTime) return 'Version unknown'
+  const commit = info.sourceCommitShort || 'unknown'
+  const build = info.buildTime ? new Date(info.buildTime).toLocaleString() : 'unknown'
+  return `Commit: ${commit}  Build: ${build}`
+})
 
 // 编辑器状态
 const showPortEdit = ref(false)
@@ -458,7 +477,8 @@ async function updateLogicName(newLogic: string) {
     if (result.ok) {
       console.log(`[CoralNode] Programmed ${props.id} with ${newLogic}, size: ${result.programSize}`)
       // 更新 isProgrammed 状态
-      updateNodeData(props.id, { isProgrammed: true })
+      const latest = await deviceApi.getNodeInfo(props.id)
+      updateNodeData(props.id, { isProgrammed: true, buildInfo: latest.node?.buildInfo || null })
       // 刷新变量列表和字段元信息，更新遥控器绑定的可用变量列表
       await runtimeStore.refreshVariables()
       await runtimeStore.refreshFieldMetas()

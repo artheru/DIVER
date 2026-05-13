@@ -6,7 +6,7 @@
  */
 
 import { get, post, del, upload } from './index'
-import type { FileNode, FileReadResponse, FileWriteRequest } from '@/types'
+import type { FileNode, FileReadResponse, FileWriteRequest, FileWriteResponse } from '@/types'
 
 /**
  * 后端返回的原始文件节点结构
@@ -73,16 +73,16 @@ export async function readFile(path: string): Promise<FileReadResponse> {
  * 写入文件内容
  * @param request 写入请求，包含路径、类型和内容
  */
-export async function writeFile(request: FileWriteRequest): Promise<void> {
-  await post('/api/files/write', request)
+export async function writeFile(request: FileWriteRequest): Promise<FileWriteResponse> {
+  return post('/api/files/write', request)
 }
 
 /**
  * 删除文件
  * @param path 文件相对路径
  */
-export async function deleteFile(path: string): Promise<void> {
-  await post('/api/files/delete', { path })
+export async function deleteFile(path: string): Promise<{ ok: boolean; head?: string; committed?: boolean }> {
+  return post('/api/files/delete', { path })
 }
 
 /**
@@ -93,7 +93,7 @@ export async function deleteFile(path: string): Promise<void> {
 export async function createInputFile(
   name: string, 
   template?: string
-): Promise<{ ok: boolean; path: string }> {
+): Promise<{ ok: boolean; path: string; head?: string; committed?: boolean }> {
   return post('/api/files/newInput', { name, template })
 }
 
