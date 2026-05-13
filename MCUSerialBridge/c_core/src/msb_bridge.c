@@ -10,6 +10,30 @@
 #include "msb_handle.h"
 #include "msb_thread.h"
 
+#define MSB_CLOSE_THREAD_TIMEOUT_MS 2000
+
+static BOOL msb_wait_and_close_thread(void** thread, const char* name)
+{
+    if (!thread || !*thread) {
+        return TRUE;
+    }
+
+    DWORD wait_ret =
+            WaitForSingleObject((HANDLE)(*thread), MSB_CLOSE_THREAD_TIMEOUT_MS);
+    if (wait_ret != WAIT_OBJECT_0) {
+        DBG_PRINT(
+                "MSB Close: thread[%s] did not exit in %u ms, wait_ret=%lu",
+                name ? name : "?",
+                MSB_CLOSE_THREAD_TIMEOUT_MS,
+                (unsigned long)wait_ret);
+        return FALSE;
+    }
+
+    CloseHandle((HANDLE)(*thread));
+    *thread = NULL;
+    return TRUE;
+}
+
 
 MCUSerialBridgeError msb_open(
         msb_handle** handle,
@@ -143,18 +167,18 @@ MCUSerialBridgeError msb_close(msb_handle* handle)
 
     handle->is_open = false;
 
-    // 等待线程退出
-    if (handle->recv_thread) {
-        WaitForSingleObject(handle->recv_thread, INFINITE);
-        CloseHandle(handle->recv_thread);
+    HANDLE hComm = handle->hComm;
+    if (hComm && hComm != INVALID_HANDLE_VALUE) {
+        CancelIoEx(hComm, NULL);
+        PurgeComm(hComm, PURGE_RXABORT | PURGE_RXCLEAR | PURGE_TXABORT | PURGE_TXCLEAR);
     }
-    if (handle->parse_thread) {
-        WaitForSingleObject(handle->send_thread, INFINITE);
-        CloseHandle(handle->parse_thread);
-    }
-    if (handle->send_thread) {
-        WaitForSingleObject(handle->send_thread, INFINITE);
-        CloseHandle(handle->send_thread);
+
+    BOOL threads_closed = TRUE;
+    threads_closed &= msb_wait_and_close_thread(&handle->recv_thread, "recv");
+    threads_closed &= msb_wait_and_close_thread(&handle->parse_thread, "parse");
+    threads_closed &= msb_wait_and_close_thread(&handle->send_thread, "send");
+    if (!threads_closed) {
+        return MSB_Error_Win_ResourceBusy;
     }
 
     EnterCriticalSection(&handle->comm_lock);

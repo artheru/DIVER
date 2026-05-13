@@ -14,4 +14,10 @@
     <Compile Include="TestBL.cs" />
     <Compile Include="MCUBootloaderHandlerCLR.cs" />
   </ItemGroup>
+
+  <ItemGroup>
+    <UpToDateCheckInput
+      Include="$(MSBuildThisFileDirectory)..\build\mcu_serial_bridge.dll"
+      Condition="Exists('$(MSBuildThisFileDirectory)..\build\mcu_serial_bridge.dll')" />
+  </ItemGroup>
 </Project>

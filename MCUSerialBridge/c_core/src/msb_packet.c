@@ -132,26 +132,42 @@ MCUSerialBridgeError mcu_send_packet_and_wait(
             return MSB_Error_Win_BufferFull;
         }
 
-        // 等待接收线程唤醒
+        // Wait until the command completes or the caller's total timeout expires.
         EnterCriticalSection(&waiter->mtx);
-        BOOL signaled = SleepConditionVariableCS(
-                &waiter->cnd, &waiter->mtx, timeout_ms);
-        if (!signaled) {
-            // 超时
-            waiter->in_use = false;
-            LeaveCriticalSection(&waiter->mtx);
-
-            DBG_PRINT(
-                    "Send Packet Timed-out, command[0x%02X], sequence[%u], "
-                    "timeout[%u]",
-                    command,
-                    seq,
-                    timeout_ms);
-            return MSB_Error_Proto_Timeout;
-        }
-
+        uint64_t deadline_ms = GetTickCount64() + timeout_ms;
         while (!waiter->done_flag) {
-            SleepConditionVariableCS(&waiter->cnd, &waiter->mtx, INFINITE);
+            uint64_t now_ms = GetTickCount64();
+            if (now_ms >= deadline_ms) {
+                waiter->in_use = false;
+                LeaveCriticalSection(&waiter->mtx);
+
+                DBG_PRINT(
+                        "Send Packet Timed-out, command[0x%02X], sequence[%u], "
+                        "timeout[%u]",
+                        command,
+                        seq,
+                        timeout_ms);
+                return MSB_Error_Proto_Timeout;
+            }
+
+            uint64_t remaining_ms = deadline_ms - now_ms;
+            DWORD wait_ms = remaining_ms > MAXDWORD
+                    ? MAXDWORD
+                    : (DWORD)remaining_ms;
+            BOOL signaled = SleepConditionVariableCS(
+                    &waiter->cnd, &waiter->mtx, wait_ms);
+            if (!signaled && GetLastError() == ERROR_TIMEOUT) {
+                waiter->in_use = false;
+                LeaveCriticalSection(&waiter->mtx);
+
+                DBG_PRINT(
+                        "Send Packet Timed-out, command[0x%02X], sequence[%u], "
+                        "timeout[%u]",
+                        command,
+                        seq,
+                        timeout_ms);
+                return MSB_Error_Proto_Timeout;
+            }
         }
 
         MCUSerialBridgeError ret = waiter->result;

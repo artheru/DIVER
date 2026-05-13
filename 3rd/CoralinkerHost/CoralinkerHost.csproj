@@ -23,13 +23,17 @@
     <Folder Include="res\" />
   </ItemGroup>
 
-  <Target Name="CopyMcuSerialBridgeDll" AfterTargets="Build">
-    <Copy
-      SourceFiles="$(ProjectDir)..\..\MCUSerialBridge\build\mcu_serial_bridge.dll"
-      DestinationFolder="$(OutDir)"
-      SkipUnchangedFiles="true"
-      Condition="Exists('$(ProjectDir)..\..\MCUSerialBridge\build\mcu_serial_bridge.dll')" />
-  </Target>
+  <ItemGroup>
+    <None
+      Include="$(MSBuildThisFileDirectory)..\..\MCUSerialBridge\build\mcu_serial_bridge.dll"
+      Link="mcu_serial_bridge.dll"
+      CopyToOutputDirectory="PreserveNewest"
+      CopyToPublishDirectory="PreserveNewest"
+      Condition="Exists('$(MSBuildThisFileDirectory)..\..\MCUSerialBridge\build\mcu_serial_bridge.dll')" />
+    <UpToDateCheckInput
+      Include="$(MSBuildThisFileDirectory)..\..\MCUSerialBridge\build\mcu_serial_bridge.dll"
+      Condition="Exists('$(MSBuildThisFileDirectory)..\..\MCUSerialBridge\build\mcu_serial_bridge.dll')" />
+  </ItemGroup>
 
   <!-- Do not treat runtime workspace state as source code -->
   <ItemGroup>

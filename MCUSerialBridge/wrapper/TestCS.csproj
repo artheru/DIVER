@@ -17,4 +17,10 @@
   <ItemGroup>
     <ProjectReference Include="MCUSerialBridgeWrapper.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <UpToDateCheckInput
+      Include="$(MSBuildThisFileDirectory)..\build\mcu_serial_bridge.dll"
+      Condition="Exists('$(MSBuildThisFileDirectory)..\build\mcu_serial_bridge.dll')" />
+  </ItemGroup>
 </Project>
