@@ -33,7 +33,14 @@
               <span class="time">{{ formatTime(commit.commitTime) }}</span>
             </div>
             <div class="subject">{{ commit.subject }}</div>
-            <div class="files">{{ commit.files.join(', ') }}</div>
+            <div class="commit-meta">
+              <span class="diffstat">
+                <span class="additions">+{{ commit.additions }}</span>
+                <span class="deletions">-{{ commit.deletions }}</span>
+              </span>
+              <span class="file-count">{{ commit.files.length }} file{{ commit.files.length === 1 ? '' : 's' }}</span>
+            </div>
+            <div class="files" :title="commit.files.join(', ')">{{ commit.files.join(', ') }}</div>
             <div class="commit-actions">
               <button :class="{ active: fromCommit?.hash === commit.hash }" @click="setFrom(commit)">From</button>
               <button :class="{ active: toCommit?.hash === commit.hash }" @click="setTo(commit)">To</button>
@@ -294,6 +301,32 @@ onBeforeUnmount(() => {
 .time {
   color: #8b949e;
   font-size: 12px;
+}
+.commit-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+.diffstat {
+  display: inline-flex;
+  gap: 6px;
+  font-family: var(--font-mono);
+}
+.additions {
+  color: #3fb950;
+}
+.deletions {
+  color: #f85149;
+}
+.file-count {
+  color: #8b949e;
+}
+.files {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .close-btn {
   margin-left: auto;

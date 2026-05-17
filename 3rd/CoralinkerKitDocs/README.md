@@ -31,8 +31,9 @@ Coralinker 是基于 DIVER（Dotnet Integrated Vehicle Embedded Runtime）的车
 
 1. 先读 **01-quickstart**，跑通一次完整闭环。
 2. 读 **02-logic-api**，掌握全部可用 API 和类型约束。
-3. 按需阅读 03~07，解决具体场景问题。
-4. 遇到问题查 **08-faq**。
+3. 使用 Root Logic / Medulla 上层控制时，重点阅读 **04 变量系统** 和 **06 遥控面板** 中的 Root 接管规则。
+4. 按需阅读 03~07，解决具体场景问题。
+5. 遇到问题查 **08-faq**。
 
 ## 交付清单
 

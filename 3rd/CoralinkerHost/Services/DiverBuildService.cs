@@ -296,6 +296,7 @@ public sealed class DiverBuildService
             buildId
         );
         var artifacts = ExtractArtifacts(dllPath, _store.GeneratedDir, versionInfo);
+        var rootLogics = ExtractRootLogics(dllPath, _store.GeneratedDir, versionInfo);
         
         foreach (var kv in artifacts)
         {
@@ -309,6 +310,7 @@ public sealed class DiverBuildService
         
         await _terminal.BuildLineAsync($"========== Build Complete ==========", ct);
         await _terminal.BuildLineAsync($"Successfully extracted {artifacts.Count} logic artifact set(s)", ct);
+        await _terminal.BuildLineAsync($"Successfully extracted {rootLogics.Count} root logic definition(s)", ct);
 
         return new BuildResult(buildRoot, projDir, dllPath, artifacts)
         {
@@ -316,7 +318,8 @@ public sealed class DiverBuildService
             SourceCommit = sourceHead.Hash,
             SourceCommitShort = sourceHead.ShortHash,
             SourceCommitTime = sourceHead.CommitTime,
-            BuildTime = buildTime
+            BuildTime = buildTime,
+            RootLogics = rootLogics
         };
         }
         finally
@@ -431,6 +434,112 @@ public sealed class DiverBuildService
         return dict;
     }
 
+    private static IReadOnlyDictionary<string, RootLogicMetadata> ExtractRootLogics(
+        string builtDllPath,
+        string outDir,
+        BuildVersionInfo versionInfo)
+    {
+        var dict = new Dictionary<string, RootLogicMetadata>(StringComparer.OrdinalIgnoreCase);
+        var alc = new AssemblyLoadContext("RootLogicRead-" + Guid.NewGuid().ToString("N"), isCollectible: true);
+        Assembly asm;
+        try
+        {
+            asm = alc.LoadFromAssemblyPath(builtDllPath);
+            foreach (var type in asm.GetTypes())
+            {
+                var attr = type.GetCustomAttributes()
+                    .FirstOrDefault(a => a.GetType().Name == "LogicRunOnRootAttribute");
+                if (attr == null || !TryGetRootCartType(type, out var cartType)) continue;
+
+                var scanInterval = (int?)attr.GetType().GetField("scanInterval")?.GetValue(attr) ?? 20;
+                var cartFields = cartType.GetFields(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static)
+                    .Where(f => f.GetCustomAttributes().Any(a => a.GetType().Name is "AsUpperIO" or "AsLowerIO"))
+                    .Select(BuildFieldMetadata)
+                    .ToArray();
+                var controlFields = type.GetFields(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static)
+                    .Where(f => f.GetCustomAttributes().Any(a => a.GetType().Name == "AsControlItem"))
+                    .Select(BuildControlFieldMetadata)
+                    .ToArray();
+
+                var meta = new RootLogicMetadata(
+                    type.Name,
+                    type.FullName ?? type.Name,
+                    Path.GetFullPath(builtDllPath),
+                    scanInterval,
+                    versionInfo.SourceCommit,
+                    versionInfo.SourceCommitShort,
+                    versionInfo.SourceCommitTime,
+                    versionInfo.BuildTime,
+                    versionInfo.BuildId,
+                    cartFields,
+                    controlFields
+                );
+                var outPath = Path.Combine(outDir, type.Name + ".root.json");
+                File.WriteAllText(
+                    outPath,
+                    JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = false, PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
+                    Encoding.UTF8
+                );
+                dict[type.Name] = meta;
+            }
+        }
+        finally
+        {
+            alc.Unload();
+        }
+
+        return dict;
+    }
+
+    private static bool TryGetRootCartType(Type type, out Type cartType)
+    {
+        var current = type;
+        while (current != null)
+        {
+            if (current.IsGenericType && current.GetGenericTypeDefinition().FullName?.StartsWith("CartActivator.RootLogic`1", StringComparison.Ordinal) == true)
+            {
+                cartType = current.GetGenericArguments()[0];
+                return true;
+            }
+            current = current.BaseType;
+        }
+        cartType = typeof(object);
+        return false;
+    }
+
+    private static RootFieldMetadata BuildFieldMetadata(FieldInfo field)
+    {
+        var direction = field.GetCustomAttributes().Any(a => a.GetType().Name == "AsUpperIO")
+            ? "upper"
+            : field.GetCustomAttributes().Any(a => a.GetType().Name == "AsLowerIO")
+                ? "lower"
+                : throw new InvalidOperationException($"Root cart field {field.Name} has no declared direction.");
+        return new RootFieldMetadata(field.Name, field.FieldType.Name, TypeIdOf(field.FieldType), direction);
+    }
+
+    private static RootFieldMetadata BuildControlFieldMetadata(FieldInfo field)
+    {
+        if (TypeIdOf(field.FieldType) < 0)
+        {
+            throw new InvalidOperationException($"Root control field {field.Name} type {field.FieldType.Name} is not supported.");
+        }
+        return new RootFieldMetadata(field.Name, field.FieldType.Name, TypeIdOf(field.FieldType), "control");
+    }
+
+    private static int TypeIdOf(Type t)
+    {
+        if (t == typeof(bool)) return 0;
+        if (t == typeof(byte)) return 1;
+        if (t == typeof(sbyte)) return 2;
+        if (t == typeof(char)) return 3;
+        if (t == typeof(short)) return 4;
+        if (t == typeof(ushort)) return 5;
+        if (t == typeof(int)) return 6;
+        if (t == typeof(uint)) return 7;
+        if (t == typeof(float)) return 8;
+        return -1;
+    }
+
     private static void WriteBuildMetadata(string jsonPath, BuildVersionInfo versionInfo)
     {
         var json = JsonSerializer.Serialize(
@@ -497,6 +606,7 @@ public sealed record BuildResult(
     public string? SourceCommitShort { get; init; }
     public DateTimeOffset? SourceCommitTime { get; init; }
     public DateTimeOffset? BuildTime { get; init; }
+    public IReadOnlyDictionary<string, RootLogicMetadata> RootLogics { get; init; } = new Dictionary<string, RootLogicMetadata>();
 }
 
 public sealed record BuildVersionInfo(
@@ -505,6 +615,21 @@ public sealed record BuildVersionInfo(
     DateTimeOffset? SourceCommitTime,
     DateTimeOffset BuildTime,
     string BuildId);
+
+public sealed record RootFieldMetadata(string Name, string Type, int TypeId, string Direction);
+
+public sealed record RootLogicMetadata(
+    string Name,
+    string TypeName,
+    string AssemblyPath,
+    int ScanInterval,
+    string SourceCommit,
+    string SourceCommitShort,
+    DateTimeOffset? SourceCommitTime,
+    DateTimeOffset BuildTime,
+    string BuildId,
+    RootFieldMetadata[] CartFields,
+    RootFieldMetadata[] ControlFields);
 
 public sealed record BuildArtifacts(
     string LogicName,

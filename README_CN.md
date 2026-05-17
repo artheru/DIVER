@@ -304,6 +304,17 @@ public override void Operation(int iteration)
 
 详见 `3rd/CoralinkerHost/README.md`。
 
+## 上层控制器与 DIVERSession
+
+CoralinkerHost 的 Root Runtime、Medulla 或其它 .NET 上层控制器，都应通过 `DIVERSession` 对接 DIVER 节点。`DIVERSession` 不只管理 MCU 节点连接，也维护统一的变量声明表：
+
+- MCU 节点通过编译产物中的 cart metadata 注册 UpperIO/LowerIO。
+- Root/Medulla 通过虚拟节点声明自己读写的 cart fields 和 ControlItem。
+- `GetAllCartFieldMetas()` / `GetAllCartFields()` 返回合并后的类型、方向和可控性。
+- 前端或上层框架不应自行根据其它接口修正变量类型；这会导致 Host 和 Medulla 行为不一致。
+
+例如 Root 声明 `left_diff_speed` 为 `[AsUpperIO]` 时，这个变量由 Root/上层逻辑写，MCU 子节点读；遥控器应写 Root `[AsControlItem]`，而不是直接写 `left_diff_speed`。
+
 ## 内置变量
 
 ### `__iteration`

@@ -373,3 +373,313 @@
   - DIVER Runtime、动态加载、多节点、变量表、神经末梢/脊髓式架构。
   - 正面、前面板、后面板客户可见接口信息。
   - 开箱上电检查、CoralinkerHost 客户使用流程、维护与常见故障排查。
+
+### [implement] Root Remote Runtime 第一版
+- 用户确认 Root Remote Runtime 方案并要求实现。
+- 公共 API：
+  - `DiverTest/RunOnMCU.cs` 新增 `LogicRunOnRootAttribute`、`AsControlItem`、`RootLogic<T>`。
+  - `3rd/CoralinkerKitDocs/stubs/CartActivator.cs` 同步 stub。
+  - `AsControlItem` 只标记 Root 控制输入字段，字段类型限制为基础类型：bool、byte/sbyte、short/ushort、int/uint、float。
+- Build 扩展：
+  - `DiverBuildService` 扫描编译出的 .NET assembly，查找 `[LogicRunOnRoot]` 且继承 `RootLogic<TCart>` 的类型。
+  - 解析 cart fields 与 control fields。
+  - 生成 `assets/generated/<RootLogicName>.root.json`，包含 Root logic 类型、assembly path、scanInterval、commit/build 信息、字段元信息。
+  - `BuildResult` 返回 `RootLogics`。
+- Runtime：
+  - 新增 `RootRuntimeService`。
+  - 加载 Root logic assembly，创建 Root logic 和 cart。
+  - 周期执行 `Operation()`。
+  - 执行前从 `DIVERSession` 读取 cart 字段；执行后把 Root 写出的 UpperIO 写回 `DIVERSession`。
+  - 捕获异常并写入 Terminal，避免 Host 崩溃。
+  - Stop 时取消 loop 并 unload AssemblyLoadContext。
+- DIVERSDK / DIVERSession：
+  - 新增 `SetCartFieldAndSignalUpperIO()`。
+  - Root 写 UpperIO 后会标记所有运行节点 `_upperIOPending` 并唤醒发送线程。
+- Host API：
+  - 新增 `/api/root/logics`
+  - 新增 `/api/root/configure`
+  - 新增 `/api/root/state`
+  - 新增 `/api/root/control/meta`
+  - 新增 `/api/root/control/set`
+- 生命周期：
+  - `RuntimeSessionService.StartAsync()` 在 MCU session 启动成功后启动 Root runtime。
+  - `RuntimeSessionService.StopAsync()` 先停止 Root runtime，再停止 MCU session。
+- 前端：
+  - 新增 `api/root.ts`。
+  - `types/index.ts` 增加 Root metadata/state 类型。
+  - `RootNodeView.vue` 增加 Root Logic 下拉、运行状态、commit/build 信息、statusText。
+  - `runtimeStore.refreshFieldMetas()` 合并 Root control fields，使遥控器可绑定 Root 控制字段。
+  - `runtimeStore.setVariable()` 对 Root control field 调用 `/api/root/control/set`，不走 MCU UpperIO。
+- 新建模板：
+  - `/api/files/newInput` 增加 `templateKind`。
+  - 前端 New Input File 对话框增加 `MCU Logic` / `Root Logic` 选择。
+  - Root Logic 模板为纯 Root 差速遥控示例：`joystickX/joystickY` 控制输入，经差速分解写入 `left_diff_speed/right_diff_speed` UpperIO。
+  - Root 模板不包含 `RunOnMCU` 调用，避免误导用户。
+- 验证：
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release --no-restore` 成功；2026-05-14 04:25 后端停止后再次构建通过，0 warning / 0 error。
+  - `npm run build` 成功。
+  - `ReadLints` 检查新增/修改关键文件无错误。
+
+### [fix] Root 节点 Logic 选择 UI 对齐
+- 用户反馈 Root 节点上的 Logic 选择 UI 风格不好看，和现有 Coral 节点不一致。
+- 修改 `RootNodeView.vue`：
+  - 使用 Naive UI `NSelect` 替代原生 `select`。
+  - 布局改为和 Coral 节点一致的 `config-row` / `config-label` / `config-value` 风格。
+  - Root 节点显示 Root Logic、State、Build、Status 四行信息。
+  - Build 信息使用 monospace 风格展示 commit/build time。
+  - Build 完成后通过 `buildVersion` watch 自动刷新 Root logic 列表。
+- 验证：
+  - `npm run build` 成功，新产物为 `wwwroot/assets/HomeView-Dq29xr2Y.js`。
+
+### [fix] 变量方向四分类
+- 用户指出 Root 的 `AsControlItem` 在 Variables 面板里显示成 LowerIO，说明前端没有区分 Upper/Lower/Mutual/ControlItem。
+- 修改：
+  - `types/index.ts` 为 `CartFieldMeta`、`CartFieldValue`、`VariableValue` 增加 `direction?: 'upper' | 'lower' | 'mutual' | 'control'`。
+  - `runtimeStore.refreshFieldMetas()` 把 MCU 字段映射为 `upper/lower/mutual`，把 Root control fields 映射为 `control`。
+  - `runtimeStore.refreshVariables()` 保留 MCU 变量方向，并补回 Root control field 的本地变量值。
+  - `VariablePanel.vue` 增加 `MutualIO` 和 `ControlItem` 图例与行颜色，不再用“是否可控”推断 Upper/Lower。
+  - `ControlWindow.vue` 的可绑定变量过滤改为 `direction !== 'lower'`，因此 ControlItem 可绑定，LowerIO 仍只读。
+- 验证：
+  - `npm run build` 成功，新产物为 `wwwroot/assets/HomeView-B30sCUQL.js`。
+
+### [fix] Root cart UpperIO 不允许直接遥控
+- 用户指出同名变量可能同时出现在子节点和 Root 中；变量本身不能只有一个 `origin`，因为它会在不同地方出现。
+- 规则确认：
+  - 如果一个变量名被 Root cart 声明为 UpperIO/LowerIO/Mutual，它属于 Root 逻辑的输入/输出，不允许被遥控面板直接驱动。
+  - 只有 Root `[AsControlItem]` 字段可以被遥控面板绑定。
+  - MCU UpperIO/MutualIO 在没有被 Root cart 接管时仍可控。
+- 修改：
+  - `runtimeStore` 增加 `rootCartNames` 与 `rootControlNames` 两个集合。
+  - `refreshFieldMetas()` 中 Root cart fields 会覆盖同名变量的可控性为 false，Root control fields 覆盖为 true。
+  - `refreshVariables()` 中变量可控性按声明集合合并，不再用单一 `origin` 判断。
+  - `ControlWindow` 绑定列表回到使用 `controllableVarNames`，由 runtimeStore 统一决定是否可绑定。
+- 验证：
+  - `npm run build` 成功，新产物为 `wwwroot/assets/HomeView-CPKiNHzK.js`。
+
+### [fix] Root cart 变量类型和方向元信息回填
+- 用户反馈 `left_diff_speed` 显示紫色，类型为 `Unknown`，怀疑类型链路没有完全打通。
+- 链路排查：
+  - Root logic build 会在 `.root.json` 中记录 cart fields：`left_diff_speed` 应为 `type=Int32`、`direction=upper`。
+  - `/api/root/state` 会把 Root cart fields 返回给前端，`runtimeStore.refreshFieldMetas()` 也会合并到 `fieldMetas`。
+  - 问题出在变量值链路：`refreshVariables()` 和 SignalR `updateVariables()` 写入 `variables` 时仍优先使用后端变量快照里的 `type/typeId`，而 `DIVERSession` 对 Root 生成的变量可能只知道 `Unknown` 和默认 mutual。
+- 修改：
+  - `runtimeStore.refreshVariables()` 写入变量时改为 `meta?.type/typeId` 优先，变量值只使用快照中的 `value`。
+  - `runtimeStore.updateVariables()` 实时推送时同样通过 `fieldMetas` 回填 `type/typeId/direction`，避免 SignalR 更新把类型冲回 `Unknown`。
+- 验证：
+  - `ReadLints` 检查 `runtime.ts` 无错误。
+  - `npm run build` 成功；仅保留既有 SignalR 注释 warning、动态导入 chunk warning、大 chunk warning。
+
+### [architecture] Root runtime 作为 DIVERSession 虚拟节点
+- 用户指出前端修正 Root 变量类型不是正确边界；后续 Medulla 可能直接对接 `DIVERSession`，不应依赖 CoralinkerHost 前端逻辑。
+- 设计调整：
+  - Root runtime / Medulla / CLI 上层控制器都应作为 `DIVERSession` 内部虚拟节点或变量声明源注册。
+  - `_variables` 只保存值；变量类型、方向、可控性由 MCU `NodeEntry.CartFields` + 虚拟节点声明统一合并。
+  - 前端只消费 `/api/variables/meta` 与 `/api/variables`，不再用 `/api/root/state` 修正变量显示。
+- SDK 修改：
+  - `DIVERSession` 新增 `VirtualCartFieldDeclaration`、`VirtualNodeEntry`、`DeclaredCartField`。
+  - 新增 `RegisterVirtualNode(...)` / `UnregisterVirtualNode(...)`。
+  - 新增 `SetVirtualControlField(...)`，保留 `SetRootControlField(...)` 作为兼容别名。
+  - `CartFieldMeta` / `CartFieldValue` 扩展 `IsControl`、`IsRootCart`、`Controllable`、`Direction`。
+  - `GetAllCartFieldMetas()` / `GetAllCartFields()` 改为基于统一声明表返回类型与方向。
+  - `SetCartField()` 改为按 session 合并声明判断可写性：LowerIO 或 Root/虚拟节点接管的 cart 输出不可由普通遥控入口直接写。
+  - `SetCartFieldAndSignalUpperIO()` 保留为 Root/上层逻辑发布 UpperIO 的入口。
+- Host 修改：
+  - `RootRuntimeService` 在配置、状态读取和启动时注册 Root 虚拟节点。
+  - Root control 写入改走 `DIVERSession.SetVirtualControlField()`。
+  - `/api/variables/meta` 和 `/api/variables` 返回前确保已选 Root logic 的虚拟节点声明已注册。
+  - `/api/variable/set` 对不可写变量返回 “read-only or managed by a virtual node”。
+  - `VariableInspectorPushService` 的 SignalR 变量快照增加 `typeId` 和 `controllable`。
+- 前端修改：
+  - `runtimeStore.refreshFieldMetas()` 移除 `/api/root/state` 合并 Root 元信息的特殊处理。
+  - `runtimeStore.refreshVariables()` 和 `updateVariables()` 只信 session 变量 API 返回的 `type/typeId/direction/controllable`。
+  - `types/index.ts` 为变量元信息和值补充 `isControl`、`isRootCart`、`controllable`。
+- 文档：
+  - `3rd/CoralinkerSDK/README.md` 作为主文档，新增统一变量声明表和 Root/Medulla 虚拟节点使用示例。
+  - `3rd/CoralinkerHost/README.md` 明确 Host 不决定变量类型，VariablePanel/ControlWindow 只消费 DIVERSession 变量 API。
+  - `3rd/CoralinkerKitDocs/04-variables-and-io.md` 说明 Root 接管同名变量和 ControlItem 语义。
+  - `3rd/CoralinkerKitDocs/06-remote-control.md` 说明遥控器绑定 Root ControlItem，而非直接绑定 Root cart 输出。
+  - `3rd/CoralinkerKitDocs/README.md`、`README_CN.md`、`README.md`、`medulla2/README.md` 增加对接说明。
+- 验证：
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release --no-restore` 成功（首次正常构建 0 warning / 0 error）。
+  - 增加 `SetVirtualControlField` 别名后再次后端 Release 构建成功，0 error，输出既有 nullable/Windows API warning。
+  - `npm run build` 成功；仅有既有 SignalR 注释 warning、动态导入 chunk warning、大 chunk warning。
+  - `ReadLints` 检查关键 C#/TS 文件无错误。
+
+### [fix] ControlItem 实时推送方向
+- 用户截图显示 `joystickX` / `joystickY` 已可编辑、类型为 `f32`，但行底色不是 ControlItem 蓝色。
+- 根因：
+  - `VariablePanel.vue` 的 `.control-io` 蓝色样式存在。
+  - `VariableInspectorPushService.BuildVarsSnapshot()` 计算 `direction` 时只看 `IsLowerIO/IsUpperIO/IsMutual`，没有先判断 `IsControl`。
+  - SignalR 实时推送把 ControlItem 推成 `direction=none`，覆盖前端初始 meta 中的 `control`。
+- 修改：
+  - `VariableInspectorPushService` 对 `field.IsControl` 返回 `direction=control`，图标为 `gamepad`。
+  - `runtimeStore.updateVariables()` 忽略旧后端/瞬时推送中的 `direction=none`，避免覆盖已有方向。
+- 验证：
+  - `ReadLints` 检查相关文件无错误。
+  - 后端 Release 构建成功，0 error。
+  - `npm run build` 成功。
+
+### [cleanup] 去除变量推送中的 UI fallback 与 `none` 方向
+- 用户指出后端推送 `direction=none` 和 `icon=circle` 不合理，这些是 UI fallback 泄漏到后端 DTO 的历史遗留。
+- 边界调整：
+  - `DIVERSession` 继续作为变量类型、方向、可控性的唯一裁决者。
+  - `VariableInspectorPushService` 只转发 session 的领域值，不再自己合成 UI 图标或非法方向。
+  - 前端只消费后端合法方向，不再通过 `normalizeDirection()` 修补旧值。
+- 修改：
+  - `VariableInspectorPushService.BuildVarsSnapshot()` 删除 `icon` 输出，`direction` 直接使用 `CartFieldValue.Direction`。
+  - `DIVERSession.GetAllCartFields()` 对未声明 `_variables` 条目跳过，不再返回 `Unknown/unknown`。
+  - `DIVERSession.SetCartField()` 拒绝未声明字段，`SetCartFieldAndSignalUpperIO()` 拒绝未声明字段作为 UpperIO 发布。
+  - `DIVERSession.DirectionOf()` 对没有合法方向的声明抛出异常，避免静默产生 `none`。
+  - `DiverBuildService` 生成 Root metadata 前先过滤 `[AsUpperIO]` / `[AsLowerIO]` 字段，未标注字段不再生成 `direction=none`。
+  - `runtimeStore` 删除 `normalizeDirection()`，SignalR 快照类型删除 `icon`，变量方向直接使用后端值。
+  - `types/index.ts` 将 `CartFieldMeta`、`CartFieldValue`、`VariableValue` 的 `direction` / `controllable` 收紧为必填。
+- 验证：
+  - `ReadLints` 检查 `DIVERSession.cs`、`VariableInspectorPushService.cs`、`DiverBuildService.cs`、`runtime.ts`、`types/index.ts` 无错误。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Debug` 成功，0 error，仍有既有 nullable/Windows API warning。
+  - `npm run build` 成功，仍有既有 SignalR 注释、动态导入和大 chunk warning。
+
+### [fix] Root runtime 控制字段 JsonElement 转换错误
+- 用户反馈 Start 后 `joystickX/Y` 有写入，但 `left_diff_speed/right_diff_speed` 仍为 0，怀疑 Root `Operation()` 未执行。
+- 运行日志确认：
+  - `[root] ERROR: Unable to cast object of type 'System.Text.Json.JsonElement' to type 'System.IConvertible'.`
+  - 错误发生在 Root loop 的 `ApplyControlsToLogic()` 阶段，即 `Operation()` 调用之前。
+- 根因：
+  - 遥控器统一走 `/api/variable/set`。
+  - 请求 DTO 的 `object? Value` 反序列化后是 `JsonElement`。
+  - 前端未传 `typeHint` 时，后端直接把 `JsonElement` 存入 `DIVERSession`。
+  - Root runtime 再把 session 值赋给 `float joystickX/Y` 时执行 `Convert.ToSingle(JsonElement)`，触发异常，导致每周期都中断在 `Operation()` 前。
+- 修改：
+  - `/api/variable/set` 写入前确保 Root 虚拟节点声明已注册，并从 `DIVERSession.GetAllCartFieldMetas()` 补齐变量真实类型。
+  - 有真实类型后复用 `ValueParser.ParseValueByType()`，避免 JSON 原始值进入 session。
+  - `RootRuntimeService.ConvertValue()` 先执行 `CoerceJsonValue()`，防御其它入口残留的 `JsonElement`。
+  - `DIVERSession.SetCartField()`、`SetVirtualControlField()`、`SetCartFieldAndSignalUpperIO()` 按声明 `TypeId` 做最终类型归一化，避免 SDK/session 边界再次存入 JSON transport 类型。
+  - `RootRuntimeService.PublishUpperFields()` 对发布失败写日志，不再静默忽略。
+- 验证：
+  - `ReadLints` 检查 `DIVERSession.cs`、`ApiRoutes.cs`、`RootRuntimeService.cs` 无错误。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Debug` 成功，0 error，仍有既有 nullable/Windows API warning。
+  - Release 产物未重编：用户当时正在运行 `bin\Release\net8.0\CoralinkerHost.exe`，需关闭后再构建 Release。
+
+### [perf] Medulla 原生 C# 写入快路径
+- 用户指出 Medulla 不是网页，而是原生 C# 程序，会通过 SDK/session 原生接口对接；`DIVERSession` 必须同时支持 `JsonElement` 和原始 C# value，且不能让原生路径受 Web 兼容逻辑拖累。
+- 修改：
+  - `CoerceValueToType()` 首先识别 `JsonElement`，仅 Web/JSON transport 值进入 JSON 解包分支。
+  - 原生 C# 值增加精确类型 fast path：`bool/byte/sbyte/char/short/ushort/int/uint/float` 与声明 `TypeId` 匹配时直接返回。
+  - 只有类型不匹配但可转换时才走 `Convert.*`，用于兼容 `double -> float`、`int -> short` 等调用。
+  - `CoerceJsonValueToType()` 按目标 `TypeId` 直接读取 JSON 数值，避免 JSON 先转中间类型再二次转换。
+- 验证：
+  - `ReadLints` 检查 `DIVERSession.cs` 无错误。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Debug` 成功，0 error，仍有既有 nullable/Windows API warning。
+
+### [docs] 补充 DIVERSession 写入值类型规则
+- 用户要求将 Medulla 原生 C# 对接语义写入 README，并编译 Release。
+- 修改 `3rd/CoralinkerSDK/README.md`：
+  - 在“数据管理”下新增“写入值类型规则”。
+  - 明确 `SetCartField()`、`SetVirtualControlField()`、`SetCartFieldAndSignalUpperIO()` 接受 `object`，最终按声明 `TypeId` 归一化。
+  - 明确 Medulla/CLI/桌面程序优先传真实基础类型；类型匹配时走 fast path，不走 JSON 解包，也尽量不走 `Convert.*`。
+  - 明确 Web/HTTP 可传 `System.Text.Json.JsonElement`，session 会按目标 `TypeId` 解析，避免 transport 类型进入 `_variables`。
+  - 修正 Root/Medulla 示例中 `joystickX` 的 `TypeId` 为 `8`（Single），示例写入值改为 `0.35f`。
+- 验证：
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release` 成功，0 error，仍有既有 69 个 warning。
+
+### [feature] Root 可选择不运行逻辑并增加独立日志分栏
+- 用户要求：
+  - PC/Root Logic 下拉框允许选择“不跑任何 Root 程序”。
+  - Root 逻辑中的 `Console.WriteLine` 需要在前端有独立日志分栏，位置在 `Build` 后、Node1/Node2 前。
+- 后端修改：
+  - `RootRuntimeService.StartAsync()` 在 `RootLogicName` 为空时注销 Root 虚拟节点并跳过启动，写入 Root 日志 `[root] No Root logic configured; skipped`。
+  - `TerminalBroadcaster` 新增 Root runtime 日志缓冲 `_rootBuffer`。
+  - 新增 `RootLineAsync()`，通过 SignalR `rootLine` 推送 Root 日志。
+  - 新增 `GetRootHistory()` / `ClearRootHistory()`。
+  - `/api/logs/root` 和 `/api/logs/root/clear` 接入 Root 日志历史和清空。
+  - Root runtime 的 started/stopped/error/publish-failed 日志改走 Root 通道，不再混入 Terminal。
+  - `Operation()` 调用期间用 `RootConsoleWriter` 临时捕获 `Console.Out` 和 `Console.Error`，转发到 Root 分栏，同时 tee 到原始控制台。
+- 前端修改：
+  - `RootNodeView.vue` 的 Root Logic 下拉新增 `None (no PC Logic)`，保存为 `null`，Build 显示 `None`。
+  - `logs` store 新增 `rootLines`、`appendRoot()`、`clearRoot()`、`loadRootHistory()`。
+  - `useSignalR()` 连接后加载 Root 历史日志，并监听 `rootLine`。
+  - `runtime.ts` API 新增 `getRootLogs()` / `clearRootLogs()`。
+  - `TerminalPanel.vue` 新增固定 `Root` Tab，顺序为 `Terminal`、`Build`、`Root`、节点 tabs，并对 Root error 行显示 badge。
+- 验证：
+  - `ReadLints` 检查相关文件无错误。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release` 成功，0 error，仍有既有 50 个 warning。
+  - `npm run build` 成功，仍有既有 SignalR 注释、动态导入和大 chunk warning。
+
+### [fix] Root 日志分栏边界调整
+- 用户指出 `[root] Started Root (...)` 这类 Root runtime 生命周期日志应写到 Terminal，不应进入 Root 分栏。
+- 规则确认：
+  - Terminal：Host/Root runtime 的 started、stopped、skip、error、publish failed 等系统运行日志。
+  - Root：只显示 Root logic 自己在 `Operation()` 中调用的 `Console.WriteLine` / `Console.Error`。
+- 修改：
+  - `RootRuntimeService.StartAsync()` 的 no logic skip 和 started 日志改回 `TerminalBroadcaster.LineAsync()`。
+  - `StopAsync()` 的 stopped 日志改回 Terminal。
+  - Root loop 捕获到的 runtime exception 和 UpperIO publish failed 日志改回 Terminal。
+  - `InvokeOperationWithConsoleCapture()` 仍只在调用用户 `Operation()` 期间捕获 `Console.Out` / `Console.Error` 并写入 Root 分栏。
+- 验证：
+  - `ReadLints` 检查 `RootRuntimeService.cs` 无错误。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release` 成功，0 error，仍有既有 50 个 warning。
+
+### [template] Root 默认模板增加 Console 示例
+- 用户要求 Root 默认代码模板保留左右轮差速拆分，并增加一个每隔 1 秒输出一次 `Console` 的示例。
+- 修改 `ApiRoutes.GenerateRootTemplate()`：
+  - 新增 `private float _logElapsedMs;`。
+  - `Operation()` 中继续执行 `joystickY + joystickX` / `joystickY - joystickX` 的左右轮分解。
+  - 使用 Root runtime 注入的 `interval` 累加时间，约每 1000ms 输出一次：
+    `DiffDrive L={cart.left_diff_speed}, R={cart.right_diff_speed}`。
+  - 该输出来自 Root logic 内部 `Console.WriteLine`，会进入前端 `Root` 分栏。
+- 验证：
+  - `ReadLints` 检查 `ApiRoutes.cs` 无错误。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release` 成功，0 error，仍有既有 50 个 warning。
+
+### [fix] 文件删除、Git 历史列表和项目导入导出
+- 用户要求修正 CoralinkerHost 文件/Git 相关体验：
+  - Generated 编译产物不允许删除。
+  - 新建输入源文件的 Git commit message 不应再叫 `save`，应叫 `created`。
+  - commit 列表需要直观看到每个 commit 的新增/删除行数。
+  - project import/export 需要包含 `data/.git` 历史。
+- 后端修改：
+  - `/api/files/delete` 拒绝 `assets/generated/` 下的路径，避免删除编译生成物。
+  - `/api/files/newInput` 自动提交信息改为 `created yyyy-MM-dd HH:mm:ss`。
+  - 输入源删除的自动提交信息改为 `deleted yyyy-MM-dd HH:mm:ss`。
+  - `GitHistoryService.GetLog()` 对每个 commit 执行当前 scope 下的 `git show --numstat --format=`，返回 `files/additions/deletions`。
+  - `GitCommitInfo` 增加 `Additions` / `Deletions` 字段。
+  - project export 额外打包 `data/.git` 和 `.gitignore`。
+  - project import 时清理旧 `.git` / `.gitignore`，并恢复归档中的 Git 历史。
+  - zip 导入加入目标路径校验，避免恶意归档写出 `data` 目录。
+- 前端修改：
+  - `GitCommitInfo` 类型增加 `additions` / `deletions`。
+  - `HistoryPanel` commit 列表显示 `+N` / `-N` diffstat 和文件数量。
+  - 资产树右键菜单对 Generated 文件显示 Locked；删除入口也会拦截 Generated 路径。
+- 验证：
+  - `ReadLints` 检查 `ApiRoutes.cs`、`GitHistoryService.cs`、`index.ts`、`HistoryPanel.vue`、`TreeNode.vue`、`AssetTree.vue` 无错误。
+  - `npm run build` 成功，仍有既有 SignalR 注释、动态导入和大 chunk warning。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release` 成功，0 error，仍有既有 50 个 warning。
+
+### [ui] History 入口归入 Files 面板
+- 用户指出 History 更像文件管理功能，不应放在 Graph 右侧/主编辑 Tab 栏里；右上 `Assets` 也可以更名为 `Files`。
+- 修改 `HomeView.vue`：
+  - 主编辑 Tab 栏移除 `History` 入口，只保留 `Graph` 和打开文件 Tab。
+  - 右上面板标题由 `Assets` 改为 `Files`。
+  - `Files` 面板头部新增 `History` 按钮，与 `+ New` 并列。
+  - 当 `remoteChanged` 为真时，`History` 按钮使用 warning 样式，提示当前有新的后端保存版本。
+  - 保留顶部 HEAD 变化提示条中的 `View Diff` 入口，作为冲突/变更场景的直接入口。
+- 验证：
+  - `ReadLints` 检查 `HomeView.vue` 无错误。
+  - `npm run build` 成功，仍有既有 SignalR 注释、动态导入和大 chunk warning。
+
+### [fix] Project Load 导入 Git object 文件 Access denied
+- 用户在 Load project 时看到：
+  - `[UI][05-17 14:28:01.954] ERROR: Import failed: Error: Access to the path 'aa11f0f7b1abadfca727d48f289dd1b5a45375' is denied.`
+- 判断：
+  - 该文件名形态符合 Git object 文件。
+  - 上一轮加入 project export/import Git 历史后，import 会删除旧 `data/.git` 再恢复 zip 内容。
+  - Windows 下 Git object 文件可能带只读属性，直接 `Directory.Delete(..., recursive: true)` 会因文件属性抛 `UnauthorizedAccessException`。
+- 修改 `ApiRoutes.cs`：
+  - 新增 `DeleteDirectoryIfExists()`，删除目录前递归将文件和目录属性恢复为 `FileAttributes.Normal`。
+  - 新增 `DeleteFileIfExists()`，删除 `.gitignore` 前恢复普通属性。
+  - import 清理 `inputs`、`generated`、`.git`、`.gitignore` 统一使用这些 helper。
+  - zip 解压覆盖已有目标文件前，先将目标文件属性设为 `Normal`。
+- 验证：
+  - `ReadLints` 检查 `ApiRoutes.cs` 无错误。
+  - 常规 Release 构建失败原因是当前正在运行的 `CoralinkerHost (38248)` 锁住 `bin/Release/net8.0/CoralinkerHost.exe` / `.dll`，不是代码编译错误。
+  - 改用临时输出目录验证编译：`dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release -p:OutputPath="bin\Release-importfix\"` 成功，0 error，仍有既有 50 个 warning。
+  - 用户随后要求再跑一次正常编译；标准 Release 构建 `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release` 成功，0 error，仍有既有 50 个 warning，产物写入 `3rd/CoralinkerHost/bin/Release/net8.0`。

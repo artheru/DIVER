@@ -30,3 +30,28 @@ public class CarCart : CartDefinition
 ```
 
 在遥控面板中添加 Joystick 控件并将 X/Y 轴分别绑定到 `joystickX` / `joystickY`，添加 Gauge 控件绑定到 `leftRPM` / `rightRPM`。用户操作 Joystick 时，值实时写入 UpperIO，MCU 逻辑据此计算输出。
+
+## Root Logic 下的绑定规则
+
+如果项目启用了 Root Logic 或后续由 Medulla 等上层控制器接管变量，遥控面板不应该直接绑定被 Root cart 声明的 UpperIO。应绑定 Root `[AsControlItem]`，再由 Root/Medulla 逻辑计算输出。
+
+推荐：
+
+```csharp
+[LogicRunOnRoot]
+public class RootDrive : RootLogic<RootCart>
+{
+    [AsControlItem] public int joystickX;   // Joystick X 绑定这里
+    [AsControlItem] public int joystickY;   // Joystick Y 绑定这里
+
+    public override void Operation()
+    {
+        cart.left_diff_speed = joystickY + joystickX;
+        cart.right_diff_speed = joystickY - joystickX;
+    }
+}
+```
+
+不推荐把 Joystick 直接绑定到 `left_diff_speed` / `right_diff_speed`。这些字段是 Root cart 输出，由 Root/上层逻辑写入，MCU 子节点读取。
+
+DIVERSession 会统一返回变量的 `controllable` 状态：普通 MCU UpperIO/MutualIO 可直接绑定；Root cart 接管的变量不可直接绑定；Root `ControlItem` 可绑定。

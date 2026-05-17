@@ -323,8 +323,8 @@ export const useRuntimeStore = defineStore('runtime', () => {
         fieldMetas.value = result.fields
         // 同时更新 variableControllable
         variableControllable.value.clear()
-        for (const f of result.fields) {
-          variableControllable.value.set(f.name, !f.isLowerIO)
+        for (const f of fieldMetas.value) {
+          variableControllable.value.set(f.name, f.controllable)
         }
       }
     } catch (error) {
@@ -348,9 +348,10 @@ export const useRuntimeStore = defineStore('runtime', () => {
             name: v.name,
             value: v.value,
             type: v.type,
-            typeId: v.typeId
+            typeId: v.typeId,
+            direction: v.direction
           })
-          variableControllable.value.set(v.name, !v.isLowerIO)
+          variableControllable.value.set(v.name, v.controllable)
         }
       }
     } catch (error) {
@@ -369,7 +370,7 @@ export const useRuntimeStore = defineStore('runtime', () => {
       if (typeHint && intTypes.includes(typeHint.toLowerCase()) && typeof value === 'number') {
         finalValue = Math.round(value)
       }
-      
+
       const result = await runtimeApi.setVariable(name, finalValue, typeHint)
       
       if (result.ok) {
@@ -402,7 +403,7 @@ export const useRuntimeStore = defineStore('runtime', () => {
   function updateVariables(snapshot: unknown) {
     const data = snapshot as {
       targetType?: string
-      fields?: Array<{ name: string; type: string; value: unknown; direction?: string; icon?: string }>
+      fields?: Array<{ name: string; type: string; typeId: number; value: unknown; direction: VariableValue['direction']; controllable: boolean }>
     }
     
     if (!data || !Array.isArray(data.fields)) {
@@ -419,18 +420,25 @@ export const useRuntimeStore = defineStore('runtime', () => {
         continue
       }
       
+      const type = field.type ?? 'unknown'
+      const typeId = field.typeId
+      const direction = field.direction
       const existing = variables.value.get(name)
       if (existing) {
         existing.value = field.value
-        existing.type = field.type || existing.type
+        existing.type = type || existing.type
+        existing.typeId = typeId
+        existing.direction = direction ?? existing.direction
       } else {
         variables.value.set(name, {
           name,
           value: field.value,
-          type: field.type || 'unknown',
-          typeId: 0
+          type,
+          typeId,
+          direction
         })
       }
+      variableControllable.value.set(name, field.controllable)
     }
   }
   

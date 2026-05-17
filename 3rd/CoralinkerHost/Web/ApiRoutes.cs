@@ -189,13 +189,16 @@ public static class ApiRoutes
             if (!req.Path.Replace('\\', '/').StartsWith("assets/", StringComparison.OrdinalIgnoreCase))
                 return Results.BadRequest(new { error = "Delete allowed only under assets/." });
 
+            if (req.Path.Replace('\\', '/').StartsWith("assets/generated/", StringComparison.OrdinalIgnoreCase))
+                return Results.BadRequest(new { error = "Generated artifacts are build outputs and cannot be deleted." });
+
             var full = store.ResolveDataPath(req.Path);
             if (!File.Exists(full)) return Results.NotFound();
             File.Delete(full);
             var isInputSource = req.Path.Replace('\\', '/').StartsWith("assets/inputs/", StringComparison.OrdinalIgnoreCase)
                 && req.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
             var commit = isInputSource
-                ? history.CommitInputsIfChanged($"save {DateTime.Now:yyyy-MM-dd HH:mm:ss}")
+                ? history.CommitInputsIfChanged($"deleted {DateTime.Now:yyyy-MM-dd HH:mm:ss}")
                 : new GitCommitResult(null, history.GetStatus().Head, false);
             return Results.Ok(new { ok = true, head = commit.HeadAfter, committed = commit.Committed });
         });
@@ -216,9 +219,11 @@ public static class ApiRoutes
             if (File.Exists(full)) return Results.BadRequest(new { error = "File already exists." });
 
             var className = Path.GetFileNameWithoutExtension(name);
-            var content = req.Template ?? GenerateDefaultTemplate(className);
+            var content = req.Template ?? (string.Equals(req.TemplateKind, "root", StringComparison.OrdinalIgnoreCase)
+                ? GenerateRootTemplate(className)
+                : GenerateDefaultTemplate(className));
             await File.WriteAllTextAsync(full, content, Encoding.UTF8, ct);
-            var commit = history.CommitInputsIfChanged($"save {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            var commit = history.CommitInputsIfChanged($"created {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             return Results.Ok(new { ok = true, path = $"assets/inputs/{name}", head = commit.HeadAfter, committed = commit.Committed });
         });
 
@@ -269,7 +274,8 @@ public static class ApiRoutes
                     sourceCommitShort = result.SourceCommitShort,
                     sourceCommitTime = result.SourceCommitTime,
                     buildTime = result.BuildTime,
-                    artifacts = result.Artifacts.Keys.OrderBy(k => k).ToArray()
+                    artifacts = result.Artifacts.Keys.OrderBy(k => k).ToArray(),
+                    rootLogics = result.RootLogics.Keys.OrderBy(k => k).ToArray()
                 });
             }
             catch (BuildFailedException ex)
@@ -528,6 +534,37 @@ public static class ApiRoutes
         });
 
         // ============================================
+        // Root Runtime API
+        // ============================================
+
+        app.MapGet("/api/root/logics", (RootRuntimeService root) =>
+        {
+            return JsonHelper.Json(new { ok = true, logics = root.ListRootLogics() });
+        });
+
+        app.MapPost("/api/root/configure", (RootRuntimeService root, RootConfigureRequest req) =>
+        {
+            root.Configure(req.LogicName);
+            return JsonHelper.Json(new { ok = true });
+        });
+
+        app.MapGet("/api/root/state", (RootRuntimeService root) =>
+        {
+            return JsonHelper.Json(new { ok = true, state = root.GetState() });
+        });
+
+        app.MapGet("/api/root/control/meta", (RootRuntimeService root) =>
+        {
+            return JsonHelper.Json(new { ok = true, fields = root.GetState().ControlFields });
+        });
+
+        app.MapPost("/api/root/control/set", (RootRuntimeService root, RootControlSetRequest req) =>
+        {
+            root.SetControl(req.Name, req.Value);
+            return JsonHelper.Json(new { ok = true });
+        });
+
+        // ============================================
         // Git History API
         // ============================================
 
@@ -712,19 +749,21 @@ public static class ApiRoutes
         // ============================================
 
         // 获取所有字段元信息（不需要 Start，用于遥控器绑定）
-        app.MapGet("/api/variables/meta", () =>
+        app.MapGet("/api/variables/meta", (RootRuntimeService root) =>
         {
+            root.EnsureConfiguredRegistered();
             var metas = DIVERSession.Instance.GetAllCartFieldMetas();
             return JsonHelper.Json(new { ok = true, fields = metas });
         });
 
-        app.MapGet("/api/variables", () =>
+        app.MapGet("/api/variables", (RootRuntimeService root) =>
         {
+            root.EnsureConfiguredRegistered();
             var fields = DIVERSession.Instance.GetAllCartFields();
             return JsonHelper.Json(new { ok = true, variables = fields.Values });
         });
 
-        app.MapPost("/api/variable/set", async (HttpRequest req, TerminalBroadcaster term, CancellationToken ct) =>
+        app.MapPost("/api/variable/set", async (HttpRequest req, RootRuntimeService root, TerminalBroadcaster term, CancellationToken ct) =>
         {
             try
             {
@@ -733,16 +772,27 @@ public static class ApiRoutes
                     return Results.BadRequest(new { ok = false, error = "Missing variable name" });
 
                 // 解析值
+                root.EnsureConfiguredRegistered();
+
                 object? parsedValue = payload.Value;
-                if (payload.TypeHint != null)
+                var typeHint = payload.TypeHint;
+                if (string.IsNullOrWhiteSpace(typeHint))
                 {
-                    parsedValue = ValueParser.ParseValueByType(payload.Value, payload.TypeHint);
+                    typeHint = DIVERSession.Instance
+                        .GetAllCartFieldMetas()
+                        .FirstOrDefault(f => string.Equals(f.Name, payload.Name, StringComparison.OrdinalIgnoreCase))
+                        ?.Type;
+                }
+
+                if (!string.IsNullOrWhiteSpace(typeHint))
+                {
+                    parsedValue = ValueParser.ParseValueByType(payload.Value, typeHint);
                 }
 
                 var result = DIVERSession.Instance.SetCartField(payload.Name, parsedValue ?? 0);
                 if (!result)
                 {
-                    return Results.BadRequest(new { ok = false, error = "Cannot set LowerIO field" });
+                    return Results.BadRequest(new { ok = false, error = "Variable is read-only or managed by a virtual node" });
                 }
 
                 await term.LineAsync($"[var] Set {payload.Name} = {parsedValue}", ct);
@@ -777,6 +827,18 @@ public static class ApiRoutes
         app.MapPost("/api/logs/terminal/clear", (TerminalBroadcaster terminal) =>
         {
             terminal.ClearHistory();
+            return JsonHelper.Json(new { ok = true });
+        });
+
+        app.MapGet("/api/logs/root", (TerminalBroadcaster terminal) =>
+        {
+            var history = terminal.GetRootHistory();
+            return JsonHelper.Json(new { ok = true, lines = history });
+        });
+
+        app.MapPost("/api/logs/root/clear", (TerminalBroadcaster terminal) =>
+        {
+            terminal.ClearRootHistory();
             return JsonHelper.Json(new { ok = true });
         });
 
@@ -964,6 +1026,12 @@ public static class ApiRoutes
                         zip.CreateEntryFromFile(store.ProjectFile, "project.json");
                     }
 
+                    var gitignorePath = Path.Combine(store.DataDir, ".gitignore");
+                    if (File.Exists(gitignorePath))
+                    {
+                        zip.CreateEntryFromFile(gitignorePath, ".gitignore");
+                    }
+
                     if (Directory.Exists(store.InputsDir))
                     {
                         foreach (var file in Directory.GetFiles(store.InputsDir, "*.*", SearchOption.AllDirectories))
@@ -979,6 +1047,16 @@ public static class ApiRoutes
                         {
                             var relativePath = Path.GetRelativePath(store.DataDir, file).Replace('\\', '/');
                             zip.CreateEntryFromFile(file, relativePath);
+                        }
+                    }
+
+                    var gitDir = Path.Combine(store.DataDir, ".git");
+                    if (Directory.Exists(gitDir))
+                    {
+                        foreach (var file in Directory.GetFiles(gitDir, "*.*", SearchOption.AllDirectories))
+                        {
+                            var relativePath = Path.GetRelativePath(store.DataDir, file).Replace('\\', '/');
+                            zip.CreateEntryFromFile(file, relativePath, CompressionLevel.Fastest);
                         }
                     }
                 }
@@ -1018,25 +1096,35 @@ public static class ApiRoutes
                     // 清空现有数据
                     DIVERSession.Instance.RemoveAllNodes();
 
-                    if (Directory.Exists(store.InputsDir))
-                    {
-                        Directory.Delete(store.InputsDir, recursive: true);
-                    }
-                    if (Directory.Exists(store.GeneratedDir))
-                    {
-                        Directory.Delete(store.GeneratedDir, recursive: true);
-                    }
+                    DeleteDirectoryIfExists(store.InputsDir);
+                    DeleteDirectoryIfExists(store.GeneratedDir);
+                    var gitDir = Path.Combine(store.DataDir, ".git");
+                    DeleteDirectoryIfExists(gitDir);
+                    var gitignorePath = Path.Combine(store.DataDir, ".gitignore");
+                    DeleteFileIfExists(gitignorePath);
 
                     Directory.CreateDirectory(store.InputsDir);
                     Directory.CreateDirectory(store.GeneratedDir);
+                    Directory.CreateDirectory(store.DataDir);
 
                     using (var zip = ZipFile.OpenRead(tempZipPath))
                     {
+                        var dataRoot = Path.GetFullPath(store.DataDir);
+                        if (!dataRoot.EndsWith(Path.DirectorySeparatorChar))
+                        {
+                            dataRoot += Path.DirectorySeparatorChar;
+                        }
                         foreach (var entry in zip.Entries)
                         {
                             if (string.IsNullOrEmpty(entry.Name)) continue;
 
                             var destPath = Path.Combine(store.DataDir, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
+                            destPath = Path.GetFullPath(destPath);
+                            if (!destPath.StartsWith(dataRoot, StringComparison.OrdinalIgnoreCase))
+                            {
+                                throw new InvalidOperationException("Invalid project archive path.");
+                            }
+
                             var destDir = Path.GetDirectoryName(destPath);
 
                             if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
@@ -1044,6 +1132,10 @@ public static class ApiRoutes
                                 Directory.CreateDirectory(destDir);
                             }
 
+                            if (File.Exists(destPath))
+                            {
+                                File.SetAttributes(destPath, FileAttributes.Normal);
+                            }
                             entry.ExtractToFile(destPath, overwrite: true);
                         }
                     }
@@ -1079,6 +1171,38 @@ public static class ApiRoutes
             await term.LineAsync($"[cmd] {payload.Command}", ct);
             return Results.Ok(new { ok = true });
         });
+    }
+
+    private static void DeleteDirectoryIfExists(string path)
+    {
+        if (!Directory.Exists(path))
+        {
+            return;
+        }
+
+        foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+        {
+            File.SetAttributes(file, FileAttributes.Normal);
+        }
+
+        foreach (var dir in Directory.EnumerateDirectories(path, "*", SearchOption.AllDirectories))
+        {
+            File.SetAttributes(dir, FileAttributes.Normal);
+        }
+
+        File.SetAttributes(path, FileAttributes.Normal);
+        Directory.Delete(path, recursive: true);
+    }
+
+    private static void DeleteFileIfExists(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        File.SetAttributes(path, FileAttributes.Normal);
+        File.Delete(path);
     }
 
     private static MCUSerialBridgeCLR.PortConfig ParsePortConfig(PortConfigItem p)
@@ -1147,14 +1271,78 @@ public static class ApiRoutes
             }
             """;
     }
+
+    private static string GenerateRootTemplate(string className)
+    {
+        return $$"""
+            using CartActivator;
+
+            /// <summary>
+            /// {{className}} 的变量表。
+            /// Root 逻辑在本机 .NET runtime 上做遥控/运动学解算，
+            /// 然后把结果写入 UpperIO，下发给 MCU 节点。
+            /// </summary>
+            public class {{className}}Cart : CartDefinition
+            {
+                // Root → MCU：差速底盘左右轮目标速度。
+                [AsUpperIO] public int left_diff_speed;
+                [AsUpperIO] public int right_diff_speed;
+            }
+
+            /// <summary>
+            /// {{className}} 在 Root/Host 的普通 .NET runtime 上运行。
+            /// 这里不要调用 RunOnMCU；只读遥控器输入，写 cart 的 UpperIO。
+            /// </summary>
+            [LogicRunOnRoot(scanInterval = 20)]
+            public class {{className}} : RootLogic<{{className}}Cart>
+            {
+                // 这些字段只存在于 Root，不会直接下发 MCU。
+                // 网页遥控器可以把摇杆 X/Y 绑定到这两个字段。
+                // 取值约定：-1.0 ~ +1.0
+                [AsControlItem] public float joystickX;
+                [AsControlItem] public float joystickY;
+
+                private float _logElapsedMs;
+
+                public override void Operation()
+                {
+                    // 默认示例：差速底盘运动学分解。
+                    // joystickY：前进/后退，joystickX：左转/右转。
+                    var left = joystickY + joystickX;
+                    var right = joystickY - joystickX;
+
+                    cart.left_diff_speed = ClampSpeed(left * 1000);
+                    cart.right_diff_speed = ClampSpeed(right * 1000);
+                    statusText = $"L={cart.left_diff_speed}, R={cart.right_diff_speed}";
+
+                    // 示例：Root 分栏会显示 Root 逻辑自己的 Console 输出。
+                    _logElapsedMs += interval;
+                    if (_logElapsedMs >= 1000)
+                    {
+                        _logElapsedMs = 0;
+                        Console.WriteLine($"DiffDrive L={cart.left_diff_speed}, R={cart.right_diff_speed}");
+                    }
+                }
+
+                private static int ClampSpeed(float value)
+                {
+                    if (value > 1000) return 1000;
+                    if (value < -1000) return -1000;
+                    return (int)value;
+                }
+            }
+            """;
+    }
 }
 
 // Request DTOs
 public sealed record CommandRequest(string Command);
 public sealed record FileWriteRequest(string Path, string Kind, string? Text, string? Base64, string? BaseHead = null, bool Force = false);
 public sealed record FileDeleteRequest(string Path);
-public sealed record NewInputRequest(string Name, string? Template);
+public sealed record NewInputRequest(string Name, string? Template, string? TemplateKind = null);
 public sealed record HistoryCheckoutRequest(string Commit, string? Path);
+public sealed record RootConfigureRequest(string? LogicName);
+public sealed record RootControlSetRequest(string Name, object? Value);
 public sealed record NodeProbeRequest(string McuUri);
 public sealed record NodeConfigureRequest(string? NodeName, PortConfigItem[]? PortConfigs, JsonObject? ExtraInfo);
 public sealed record NodeProgramRequest(string LogicName);

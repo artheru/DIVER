@@ -10,12 +10,14 @@ public sealed class RuntimeSessionService
 {
     private readonly TerminalBroadcaster _terminal;
     private readonly WireTapAggregatorService _aggregator;
+    private readonly RootRuntimeService _rootRuntime;
     private readonly DIVERSession _session = DIVERSession.Instance;
 
-    public RuntimeSessionService(TerminalBroadcaster terminal, WireTapAggregatorService aggregator)
+    public RuntimeSessionService(TerminalBroadcaster terminal, WireTapAggregatorService aggregator, RootRuntimeService rootRuntime)
     {
         _terminal = terminal;
         _aggregator = aggregator;
+        _rootRuntime = rootRuntime;
         
         // 节点日志事件现在由 WireTapAggregatorService 批量推送（nodeLogBatch）
         // 减少高频 Console.WriteLine 导致的 SignalR 推送风暴
@@ -65,6 +67,7 @@ public sealed class RuntimeSessionService
         
         if (result.Success)
         {
+            await _rootRuntime.StartAsync(ct);
             await _terminal.LineAsync("[session] ========== Running ==========", ct);
         }
         
@@ -77,6 +80,7 @@ public sealed class RuntimeSessionService
     public async Task StopAsync(CancellationToken ct)
     {
         await _terminal.LineAsync("[session] ========== Stopping ==========", ct);
+        await _rootRuntime.StopAsync(ct);
         _session.Stop();
         await _terminal.LineAsync("[session] ========== Stopped ==========", ct);
     }

@@ -20,6 +20,8 @@ export interface ProjectState {
   selectedFile: string | null
   /** 最后一次构建的 ID */
   lastBuildId: string | null
+  /** 当前选择的 Root 逻辑 */
+  rootLogicName?: string | null
   /** 遥控器布局配置 */
   controlLayout?: ControlLayoutConfig
 }
@@ -223,6 +225,10 @@ export interface CartFieldMeta {
   isLowerIO: boolean
   isUpperIO: boolean
   isMutual: boolean
+  isControl?: boolean
+  isRootCart?: boolean
+  controllable: boolean
+  direction: 'upper' | 'lower' | 'mutual' | 'control'
 }
 
 /**
@@ -236,6 +242,10 @@ export interface CartFieldValue {
   isLowerIO: boolean
   isUpperIO: boolean
   isMutual: boolean
+  isControl?: boolean
+  isRootCart?: boolean
+  controllable: boolean
+  direction: 'upper' | 'lower' | 'mutual' | 'control'
 }
 
 /**
@@ -259,6 +269,7 @@ export interface VariableValue {
   value: unknown
   type: string
   typeId: number
+  direction: 'upper' | 'lower' | 'mutual' | 'control'
 }
 
 /**
@@ -464,6 +475,40 @@ export interface BuildVersionInfo {
   buildId: string
 }
 
+export interface RootFieldMetadata {
+  name: string
+  type: string
+  typeId: number
+  direction: 'upper' | 'lower' | 'control' | string
+}
+
+export interface RootLogicMetadata {
+  name: string
+  typeName: string
+  assemblyPath: string
+  scanInterval: number
+  sourceCommit: string
+  sourceCommitShort: string
+  sourceCommitTime?: string
+  buildTime: string
+  buildId: string
+  cartFields: RootFieldMetadata[]
+  controlFields: RootFieldMetadata[]
+}
+
+export interface RootRuntimeState {
+  isRunning: boolean
+  logicName?: string | null
+  sourceCommit?: string | null
+  sourceCommitShort?: string | null
+  sourceCommitTime?: string | null
+  buildTime?: string | null
+  buildId?: string | null
+  statusText: string
+  cartFields: RootFieldMetadata[]
+  controlFields: RootFieldMetadata[]
+}
+
 export interface GitStatusSnapshot {
   head?: string | null
   shortHead?: string | null
@@ -479,6 +524,8 @@ export interface GitCommitInfo {
   author: string
   subject: string
   files: string[]
+  additions: number
+  deletions: number
 }
 
 export interface GitDiffResult {

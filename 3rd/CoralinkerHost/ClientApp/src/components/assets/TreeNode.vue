@@ -45,7 +45,8 @@
         :style="contextMenuStyle"
         @click.stop
       >
-        <button @click="handleDelete">🗑 Delete</button>
+        <button v-if="canDelete" @click="handleDelete">🗑 Delete</button>
+        <button v-else disabled title="Generated build artifacts cannot be deleted">Locked</button>
       </div>
     </Teleport>
   </div>
@@ -82,6 +83,8 @@ const contextMenuStyle = ref({ left: '0px', top: '0px' })
 // ============================================
 
 const isFolder = computed(() => props.node.kind === 'folder')
+const normalizedPath = computed(() => props.node.path.replace(/\\/g, '/'))
+const canDelete = computed(() => !normalizedPath.value.startsWith('assets/generated/'))
 
 const icon = computed(() => {
   if (isFolder.value) {

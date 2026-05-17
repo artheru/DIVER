@@ -1,4 +1,4 @@
-﻿using DiverTest;
+using DiverTest;
 
 namespace CartActivator
 {
@@ -24,6 +24,11 @@ namespace CartActivator
     {
         public string mcuUri = "default";
         public int scanInterval = 1000;
+    }
+
+    public class LogicRunOnRootAttribute : Attribute
+    {
+        public int scanInterval = 20;
     }
 
     public class RequireNativeCodeAttribute : Attribute
@@ -130,10 +135,22 @@ namespace CartActivator
     {
     }
 
+    public class AsControlItem : Attribute
+    {
+    }
+
     public abstract class LadderLogic<T> where T : CartDefinition
     {
         public T cart;
         public abstract void Operation(int iteration);
+    }
+
+    public abstract class RootLogic<T> where T : CartDefinition
+    {
+        public T cart;
+        public float interval;
+        public string statusText = "/";
+        public abstract void Operation();
     }
 
     public abstract class CartDefinition

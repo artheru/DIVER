@@ -71,20 +71,14 @@ public sealed class VariableInspectorPushService : BackgroundService
         foreach (var kv in fields)
         {
             var field = kv.Value;
-            var (dir, icon) = (field.IsLowerIO, field.IsUpperIO, field.IsMutual) switch
-            {
-                (true, _, _) => ("lower", "arrow-down"),
-                (_, true, _) => ("upper", "arrow-up"),
-                (_, _, true) => ("mutual", "arrow-up"),
-                _ => ("none", "circle")
-            };
 
             items.Add(new
             {
                 name = field.Name,
                 type = field.Type,
-                direction = dir,
-                icon,
+                typeId = field.TypeId,
+                direction = field.Direction,
+                controllable = field.Controllable,
                 value = FormatValue(field.Value)
             });
         }

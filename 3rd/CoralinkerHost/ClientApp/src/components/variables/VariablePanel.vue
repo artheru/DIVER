@@ -22,6 +22,8 @@
     <div class="color-legend">
       <span class="legend-item upper"><span class="legend-dot"></span>UpperIO</span>
       <span class="legend-item lower"><span class="legend-dot"></span>LowerIO</span>
+      <span class="legend-item mutual"><span class="legend-dot"></span>MutualIO</span>
+      <span class="legend-item control"><span class="legend-dot"></span>ControlItem</span>
     </div>
     
     <!-- 变量列表 -->
@@ -30,7 +32,7 @@
         v-for="variable in variableList" 
         :key="variable.name"
         class="variable-row"
-        :class="{ 'upper-io': isControllable(variable.name), 'lower-io': !isControllable(variable.name) }"
+        :class="directionClass(variable)"
       >
         <!-- 类型 -->
         <div class="col-type" :title="variable.type">
@@ -118,6 +120,14 @@ const editInputRef = ref<HTMLInputElement[]>([])
  */
 function isControllable(name: string): boolean {
   return controllableVarNames.value.has(name)
+}
+
+function directionOf(variable: VariableValue): string {
+  return variable.direction || (isControllable(variable.name) ? 'upper' : 'lower')
+}
+
+function directionClass(variable: VariableValue): string {
+  return `${directionOf(variable)}-io`
 }
 
 /**
@@ -287,6 +297,14 @@ async function confirmEdit(variable: VariableValue) {
   background: rgba(251, 146, 60, 0.6);
 }
 
+.legend-item.mutual .legend-dot {
+  background: rgba(168, 85, 247, 0.6);
+}
+
+.legend-item.control .legend-dot {
+  background: rgba(56, 189, 248, 0.6);
+}
+
 /* 变量列表 */
 .variable-list {
   flex: 1;
@@ -323,6 +341,22 @@ async function confirmEdit(variable: VariableValue) {
 
 .variable-row.lower-io:hover {
   background: rgba(251, 146, 60, 0.25);
+}
+
+.variable-row.mutual-io {
+  background: rgba(168, 85, 247, 0.15);
+}
+
+.variable-row.mutual-io:hover {
+  background: rgba(168, 85, 247, 0.25);
+}
+
+.variable-row.control-io {
+  background: rgba(56, 189, 248, 0.15);
+}
+
+.variable-row.control-io:hover {
+  background: rgba(56, 189, 248, 0.25);
 }
 
 /* 列样式 */

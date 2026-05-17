@@ -127,7 +127,11 @@ public record CartFieldMeta(
     int TypeId,
     bool IsLowerIO,
     bool IsUpperIO,
-    bool IsMutual
+    bool IsMutual,
+    bool IsControl = false,
+    bool IsRootCart = false,
+    bool Controllable = false,
+    string? Direction = null
 );
 
 /// <summary>Cart字段值</summary>
@@ -138,7 +142,26 @@ public record CartFieldValue(
     object? Value,
     bool IsLowerIO,
     bool IsUpperIO,
-    bool IsMutual
+    bool IsMutual,
+    bool IsControl = false,
+    bool IsRootCart = false,
+    bool Controllable = false,
+    string? Direction = null
+);
+
+/// <summary>
+/// 非 MCU 运行节点的 Cart 字段声明。
+/// 例如 Root runtime / Medulla 上层控制器可以把自己作为虚拟节点注册到 DIVERSession，
+/// 让类型、方向、可控性都由 session 统一裁决。
+/// </summary>
+public record VirtualCartFieldDeclaration(
+    string Name,
+    int TypeId,
+    bool IsLowerIO,
+    bool IsUpperIO,
+    bool IsMutual,
+    bool IsControl = false,
+    bool IsRootCart = false
 );
 
 /// <summary>日志条目</summary>
@@ -195,6 +218,26 @@ internal class NodeEntry : IDisposable
         Handle = null;
     }
 }
+
+/// <summary>虚拟运行节点 - Root runtime / Medulla 等上层控制器的变量声明源。</summary>
+internal class VirtualNodeEntry
+{
+    public string SourceId { get; init; } = "";
+    public string DisplayName { get; init; } = "";
+    public VirtualCartFieldDeclaration[] CartFields { get; init; } = Array.Empty<VirtualCartFieldDeclaration>();
+    public VirtualCartFieldDeclaration[] ControlFields { get; init; } = Array.Empty<VirtualCartFieldDeclaration>();
+}
+
+internal sealed record DeclaredCartField(
+    string Name,
+    int TypeId,
+    bool IsLowerIO,
+    bool IsUpperIO,
+    bool IsMutual,
+    bool IsControl,
+    bool IsRootCart,
+    string SourceId
+);
 
 /// <summary>节点日志缓冲区</summary>
 internal class NodeLogBuffer
@@ -340,6 +383,7 @@ public sealed class DIVERSession : IDisposable
     private static readonly Lazy<DIVERSession> _instance = new(() => new DIVERSession());
 
     private readonly ConcurrentDictionary<string, NodeEntry> _nodes = new();
+    private readonly ConcurrentDictionary<string, VirtualNodeEntry> _virtualNodes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, object?> _variables = new();
     private readonly object _stateLock = new();
     
@@ -530,6 +574,7 @@ public sealed class DIVERSession : IDisposable
         }
         _nodes.Clear();
         _variables.Clear();
+        InitializeVariables(_virtualNodes.Values.SelectMany(v => v.CartFields.Concat(v.ControlFields)));
         _wireTapConfigs.Clear();  // 清理 WireTap 配置
         _nodeIndex = 0;
         Console.WriteLine("[DIVERSession] Removed all nodes");
@@ -769,15 +814,7 @@ public sealed class DIVERSession : IDisposable
 
         // 解析 MetaJson
         entry.CartFields = HostRuntime.ParseMetaJson(metaJson);
-
-        // 初始化变量存储
-        foreach (var field in entry.CartFields)
-        {
-            if (!_variables.ContainsKey(field.Name))
-            {
-                _variables[field.Name] = HostRuntime.GetDefaultValue(field.TypeId);
-            }
-        }
+        InitializeVariables(entry.CartFields);
 
         Console.WriteLine(
             $"[DIVERSession] Programmed node {entry.NodeName}: {programBytes.Length} bytes, {entry.CartFields.Length} fields, logic={logicName ?? "(none)"}"
@@ -897,15 +934,7 @@ public sealed class DIVERSession : IDisposable
             if (!string.IsNullOrEmpty(entry.MetaJson))
             {
                 entry.CartFields = HostRuntime.ParseMetaJson(entry.MetaJson);
-
-                // 初始化变量
-                foreach (var field in entry.CartFields)
-                {
-                    if (!_variables.ContainsKey(field.Name))
-                    {
-                        _variables[field.Name] = HostRuntime.GetDefaultValue(field.TypeId);
-                    }
-                }
+                InitializeVariables(entry.CartFields);
             }
 
             _nodes[uuid] = entry;
@@ -918,6 +947,8 @@ public sealed class DIVERSession : IDisposable
                     _nodeIndex = idx;
             }
         }
+
+        InitializeVariables(_virtualNodes.Values.SelectMany(v => v.CartFields.Concat(v.ControlFields)));
 
         Console.WriteLine($"[DIVERSession] Imported {data.Count} nodes");
     }
@@ -1113,6 +1144,50 @@ public sealed class DIVERSession : IDisposable
     #region 数据管理接口
 
     /// <summary>
+    /// 注册一个非 MCU 的变量声明源。
+    /// Root runtime / Medulla 这类上层控制器应以虚拟节点形式注册到 session，
+    /// 避免上层 UI 再去修正变量类型和方向。
+    /// </summary>
+    public void RegisterVirtualNode(
+        string sourceId,
+        string displayName,
+        IEnumerable<VirtualCartFieldDeclaration> cartFields,
+        IEnumerable<VirtualCartFieldDeclaration>? controlFields = null)
+    {
+        if (string.IsNullOrWhiteSpace(sourceId))
+            throw new ArgumentException("Source id is required.", nameof(sourceId));
+
+        var entry = new VirtualNodeEntry
+        {
+            SourceId = sourceId,
+            DisplayName = string.IsNullOrWhiteSpace(displayName) ? sourceId : displayName,
+            CartFields = cartFields.ToArray(),
+            ControlFields = (controlFields ?? Array.Empty<VirtualCartFieldDeclaration>()).ToArray(),
+        };
+
+        _virtualNodes[sourceId] = entry;
+        InitializeVariables(entry.CartFields.Concat(entry.ControlFields));
+        Console.WriteLine($"[DIVERSession] Registered virtual node {entry.DisplayName}: {entry.CartFields.Length} cart fields, {entry.ControlFields.Length} control fields");
+    }
+
+    /// <summary>注销虚拟变量声明源，并清理不再被任何节点声明的变量。</summary>
+    public void UnregisterVirtualNode(string sourceId)
+    {
+        if (!_virtualNodes.TryRemove(sourceId, out var removed)) return;
+
+        var declared = BuildDeclaredFieldMap();
+        foreach (var field in removed.CartFields.Concat(removed.ControlFields))
+        {
+            if (!declared.ContainsKey(field.Name))
+            {
+                _variables.TryRemove(field.Name, out _);
+            }
+        }
+
+        Console.WriteLine($"[DIVERSession] Unregistered virtual node {removed.DisplayName}");
+    }
+
+    /// <summary>
     /// 获取所有 Cart 字段元信息（不需要 Start，从节点配置中获取）
     /// </summary>
     public List<CartFieldMeta> GetAllCartFieldMetas()
@@ -1129,25 +1204,17 @@ public sealed class DIVERSession : IDisposable
                 TypeId: 6, // TypeId for Int32
                 IsLowerIO: true,
                 IsUpperIO: false,
-                IsMutual: false
+                IsMutual: false,
+                Controllable: false,
+                Direction: "lower"
             );
         }
-        
-        foreach (var entry in _nodes.Values)
+
+        foreach (var field in BuildDeclaredFieldMap().Values)
         {
-            foreach (var field in entry.CartFields)
+            if (!result.ContainsKey(field.Name))
             {
-                if (!result.ContainsKey(field.Name))
-                {
-                    result[field.Name] = new CartFieldMeta(
-                        field.Name,
-                        HostRuntime.GetTypeName(field.TypeId),
-                        field.TypeId,
-                        field.IsLowerIO,
-                        field.IsUpperIO,
-                        field.IsMutual
-                    );
-                }
+                result[field.Name] = BuildCartFieldMeta(field);
             }
         }
         
@@ -1161,18 +1228,7 @@ public sealed class DIVERSession : IDisposable
     {
         var result = new Dictionary<string, CartFieldValue>();
 
-        // 收集所有字段信息
-        var fieldInfoMap = new Dictionary<string, CartFieldInfo>(StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in _nodes.Values)
-        {
-            foreach (var field in entry.CartFields)
-            {
-                if (!fieldInfoMap.ContainsKey(field.Name))
-                {
-                    fieldInfoMap[field.Name] = field;
-                }
-            }
-        }
+        var fieldInfoMap = BuildDeclaredFieldMap();
 
         // 添加每个节点的内置 __iteration 字段值
         foreach (var entry in _nodes.Values)
@@ -1186,23 +1242,33 @@ public sealed class DIVERSession : IDisposable
                 Value: iteration ?? 0,
                 IsLowerIO: true,
                 IsUpperIO: false,
-                IsMutual: false
+                IsMutual: false,
+                Controllable: false,
+                Direction: "lower"
             );
         }
 
         // 构建其他变量结果
         foreach (var kv in _variables)
         {
-            fieldInfoMap.TryGetValue(kv.Key, out var fieldInfo);
+            if (!fieldInfoMap.TryGetValue(kv.Key, out var fieldInfo))
+            {
+                Console.WriteLine($"[DIVERSession] Skip undeclared variable in snapshot: {kv.Key}");
+                continue;
+            }
 
             result[kv.Key] = new CartFieldValue(
                 kv.Key,
-                fieldInfo != null ? HostRuntime.GetTypeName(fieldInfo.TypeId) : "Unknown",
-                fieldInfo?.TypeId ?? 0,
+                HostRuntime.GetTypeName(fieldInfo.TypeId),
+                fieldInfo.TypeId,
                 kv.Value,
-                fieldInfo?.IsLowerIO ?? false,
-                fieldInfo?.IsUpperIO ?? false,
-                fieldInfo?.IsMutual ?? false
+                fieldInfo.IsLowerIO,
+                fieldInfo.IsUpperIO,
+                fieldInfo.IsMutual,
+                fieldInfo.IsControl,
+                fieldInfo.IsRootCart,
+                IsControllable(fieldInfo),
+                DirectionOf(fieldInfo)
             );
         }
 
@@ -1214,20 +1280,69 @@ public sealed class DIVERSession : IDisposable
     /// </summary>
     public bool SetCartField(string fieldName, object value)
     {
-        // 检查是否是 LowerIO 字段
-        foreach (var entry in _nodes.Values)
+        var field = ResolveDeclaredField(fieldName);
+        if (field == null)
         {
-            var field = entry.CartFields.FirstOrDefault(f =>
-                string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase)
-            );
-            if (field != null && field.IsLowerIO)
-            {
-                Console.WriteLine($"[DIVERSession] Cannot set LowerIO field: {fieldName}");
-                return false;
-            }
+            Console.WriteLine($"[DIVERSession] Cannot set undeclared field: {fieldName}");
+            return false;
         }
 
-        _variables[fieldName] = value;
+        if (!IsControllable(field))
+        {
+            Console.WriteLine($"[DIVERSession] Cannot set read-only or Root-managed field: {fieldName}");
+            return false;
+        }
+
+        _variables[fieldName] = CoerceValueToType(value, field.TypeId);
+        return true;
+    }
+
+    /// <summary>设置虚拟节点控制字段。Root ControlItem / Medulla 控制输入走这个语义。</summary>
+    public bool SetVirtualControlField(string fieldName, object value)
+    {
+        var field = ResolveDeclaredField(fieldName);
+        if (field == null || !field.IsControl)
+        {
+            Console.WriteLine($"[DIVERSession] Not a registered control field: {fieldName}");
+            return false;
+        }
+
+        _variables[fieldName] = CoerceValueToType(value, field.TypeId);
+        return true;
+    }
+
+    /// <summary>兼容 RootRuntimeService 语义的控制字段写入别名。</summary>
+    public bool SetRootControlField(string fieldName, object value) => SetVirtualControlField(fieldName, value);
+
+    /// <summary>
+    /// 设置 Cart 字段值，并唤醒所有正在运行节点发送 UpperIO。
+    /// Root/Host 侧逻辑写 UpperIO 后使用该方法。
+    /// </summary>
+    public bool SetCartFieldAndSignalUpperIO(string fieldName, object value)
+    {
+        var field = ResolveDeclaredField(fieldName);
+        if (field == null)
+        {
+            Console.WriteLine($"[DIVERSession] Cannot publish undeclared field as UpperIO: {fieldName}");
+            return false;
+        }
+
+        if (field is { IsLowerIO: true } or { IsControl: true })
+        {
+            Console.WriteLine($"[DIVERSession] Cannot publish field as UpperIO: {fieldName}");
+            return false;
+        }
+
+        _variables[fieldName] = CoerceValueToType(value, field.TypeId);
+
+        foreach (var entry in _nodes.Values)
+        {
+            if (entry.Handle?.IsRunning == true)
+            {
+                _upperIOPending[entry.UUID] = 1;
+            }
+        }
+        _upperIOSignal.Set();
         return true;
     }
 
@@ -1237,6 +1352,196 @@ public sealed class DIVERSession : IDisposable
     public object? GetCartField(string fieldName)
     {
         return _variables.TryGetValue(fieldName, out var value) ? value : null;
+    }
+
+    private void InitializeVariables(IEnumerable<CartFieldInfo> fields)
+    {
+        foreach (var field in fields)
+        {
+            _variables.TryAdd(field.Name, HostRuntime.GetDefaultValue(field.TypeId));
+        }
+    }
+
+    private void InitializeVariables(IEnumerable<VirtualCartFieldDeclaration> fields)
+    {
+        foreach (var field in fields)
+        {
+            _variables.TryAdd(field.Name, HostRuntime.GetDefaultValue(field.TypeId));
+        }
+    }
+
+    private DeclaredCartField? ResolveDeclaredField(string fieldName)
+    {
+        var fields = BuildDeclaredFieldMap();
+        return fields.TryGetValue(fieldName, out var field) ? field : null;
+    }
+
+    private Dictionary<string, DeclaredCartField> BuildDeclaredFieldMap()
+    {
+        var result = new Dictionary<string, DeclaredCartField>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in _nodes.Values)
+        {
+            foreach (var field in entry.CartFields)
+            {
+                MergeDeclaredField(result, new DeclaredCartField(
+                    field.Name,
+                    field.TypeId,
+                    field.IsLowerIO,
+                    field.IsUpperIO,
+                    field.IsMutual,
+                    IsControl: false,
+                    IsRootCart: false,
+                    SourceId: entry.UUID));
+            }
+        }
+
+        foreach (var entry in _virtualNodes.Values)
+        {
+            foreach (var field in entry.CartFields)
+            {
+                MergeDeclaredField(result, new DeclaredCartField(
+                    field.Name,
+                    field.TypeId,
+                    field.IsLowerIO,
+                    field.IsUpperIO,
+                    field.IsMutual,
+                    field.IsControl,
+                    field.IsRootCart,
+                    entry.SourceId),
+                    overwrite: true);
+            }
+
+            foreach (var field in entry.ControlFields)
+            {
+                MergeDeclaredField(result, new DeclaredCartField(
+                    field.Name,
+                    field.TypeId,
+                    IsLowerIO: false,
+                    IsUpperIO: false,
+                    IsMutual: false,
+                    IsControl: true,
+                    IsRootCart: false,
+                    entry.SourceId),
+                    overwrite: true);
+            }
+        }
+
+        return result;
+    }
+
+    private static void MergeDeclaredField(
+        Dictionary<string, DeclaredCartField> fields,
+        DeclaredCartField next,
+        bool overwrite = false)
+    {
+        if (fields.TryGetValue(next.Name, out var existing))
+        {
+            if (existing.TypeId != next.TypeId)
+            {
+                Console.WriteLine(
+                    $"[DIVERSession] Variable type conflict for {next.Name}: {existing.SourceId}/{HostRuntime.GetTypeName(existing.TypeId)} vs {next.SourceId}/{HostRuntime.GetTypeName(next.TypeId)}");
+            }
+
+            if (!overwrite) return;
+        }
+
+        fields[next.Name] = next;
+    }
+
+    private static CartFieldMeta BuildCartFieldMeta(DeclaredCartField field)
+    {
+        return new CartFieldMeta(
+            field.Name,
+            HostRuntime.GetTypeName(field.TypeId),
+            field.TypeId,
+            field.IsLowerIO,
+            field.IsUpperIO,
+            field.IsMutual,
+            field.IsControl,
+            field.IsRootCart,
+            IsControllable(field),
+            DirectionOf(field));
+    }
+
+    private static bool IsControllable(DeclaredCartField field)
+    {
+        return field.IsControl || (!field.IsLowerIO && !field.IsRootCart);
+    }
+
+    private static string DirectionOf(DeclaredCartField field)
+    {
+        if (field.IsControl) return "control";
+        if (field.IsLowerIO) return "lower";
+        if (field.IsUpperIO) return "upper";
+        if (field.IsMutual) return "mutual";
+        throw new InvalidOperationException($"Field {field.Name} has no declared direction.");
+    }
+
+    private static object? CoerceValueToType(object? value, int typeId)
+    {
+        if (value is JsonElement json)
+        {
+            if (json.ValueKind == JsonValueKind.Null)
+            {
+                return HostRuntime.GetDefaultValue(typeId);
+            }
+
+            return CoerceJsonValueToType(json, typeId);
+        }
+
+        if (value == null) return HostRuntime.GetDefaultValue(typeId);
+
+        // Native C# callers (Medulla/CLI/SDK users) should stay on this fast path.
+        return typeId switch
+        {
+            0 when value is bool v => v,
+            1 when value is byte v => v,
+            2 when value is sbyte v => v,
+            3 when value is char v => v,
+            4 when value is short v => v,
+            5 when value is ushort v => v,
+            6 when value is int v => v,
+            7 when value is uint v => v,
+            8 when value is float v => v,
+            0 => Convert.ToBoolean(value),
+            1 => Convert.ToByte(value),
+            2 => Convert.ToSByte(value),
+            3 => Convert.ToChar(value),
+            4 => Convert.ToInt16(value),
+            5 => Convert.ToUInt16(value),
+            6 => Convert.ToInt32(value),
+            7 => Convert.ToUInt32(value),
+            8 => Convert.ToSingle(value),
+            _ => value
+        };
+    }
+
+    private static object? CoerceJsonValueToType(JsonElement json, int typeId)
+    {
+        if (json.ValueKind == JsonValueKind.String)
+        {
+            var text = json.GetString();
+            return typeId switch
+            {
+                3 => string.IsNullOrEmpty(text) ? '\0' : text[0],
+                _ => CoerceValueToType(text, typeId)
+            };
+        }
+
+        return typeId switch
+        {
+            0 => json.ValueKind == JsonValueKind.True || (json.ValueKind == JsonValueKind.Number && json.GetDouble() != 0),
+            1 => json.GetByte(),
+            2 => json.GetSByte(),
+            3 => (char)json.GetUInt16(),
+            4 => json.GetInt16(),
+            5 => json.GetUInt16(),
+            6 => json.GetInt32(),
+            7 => json.GetUInt32(),
+            8 => json.GetSingle(),
+            _ => json.ToString()
+        };
     }
 
     #endregion

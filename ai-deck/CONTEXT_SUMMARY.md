@@ -4,22 +4,42 @@
 
 ## 最近一次支持
 
-- 时间：2026-05-14 02:42 UTC+8
-- 事项：在 `CORAL-NODE-V2.1` 下新建 PEAM Lite (DIVER Node V0.1) TeX 手册草稿目录并开始落盘。
-- 新建目录：`CORAL-NODE-V2.1/PEAM_Lite_DIVER_Node_Manual/`
-- 已新建文件：
-  - `main.tex`
-  - `macro.tex`（复用 `../Coralink_Node_Manual/macro`）
-  - `section1_product.tex`
-  - `section2_runtime.tex`
-  - `section3_interfaces.tex`
-  - `section4_power_on.tex`
-  - `section5_host.tex`
-  - `section6_maintenance.tex`
-  - `glossary.tex`
-- 当前状态：先写入产品命名、DIVER Runtime、客户可见接口、开箱上电、CoralinkerHost 使用、维护排障的初稿，后续再补全细节与版式。
+- 时间：2026-05-17 14:35 UTC+8
+- 事项：修复 Project Load 导入 Git 历史时报 Git object 文件 Access denied。
+- 背景：
+  - 用户在 Load project 时遇到 `[UI] ERROR: Import failed: Error: Access to the path '<git-object-hash>' is denied.`。
+  - 根因判断：导入时会清理旧 `data/.git`，Windows 下 Git object 文件可能带只读/隐藏等属性，直接 `Directory.Delete(..., recursive: true)` 会失败。
+- 已实现：
+  - `ApiRoutes.cs` 新增 `DeleteDirectoryIfExists()`：删除目录前递归将所有文件/目录属性设为 `FileAttributes.Normal`。
+  - `ApiRoutes.cs` 新增 `DeleteFileIfExists()`：删除 `.gitignore` 前恢复普通属性。
+  - Project import 清理 `inputs`、`generated`、`.git`、`.gitignore` 时改用上述 helper。
+  - Zip 解压覆盖已有文件前，先将目标文件属性设为 `Normal`，避免覆盖只读文件失败。
+- 验证：
+  - `ReadLints` 检查 `ApiRoutes.cs` 无错误。
+  - 起初常规 Release 构建因运行中的 `CoralinkerHost (38248)` 锁住 `bin/Release/net8.0/CoralinkerHost.exe` / `.dll` 无法覆盖。
+  - 使用临时输出目录验证：`dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release -p:OutputPath="bin\Release-importfix\"` 成功，0 error，仍有既有 50 个 warning。
+  - 用户随后要求正常编译一次；标准命令 `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release` 已成功，0 error，仍有既有 50 个 warning。
 
 ## 本次工作记录
+
+- 时间：2026-05-14 04:04 UTC+8
+- 事项：实现 Root Remote Runtime 第一版。
+- 已实现：
+  - `DiverTest/RunOnMCU.cs` 与 `CoralinkerKitDocs/stubs/CartActivator.cs` 新增 `LogicRunOnRootAttribute`、`AsControlItem`、`RootLogic<T>`。
+  - Build 阶段扫描 `[LogicRunOnRoot]`，生成 `assets/generated/<RootLogicName>.root.json`，记录 assembly、scanInterval、cart fields、control fields、commit/build 信息。
+  - 新增 `RootRuntimeService`：加载 Root .NET assembly，实例化 Root logic/cart，周期执行 `Operation()`，读取 DIVERSession 变量，写回 UpperIO，并触发 MCU UpperIO 下发。
+  - `DIVERSession` 新增 `SetCartFieldAndSignalUpperIO()`，用于 Root 写 UpperIO 后唤醒节点发送。
+  - 新增 `/api/root/logics`、`/api/root/configure`、`/api/root/state`、`/api/root/control/meta`、`/api/root/control/set`。
+  - Start/Stop 生命周期集成 Root runtime：Start 成功后启动 Root；Stop 先停 Root 再停 MCU session。
+  - Root 节点 UI 增加 Root Logic 下拉、状态、commit/build 信息；Build 后会刷新 Root logic 列表。
+  - 遥控器变量绑定接入 Root control fields；Root control field 只支持基础类型，UI 控件负责映射。
+- 后续补充：
+  - New Input File 支持 `MCU Logic` / `Root Logic` 模板选择。
+  - Root 默认模板改为纯 Root 差速遥控逻辑：`joystickX/joystickY -> left_diff_speed/right_diff_speed`，不包含 `RunOnMCU` 示例。
+- 验证：
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release --no-restore` 成功（2026-05-14 04:25 再次通过，0 warning / 0 error）。
+  - `npm run build` 成功。
+  - 关键文件 `ReadLints` 无 linter 错误。
 
 - 时间：2026-05-14 01:57 UTC+8
 - 事项：实现 CoralinkerHost 前端编辑/构建/运行页面的输入源文件 Git 历史追踪能力。

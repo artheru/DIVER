@@ -92,9 +92,10 @@ export async function deleteFile(path: string): Promise<{ ok: boolean; head?: st
  */
 export async function createInputFile(
   name: string, 
-  template?: string
+  template?: string,
+  templateKind?: 'mcu' | 'root'
 ): Promise<{ ok: boolean; path: string; head?: string; committed?: boolean }> {
-  return post('/api/files/newInput', { name, template })
+  return post('/api/files/newInput', { name, template, templateKind })
 }
 
 /**

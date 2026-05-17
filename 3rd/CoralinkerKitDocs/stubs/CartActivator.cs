@@ -34,6 +34,15 @@ namespace CartActivator
         public int scanInterval = 1000;
     }
 
+    /// <summary>
+    /// 标注逻辑类运行在 Root/Host 的 .NET runtime 上。
+    /// scanInterval: 扫描周期（毫秒）。
+    /// </summary>
+    public class LogicRunOnRootAttribute : Attribute
+    {
+        public int scanInterval = 20;
+    }
+
     /// <summary>标注字段方向：Host -> MCU（可控量）</summary>
     public class AsUpperIO : Attribute { }
 
@@ -41,14 +50,33 @@ namespace CartActivator
     public class AsLowerIO : Attribute { }
 
     /// <summary>
+    /// 标注 Root logic 的控制输入字段。字段类型只支持基础数值/布尔类型。
+    /// 前端遥控器负责把 UI 控件绑定到这些字段。
+    /// </summary>
+    public class AsControlItem : Attribute { }
+
+    /// <summary>
     /// 逻辑基类。泛型参数 T 必须继承 CartDefinition。
     /// cart: 变量表实例，通过它读写 UpperIO / LowerIO 字段。
     /// Operation: 每个扫描周期调用一次。iteration 在 Host-MCU 通信正常时每周期 +1，丢包时不增加。
     /// </summary>
-    public abstract class LadderLogic<T> where T : CartDefinition
+    public abstract class LadderLogic<T>
+        where T : CartDefinition
     {
         public T cart;
         public abstract void Operation(int iteration);
+    }
+
+    /// <summary>
+    /// Root/Host 侧 .NET 逻辑基类。Operation 在 Host 进程中周期运行。
+    /// </summary>
+    public abstract class RootLogic<T>
+        where T : CartDefinition
+    {
+        public T cart;
+        public float interval;
+        public string statusText = "/";
+        public abstract void Operation();
     }
 
     /// <summary>

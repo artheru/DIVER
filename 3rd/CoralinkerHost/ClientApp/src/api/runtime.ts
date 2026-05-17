@@ -116,6 +116,20 @@ export async function clearTerminalLogs(): Promise<{ ok: boolean }> {
   return post('/api/logs/terminal/clear')
 }
 
+/**
+ * 获取 Root runtime 历史日志
+ */
+export async function getRootLogs(): Promise<{ ok: boolean; lines: string[] }> {
+  return get('/api/logs/root')
+}
+
+/**
+ * 清空 Root runtime 日志
+ */
+export async function clearRootLogs(): Promise<{ ok: boolean }> {
+  return post('/api/logs/root/clear')
+}
+
 // ============================================
 // 节点日志 API (DIVERSession 管理)
 // ============================================
@@ -215,7 +229,7 @@ export async function getControllableVariables(): Promise<{ variables: Array<{
       name: v.name,
       type: v.type,
       typeId: v.typeId,
-      controllable: !v.isLowerIO,
+      controllable: v.controllable ?? !v.isLowerIO,
       isLowerIO: v.isLowerIO,
       isUpperIO: v.isUpperIO,
       isMutual: v.isMutual

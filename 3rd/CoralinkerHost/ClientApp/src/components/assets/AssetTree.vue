@@ -99,6 +99,10 @@ async function handleDelete(path: string) {
     uiStore.error('Build Running', 'Cannot delete files while building')
     return
   }
+  if (path.replace(/\\/g, '/').startsWith('assets/generated/')) {
+    uiStore.error('Delete Blocked', 'Generated build artifacts cannot be deleted')
+    return
+  }
   try {
     await filesStore.deleteFile(path)
     uiStore.success('Deleted', path)

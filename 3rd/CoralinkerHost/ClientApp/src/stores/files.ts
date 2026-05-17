@@ -211,8 +211,8 @@ export const useFilesStore = defineStore('files', () => {
    * 创建新的输入文件
    * @param name 文件名
    */
-  async function createNewInput(name: string) {
-    const result = await filesApi.createInputFile(name)
+  async function createNewInput(name: string, templateKind?: 'mcu' | 'root') {
+    const result = await filesApi.createInputFile(name, undefined, templateKind)
     const historyStore = useHistoryStore()
     if (result.head) {
       historyStore.markHeadKnown(result.head)

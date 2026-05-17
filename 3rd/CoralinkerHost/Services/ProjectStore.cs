@@ -64,6 +64,7 @@ public sealed class ProjectStore
             ["selectedAsset"] = snap.SelectedAsset,
             ["selectedFile"] = snap.SelectedFile,
             ["lastBuildId"] = snap.LastBuildId,
+            ["rootLogicName"] = snap.RootLogicName,
             ["nodes"] = JsonSerializer.SerializeToNode(nodes, ProjectJson.Options),
             ["controlLayout"] = snap.ControlLayout != null 
                 ? JsonSerializer.SerializeToNode(snap.ControlLayout, ProjectJson.Options) 
@@ -99,6 +100,7 @@ public sealed class ProjectStore
                 root.TryGetProperty("selectedAsset", out var sa) && sa.ValueKind == JsonValueKind.String ? sa.GetString() : null,
                 root.TryGetProperty("selectedFile", out var sf) && sf.ValueKind == JsonValueKind.String ? sf.GetString() : null,
                 root.TryGetProperty("lastBuildId", out var lb) && lb.ValueKind == JsonValueKind.String ? lb.GetString() : null,
+                root.TryGetProperty("rootLogicName", out var rl) && rl.ValueKind == JsonValueKind.String ? rl.GetString() : null,
                 controlLayout
             );
             
@@ -275,12 +277,13 @@ public sealed record ProjectState(
     string? SelectedAsset,     // 当前选中的 .cs 资源文件名
     string? SelectedFile,      // 当前在编辑器中打开的文件路径
     string? LastBuildId,       // 最后一次构建的 ID
+    string? RootLogicName,     // Root 本机逻辑名称
     ControlLayoutConfig? ControlLayout = null  // 遥控器布局配置
 )
 {
     public static ProjectState CreateDefault()
     {
-        return new ProjectState(null, null, null, null);
+        return new ProjectState(null, null, null, null, null);
     }
 }
 

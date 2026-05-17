@@ -29,6 +29,9 @@ export const useProjectStore = defineStore('project', () => {
   
   /** 最后一次构建的 ID */
   const lastBuildId = ref<string | null>(null)
+
+  /** 当前选择的 Root 逻辑 */
+  const rootLogicName = ref<string | null>(null)
   
   /** 是否正在加载 */
   const loading = ref(false)
@@ -78,6 +81,7 @@ export const useProjectStore = defineStore('project', () => {
       selectedAsset.value = state.selectedAsset
       selectedFile.value = state.selectedFile
       lastBuildId.value = state.lastBuildId
+      rootLogicName.value = state.rootLogicName ?? null
       
       // 加载遥控器配置（如果有）
       if (state.controlLayout) {
@@ -110,6 +114,7 @@ export const useProjectStore = defineStore('project', () => {
         selectedAsset: selectedAsset.value,
         selectedFile: selectedFile.value,
         lastBuildId: lastBuildId.value,
+        rootLogicName: rootLogicName.value,
         controlLayout: controlLayout.value
       }
       
@@ -176,6 +181,7 @@ export const useProjectStore = defineStore('project', () => {
       selectedAsset.value = null
       selectedFile.value = null
       lastBuildId.value = null
+      rootLogicName.value = null
       lastBuildResult.value = null
       controlLayout.value = {
         windowX: 100,
@@ -267,6 +273,7 @@ export const useProjectStore = defineStore('project', () => {
     selectedAsset,
     selectedFile,
     lastBuildId,
+    rootLogicName,
     loading,
     dirty,
     syncState,

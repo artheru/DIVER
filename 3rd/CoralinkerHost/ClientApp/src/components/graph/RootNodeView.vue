@@ -15,6 +15,30 @@
       <span class="node-name">{{ data.name || 'PC' }}</span>
     </div>
     <div class="node-content">
+      <div class="config-row">
+        <span class="config-label">Logic</span>
+        <n-select
+          v-model:value="selectedLogic"
+          :options="logicOptions"
+          size="small"
+          placeholder="No PC Logic"
+          clearable
+          class="logic-select"
+          @update:value="configureRootLogic"
+        />
+      </div>
+      <div class="config-row readonly">
+        <span class="config-label">State</span>
+        <span class="config-value">{{ rootState?.isRunning ? 'Running' : 'Idle' }}</span>
+      </div>
+      <div class="config-row readonly">
+        <span class="config-label">Build</span>
+        <span class="config-value version-display">{{ buildText }}</span>
+      </div>
+      <div class="config-row readonly">
+        <span class="config-label">Status</span>
+        <span class="config-value status-text">{{ rootState?.statusText || '/' }}</span>
+      </div>
       <div class="harness-out">
         <span class="handle-label">out ●</span>
       </div>
@@ -23,7 +47,13 @@
 </template>
 
 <script setup lang="ts">
+import { computed, onMounted, ref, watch } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
+import { NSelect } from 'naive-ui'
+import * as rootApi from '@/api/root'
+import type { RootLogicMetadata, RootRuntimeState } from '@/types'
+import { useFilesStore, useRuntimeStore } from '@/stores'
+import { storeToRefs } from 'pinia'
 
 // Props from vue-flow
 defineProps<{
@@ -33,6 +63,55 @@ defineProps<{
   }
   selected: boolean
 }>()
+
+const rootLogics = ref<RootLogicMetadata[]>([])
+const rootState = ref<RootRuntimeState | null>(null)
+const selectedLogic = ref<string | null>(null)
+const runtimeStore = useRuntimeStore()
+const filesStore = useFilesStore()
+const { buildVersion } = storeToRefs(filesStore)
+
+const logicOptions = computed(() => {
+  return [
+    { label: 'None (no PC Logic)', value: '__none__' },
+    ...rootLogics.value.map(logic => ({
+      label: logic.name,
+      value: logic.name
+    }))
+  ]
+})
+
+const buildText = computed(() => {
+  if (!rootState.value?.logicName) return 'None'
+  const commit = rootState.value.sourceCommitShort || 'unknown'
+  const build = rootState.value.buildTime ? new Date(rootState.value.buildTime).toLocaleString() : 'unknown'
+  return `Commit: ${commit}  Build: ${build}`
+})
+
+async function loadRootInfo() {
+  const [logicResult, stateResult] = await Promise.all([
+    rootApi.getRootLogics().catch(() => null),
+    rootApi.getRootState().catch(() => null)
+  ])
+  rootLogics.value = logicResult?.ok ? logicResult.logics : []
+  rootState.value = stateResult?.ok ? stateResult.state : null
+  selectedLogic.value = rootState.value?.logicName || '__none__'
+}
+
+async function configureRootLogic(value?: string | null) {
+  selectedLogic.value = value || '__none__'
+  await rootApi.configureRoot(selectedLogic.value === '__none__' ? null : selectedLogic.value)
+  await loadRootInfo()
+  await runtimeStore.refreshFieldMetas()
+}
+
+onMounted(() => {
+  loadRootInfo()
+})
+
+watch(buildVersion, () => {
+  loadRootInfo()
+})
 </script>
 
 <style scoped>
@@ -73,6 +152,42 @@ defineProps<{
 
 .node-content {
   padding: 12px;
+}
+
+.config-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.config-label {
+  width: 44px;
+  flex-shrink: 0;
+  color: #8b949e;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.logic-select {
+  flex: 1;
+  min-width: 160px;
+}
+
+.config-value {
+  flex: 1;
+  color: #cbd5e1;
+  font-size: 11px;
+}
+
+.status-text {
+  color: #a0aec0;
+}
+
+.version-display {
+  font-family: var(--font-mono);
+  color: #a5d6ff;
 }
 
 .harness-out {

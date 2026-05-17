@@ -308,6 +308,17 @@ The `3rd/CoralinkerHost` project provides a web interface for:
 
 See `3rd/CoralinkerHost/README.md` for details.
 
+## Upper Controllers and DIVERSession
+
+CoralinkerHost Root Runtime, Medulla, or any other .NET upper controller should integrate through `DIVERSession`. The session manages both MCU nodes and the unified variable declaration table:
+
+- MCU nodes register UpperIO/LowerIO through compiled cart metadata.
+- Root/Medulla registers cart fields and ControlItem inputs as a virtual node.
+- `GetAllCartFieldMetas()` and `GetAllCartFields()` return the merged type, direction, and controllability.
+- UI layers should not repair variable types from side channels; that rule belongs inside `DIVERSession`.
+
+For example, if Root declares `left_diff_speed` as `[AsUpperIO]`, Root/Medulla writes that variable and MCU child nodes read it. Remote panels should bind to Root `[AsControlItem]` inputs, not directly to `left_diff_speed`.
+
 ## Reliability Updates (2026-03)
 
 This release aligns three layers (`MCUSerialBridge` C-core -> `MCUSerialBridgeCLR` -> `CoralinkerSDK`) to make disconnect/reconnect behavior both observable and deterministic.

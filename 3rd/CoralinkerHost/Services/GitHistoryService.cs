@@ -91,7 +91,11 @@ public sealed class GitHistoryService
                 .Select(ParseCommitLine)
                 .Where(c => c != null)
                 .Select(c => c!)
-                .Select(c => c with { Files = GetCommitFilesUnsafe(c.Hash) })
+                .Select(c =>
+                {
+                    var stat = GetCommitStatUnsafe(c.Hash, path);
+                    return c with { Files = stat.Files, Additions = stat.Additions, Deletions = stat.Deletions };
+                })
                 .ToArray();
             return new GitCommitListResult(commits);
         }
@@ -270,12 +274,33 @@ public sealed class GitHistoryService
         return exit == 1;
     }
 
-    private string[] GetCommitFilesUnsafe(string commit)
+    private GitCommitStat GetCommitStatUnsafe(string commit, string? path)
     {
-        var output = RunGitAllowFailure(["diff-tree", "--root", "--no-commit-id", "--name-only", "-r", commit, "--", InputsGitPath], out _);
-        return output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(x => x.Trim().Replace('\\', '/'))
-            .ToArray();
+        var scope = path ?? InputsGitPath;
+        var output = RunGitAllowFailure(["show", "--numstat", "--format=", commit, "--", scope], out _);
+        var files = new List<string>();
+        var additions = 0;
+        var deletions = 0;
+
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = line.TrimEnd('\r').Split('\t');
+            if (parts.Length < 3) continue;
+
+            if (int.TryParse(parts[0], out var add))
+            {
+                additions += add;
+            }
+
+            if (int.TryParse(parts[1], out var del))
+            {
+                deletions += del;
+            }
+
+            files.Add(parts[^1].Trim().Replace('\\', '/'));
+        }
+
+        return new GitCommitStat(files.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), additions, deletions);
     }
 
     private static GitCommitInfo? ParseCommitLine(string line)
@@ -396,8 +421,9 @@ public sealed class GitHistoryService
 public sealed record GitHeadInfo(string Hash, string ShortHash, DateTimeOffset? CommitTime);
 public sealed record GitStatusSnapshot(string? Head, string? ShortHead, DateTimeOffset? CommitTime, bool IsDirty, string[] DirtyFiles);
 public sealed record GitCommitResult(string? HeadBefore, string? HeadAfter, bool Committed);
-public sealed record GitCommitInfo(string Hash, string ShortHash, DateTimeOffset? CommitTime, string Author, string Subject, string[] Files);
+public sealed record GitCommitInfo(string Hash, string ShortHash, DateTimeOffset? CommitTime, string Author, string Subject, string[] Files, int Additions = 0, int Deletions = 0);
 public sealed record GitCommitListResult(GitCommitInfo[] Commits);
 public sealed record GitDiffResult(string From, string To, string? Path, string UnifiedDiff, string? OldText, string? NewText);
 public sealed record GitFileAtCommitResult(string Commit, string Path, string Text);
 public sealed record GitCheckoutResult(string? Head, string? ShortHead, string[] DirtyFiles);
+internal sealed record GitCommitStat(string[] Files, int Additions, int Deletions);

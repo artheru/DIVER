@@ -717,7 +717,7 @@ const gridBackgroundStyle = computed(() => ({
 }))
 
 // 可控变量列表 - 返回带有类型信息的对象
-const { fieldMetas, variableList } = storeToRefs(runtimeStore)
+const { fieldMetas, variableList, controllableVarNames } = storeToRefs(runtimeStore)
 
 // 支持绑定的类型 ID（数值类型，不包括 string 等）
 // 0=bool, 1=byte, 2=sbyte, 3=char, 4=i16, 5=u16, 6=i32, 7=u32, 8=f32
@@ -740,8 +740,8 @@ const controllableVarList = computed<BindableVariable[]>(() => {
   // 2. 必须是可绑定的数值类型
   // 注意：fieldMetas 不需要 Start 就能获取，在页面加载时获取
   return fieldMetas.value
-    .filter(f => 
-      !f.isLowerIO && 
+    .filter(f =>
+      controllableVarNames.value.has(f.name) &&
       BINDABLE_TYPE_IDS.includes(f.typeId)
     )
     .map(f => ({
@@ -766,7 +766,7 @@ const allVarList = computed<AllVariable[]>(() => {
       type: f.type,
       typeId: f.typeId,
       isInteger: INTEGER_TYPE_IDS.includes(f.typeId),
-      isControllable: !f.isLowerIO  // LowerIO = 只读
+      isControllable: controllableVarNames.value.has(f.name)
     }))
 })
 

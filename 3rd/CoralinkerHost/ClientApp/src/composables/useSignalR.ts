@@ -202,13 +202,14 @@ export function useSignalR() {
     console.log('[SignalR] Loading terminal history logs...')
     
     try {
-      // 加载 Terminal 历史日志（Host 管理）
+      // 加载 Terminal / Root 历史日志（Host 管理）
       await logStore.loadTerminalHistory()
+      await logStore.loadRootHistory()
       
       // 节点日志在 GraphCanvas.vue 的 syncLogTabs 中自动加载
       // 不需要在这里加载，因为节点可能还未初始化
       
-      console.log('[SignalR] Terminal history logs loaded')
+      console.log('[SignalR] Terminal and root history logs loaded')
     } catch (error) {
       console.error('[SignalR] Failed to load terminal history logs:', error)
     }
@@ -239,6 +240,12 @@ export function useSignalR() {
     // 格式: buildLine(line: string)
     connection.value.on('buildLine', (line: string) => {
       logStore.appendBuild(line)
+    })
+
+    // Root runtime 日志事件（专用通道）
+    // 格式: rootLine(line: string)
+    connection.value.on('rootLine', (line: string) => {
+      logStore.appendRoot(line)
     })
     
     // 节点日志事件（旧的逐行推送，保留兼容）

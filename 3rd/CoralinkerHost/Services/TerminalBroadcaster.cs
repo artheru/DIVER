@@ -14,6 +14,10 @@ public sealed class TerminalBroadcaster
     // Build 日志缓冲区
     private readonly List<string> _buildBuffer = new();
     private readonly object _buildBufferLock = new();
+
+    // Root runtime 日志缓冲区
+    private readonly List<string> _rootBuffer = new();
+    private readonly object _rootBufferLock = new();
     
     private const int MAX_BUFFER_SIZE = 5000;
 
@@ -81,6 +85,26 @@ public sealed class TerminalBroadcaster
         
         return _hub.Clients.All.SendAsync("buildLine", line, ct);
     }
+
+    /// <summary>
+    /// 发送 Root runtime 日志行（专用通道，发送到前端 Root 面板）
+    /// </summary>
+    public Task RootLineAsync(string line, CancellationToken ct = default)
+    {
+        var timestamp = DateTime.Now.ToString("MM-dd HH:mm:ss.fff");
+        var formattedLine = $"[SA][{timestamp}] {line}";
+
+        lock (_rootBufferLock)
+        {
+            _rootBuffer.Add(formattedLine);
+            if (_rootBuffer.Count > MAX_BUFFER_SIZE)
+            {
+                _rootBuffer.RemoveRange(0, _rootBuffer.Count - MAX_BUFFER_SIZE);
+            }
+        }
+
+        return _hub.Clients.All.SendAsync("rootLine", formattedLine, ct);
+    }
     
     /// <summary>
     /// 清空 Build 日志缓冲区
@@ -123,6 +147,28 @@ public sealed class TerminalBroadcaster
         lock (_buildBufferLock)
         {
             return _buildBuffer.ToArray();
+        }
+    }
+
+    /// <summary>
+    /// 获取 Root runtime 历史日志
+    /// </summary>
+    public string[] GetRootHistory()
+    {
+        lock (_rootBufferLock)
+        {
+            return _rootBuffer.ToArray();
+        }
+    }
+
+    /// <summary>
+    /// 清空 Root runtime 日志
+    /// </summary>
+    public void ClearRootHistory()
+    {
+        lock (_rootBufferLock)
+        {
+            _rootBuffer.Clear();
         }
     }
 

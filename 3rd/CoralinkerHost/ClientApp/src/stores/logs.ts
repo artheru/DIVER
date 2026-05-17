@@ -39,6 +39,9 @@ export const useLogStore = defineStore('logs', () => {
   
   /** Build 日志行 */
   const buildLines = ref<string[]>([])
+
+  /** Root runtime 日志行 */
+  const rootLines = ref<string[]>([])
   
   /** 节点日志 Map<uuid, NodeLogEntry[]> */
   const nodeLogs = ref<Map<string, NodeLogEntry[]>>(new Map())
@@ -61,12 +64,15 @@ export const useLogStore = defineStore('logs', () => {
     if (activeTab.value === 'build') {
       return buildLines.value
     }
+    if (activeTab.value === 'root') {
+      return rootLines.value
+    }
     return [] as string[]
   })
 
   /** 当前节点日志条目（activeTab 为 uuid 时有效） */
   const currentNodeEntries = computed((): NodeLogEntry[] => {
-    if (activeTab.value === 'terminal' || activeTab.value === 'build') {
+    if (activeTab.value === 'terminal' || activeTab.value === 'build' || activeTab.value === 'root') {
       return []
     }
     return nodeLogs.value.get(activeTab.value) || []
@@ -110,12 +116,23 @@ export const useLogStore = defineStore('logs', () => {
     }
   }
 
+  function appendRoot(line: string) {
+    rootLines.value.push(line)
+    if (rootLines.value.length > MAX_LOG_LINES) {
+      rootLines.value.splice(0, rootLines.value.length - MAX_LOG_LINES)
+    }
+  }
+
   function logBuild(line: string) {
     appendBuild(`[${getTimestamp()}] ${line}`)
   }
 
   function clearBuild() {
     buildLines.value.length = 0
+  }
+
+  function clearRoot() {
+    rootLines.value.length = 0
   }
   
   /**
@@ -245,11 +262,30 @@ export const useLogStore = defineStore('logs', () => {
     }
   }
 
+  async function loadRootHistory() {
+    try {
+      const result = await runtimeApi.getRootLogs()
+      
+      if (!result.ok || !result.lines) {
+        return
+      }
+      
+      rootLines.value = result.lines
+      
+      console.log(`[Logs] Loaded ${result.lines.length} root history logs`)
+    } catch (error) {
+      console.error('[Logs] Failed to load root history:', error)
+    }
+  }
+
   function clearCurrent() {
     if (activeTab.value === 'terminal') {
       terminalLines.value.length = 0
     } else if (activeTab.value === 'build') {
       buildLines.value.length = 0
+    } else if (activeTab.value === 'root') {
+      rootLines.value.length = 0
+      runtimeApi.clearRootLogs().catch(console.error)
     } else {
       const logs = nodeLogs.value.get(activeTab.value)
       if (logs) {
@@ -271,6 +307,7 @@ export const useLogStore = defineStore('logs', () => {
   
   function clearAll() {
     terminalLines.value.length = 0
+    rootLines.value.length = 0
     nodeLogs.value.forEach(logs => logs.length = 0)
     nodeInfos.value.forEach(info => info.lastSeq = 0)
     
@@ -310,6 +347,7 @@ export const useLogStore = defineStore('logs', () => {
     // 状态
     terminalLines,
     buildLines,
+    rootLines,
     nodeLogs,
     nodeInfos,
     activeTab,
@@ -323,8 +361,10 @@ export const useLogStore = defineStore('logs', () => {
     appendTerminal,
     logUI,
     appendBuild,
+    appendRoot,
     logBuild,
     clearBuild,
+    clearRoot,
     appendNodeLog,
     ensureNodeTab,
     removeNodeTab,
@@ -332,6 +372,7 @@ export const useLogStore = defineStore('logs', () => {
     loadNodeLogs,
     loadNodeHistory,
     loadTerminalHistory,
+    loadRootHistory,
     clearCurrent,
     clearTerminal,
     clearAll,

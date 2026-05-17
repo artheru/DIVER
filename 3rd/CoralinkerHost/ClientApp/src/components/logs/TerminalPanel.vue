@@ -31,6 +31,16 @@
         Build
         <span v-if="buildErrorCount > 0" class="error-badge">{{ buildErrorCount }}</span>
       </button>
+
+      <!-- Root Runtime Tab -->
+      <button
+        class="tab"
+        :class="{ active: activeTab === 'root' }"
+        @click="switchTab('root')"
+      >
+        Root
+        <span v-if="rootErrorCount > 0" class="error-badge">{{ rootErrorCount }}</span>
+      </button>
       
       <!-- 节点 Tabs -->
       <button 
@@ -144,16 +154,20 @@ const emit = defineEmits<{
 const logStore = useLogStore()
 const wireTapStore = useWireTapStore()
 
-const { activeTab, currentLines, nodeTabs, buildLines } = storeToRefs(logStore)
+const { activeTab, currentLines, nodeTabs, buildLines, rootLines } = storeToRefs(logStore)
 
 // Build 错误计数
 const buildErrorCount = computed(() => {
   return buildLines.value.filter(line => line.includes(': error ')).length
 })
 
+const rootErrorCount = computed(() => {
+  return rootLines.value.filter(line => isErrorLine(line)).length
+})
+
 // 当前 Tab 是否是有 WireTap 数据的节点（config 激活 OR 有已采集的日志）
 const currentNodeHasWireTap = computed(() => {
-  if (activeTab.value === 'terminal' || activeTab.value === 'build') {
+  if (activeTab.value === 'terminal' || activeTab.value === 'build' || activeTab.value === 'root') {
     return false
   }
   const ports = wireTapStore.getPortsWithDataForNode(activeTab.value)
@@ -166,9 +180,9 @@ const currentNodeInfo = computed(() => {
   return info || { uuid: activeTab.value, nodeName: activeTab.value.slice(0, 8) }
 })
 
-// 当前 Tab 是否是节点 Tab（非 terminal/build）
+// 当前 Tab 是否是节点 Tab（非 terminal/build/root）
 const isNodeTab = computed(() => {
-  return activeTab.value !== 'terminal' && activeTab.value !== 'build'
+  return activeTab.value !== 'terminal' && activeTab.value !== 'build' && activeTab.value !== 'root'
 })
 
 // 节点日志条目（结构化，直接从 store 获取）

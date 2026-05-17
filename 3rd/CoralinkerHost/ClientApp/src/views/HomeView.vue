@@ -4,7 +4,7 @@
   
   布局结构：
   ┌────────────────────────┬──────────────┐
-  │                        │   Assets     │
+  │                        │    Files     │
   │    Graph / Editor      │   Panel      │
   │        (左上)          │   (右上)     │
   ├────────────────────────┼──────────────┤
@@ -31,13 +31,6 @@
                   @click="setViewMode('graph')"
                 >
                   Graph
-                </button>
-                <button
-                  class="tab history-entry"
-                  @click="showHistoryPanel = true"
-                  title="View input history"
-                >
-                  History
                 </button>
                 <div
                   v-for="tab in tabs" 
@@ -201,12 +194,21 @@
       <!-- 右侧区域 -->
       <Pane :min-size="15" :max-size="50">
         <Splitpanes horizontal @resize="handleRightResize">
-          <!-- 右上：资源面板 -->
+          <!-- 右上：文件面板 -->
           <Pane :size="topRightPaneSize" :min-size="20">
             <div class="panel assets-panel">
               <div class="panel-header">
-                <span>Assets</span>
-                <n-button size="tiny" :disabled="isBuilding" @click="showNewFileDialog = true">+ New</n-button>
+                <span>Files</span>
+                <div class="files-actions">
+                  <n-button
+                    size="tiny"
+                    :type="remoteChanged ? 'warning' : 'default'"
+                    @click="showHistoryPanel = true"
+                  >
+                    History
+                  </n-button>
+                  <n-button size="tiny" :disabled="isBuilding" @click="showNewFileDialog = true">+ New</n-button>
+                </div>
               </div>
               <AssetTree :disabled="isBuilding" @select="handleFileSelect" />
             </div>
@@ -234,6 +236,23 @@
           placeholder="MyLogic"
           @keyup.enter="createNewFile"
         />
+        <div class="template-kind-row">
+          <span>Template</span>
+          <n-button
+            size="tiny"
+            :type="newTemplateKind === 'mcu' ? 'primary' : 'default'"
+            @click="newTemplateKind = 'mcu'"
+          >
+            MCU Logic
+          </n-button>
+          <n-button
+            size="tiny"
+            :type="newTemplateKind === 'root' ? 'primary' : 'default'"
+            @click="newTemplateKind = 'root'"
+          >
+            Root Logic
+          </n-button>
+        </div>
         <template #footer>
           <div class="dialog-footer">
             <n-button @click="showNewFileDialog = false">Cancel</n-button>
@@ -311,6 +330,7 @@ useAutoSave()
 
 const showNewFileDialog = ref(false)
 const newFileName = ref('')
+const newTemplateKind = ref<'mcu' | 'root'>('mcu')
 const graphCanvasRef = ref<InstanceType<typeof GraphCanvas> | null>(null)
 const codeEditorRef = ref<{ goToLine: (line: number) => void, getValue: () => string } | null>(null)
 const importFileRef = ref<HTMLInputElement | null>(null)
@@ -649,7 +669,7 @@ async function createNewFile() {
   if (!newFileName.value.trim()) return
   
   try {
-    await filesStore.createNewInput(newFileName.value.trim())
+    await filesStore.createNewInput(newFileName.value.trim(), newTemplateKind.value)
     showNewFileDialog.value = false
     newFileName.value = ''
     uiStore.success('File Created', `${newFileName.value}.cs created`)
@@ -966,6 +986,15 @@ async function handleStop() {
   cursor: pointer;
 }
 
+.template-kind-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 /* Splitpanes 样式覆盖 */
 :deep(.splitpanes) {
   background: transparent;
@@ -1207,19 +1236,6 @@ async function handleStop() {
   color: var(--text-color);
 }
 
-.tab.history-entry {
-  color: #79c0ff;
-  border-left: 1px solid var(--border-color);
-  border-right: 1px solid var(--border-color);
-  padding-left: 10px;
-  padding-right: 10px;
-}
-
-.tab.history-entry:hover {
-  background: rgba(79, 140, 255, 0.12);
-  color: #a5d6ff;
-}
-
 .tab.readonly {
   color: var(--text-muted);
   font-style: italic;
@@ -1295,6 +1311,12 @@ async function handleStop() {
 /* 资源面板 */
 .assets-panel {
   overflow: hidden;
+}
+
+.files-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* 终端面板 */
