@@ -48,6 +48,7 @@ internal static class Program
         });
 
         builder.Services.AddSignalR();
+        builder.Services.AddSingleton<HostRuntimePaths>();
         builder.Services.AddSingleton<ProjectStore>();
         builder.Services.AddSingleton<FileTreeService>();
         builder.Services.AddSingleton<TerminalBroadcaster>();
@@ -61,6 +62,13 @@ internal static class Program
         builder.Services.AddHostedService(sp => sp.GetRequiredService<WireTapAggregatorService>());
 
         var app = builder.Build();
+        var runtimePaths = app.Services.GetRequiredService<HostRuntimePaths>();
+        app.Logger.LogInformation(
+            "Runtime paths: Layout={Layout}, ContentRoot={ContentRoot}, DataDir={DataDir}, CompilerResources={CompilerResources}",
+            runtimePaths.RunLayout,
+            runtimePaths.ContentRoot,
+            runtimePaths.DataDir,
+            runtimePaths.CompilerResourcesDir);
 
         app.UseExceptionHandler(errorApp =>
         {

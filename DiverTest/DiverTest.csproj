@@ -42,7 +42,11 @@
 	</ItemGroup>
 
 	<Target Name="RebuildDiverCompiler" BeforeTargets="PreBuildEvent">
-		<MSBuild Projects="..\DiverCompiler\DiverCompiler.csproj" Targets="Rebuild" />
+		<MSBuild
+			Projects="..\DiverCompiler\DiverCompiler.csproj"
+			Targets="Rebuild"
+			Properties="Configuration=$(Configuration);Platform=AnyCPU;ResolveNuGetPackages=false"
+			RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier;RuntimeIdentifiers;SelfContained" />
 	</Target>
 
 	<UsingTask TaskName="CppCompile" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.CppTasks.Common.dll" />

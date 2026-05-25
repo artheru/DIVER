@@ -683,3 +683,266 @@
   - 常规 Release 构建失败原因是当前正在运行的 `CoralinkerHost (38248)` 锁住 `bin/Release/net8.0/CoralinkerHost.exe` / `.dll`，不是代码编译错误。
   - 改用临时输出目录验证编译：`dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release -p:OutputPath="bin\Release-importfix\"` 成功，0 error，仍有既有 50 个 warning。
   - 用户随后要求再跑一次正常编译；标准 Release 构建 `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release` 成功，0 error，仍有既有 50 个 warning，产物写入 `3rd/CoralinkerHost/bin/Release/net8.0`。
+
+### [summary] 2026 年 5 月 git 历史梳理
+- 用户要求查看 git 历史，概括 5 月主要改动，不需要细节。
+- 查询：
+  - `git log --since="2026-05-01" --until="2026-05-31 23:59:59" --date=short --pretty=format:"%h %ad %s" --name-only`
+  - `git log --since="2026-05-01" --until="2026-05-31 23:59:59" --date=short --pretty=format:"%h%x09%ad%x09%s" --shortstat`
+- 结果：
+  - `28eee6a`：MCUSerialBridge 构建流程、native DLL 拷贝、线程/停止稳定性，以及 CORAL-NODE-V2.1 BSP 相关改动。
+  - `b42a401`：CoralinkerHost 输入源文件 GitHistory、History UI、diff/build 版本信息等。
+  - `d02be69`：遥控器窗口边界限制。
+  - `612697a`：Root Logic 集成、DIVERSession 虚拟节点/变量元数据、Root 日志分栏、文件/Git/导入导出体验等综合增强。
+
+### [plan] ARM Linux 发行迁移计划修正
+- 用户提出 ARM Linux 平台迁移需求，优先顺序是先解决发行，再解决跨平台。
+- 初版计划误解了“ARM 上不 Build”的含义，写成 ARM 包只运行已有 generated artifacts。
+- 用户澄清：
+  - ARM 上不作为开发机，不在 ARM 上做源码开发。
+  - 但部署后的 ARM 包必须具备 Build 能力，可以通过 Host/UI/API 构建用户逻辑。
+- 已修正计划文件：
+  - `c:\Users\lvzhe\.cursor\plans\arm_linux_发行迁移_24982563.plan.md`
+- 修正要点：
+  - ARM 端 framework-dependent 包需要依赖 .NET 8 SDK，而不仅是 runtime。
+  - 发布包默认是可运行且可 Build 的 `standard` 包。
+  - 包内需要发布 `res/compiler/`，包含 `DiverCompiler.exe`、`RunOnMCU.cs`、`DIVERInterface.cs`、`DIVERCommonUtils.cs`、`Extensions.cs` 等编译资源。
+  - `DiverBuildService` 后续要从发布包资源目录读取编译资源，不再从源码仓库 `../../DiverTest` 推导。
+  - `with-history` 模式额外携带 `data/.git`，用于保留 History/diff/checkout 能力。
+- 备注：
+  - 本轮仍在 Plan mode，仅修改 markdown 计划和 `ai-deck` 记录，没有进入代码实现。
+
+### [plan] ARM Linux 发行迁移计划补充双运行布局
+- 用户补充要求：
+  - 必须同时支持开发环境下直接运行和打包以后的运行。
+  - 不能为了发布包把当前源码仓库调试/开发流程破坏掉。
+- 已更新计划文件：
+  - `c:\Users\lvzhe\.cursor\plans\arm_linux_发行迁移_24982563.plan.md`
+- 新增设计：
+  - 引入 `RunLayout`：`Development` / `Published`。
+  - `Development`：从源码仓库运行，继续支持当前 Debug/Release、本地 Build、前端调试。
+  - `Published`：从 publish 输出目录运行，不依赖源码仓库相对路径，但仍具备 Build 能力。
+  - 编译资源查找优先级：
+    1. 环境变量 `CORALINKER_COMPILER_RES_DIR`。
+    2. 发布包内 `ContentRoot/res/compiler`。
+    3. 开发环境 fallback：`ContentRoot/../../DiverTest`。
+  - 数据目录允许 `CORALINKER_DATA_DIR` 覆盖；默认仍可使用 ContentRoot 下的 `data`。
+  - 后续实现时 `DiverBuildService` 只依赖统一路径层，避免继续散落 `../../DiverTest` 之类推导。
+- 验证要求补充：
+  - Windows 源码仓库原地运行。
+  - Windows publish 目录运行。
+  - linux-arm64 framework-dependent 发布包运行并执行 Build。
+
+### [plan] ARM Linux 迁移计划补充 README 分层
+- 用户要求审视迁移计划，明确文档落地：
+  - 运行目录和发布相关改动写到 Host README。
+  - 平台相关改动写到对应 README。
+- 已更新计划文件：
+  - `c:\Users\lvzhe\.cursor\plans\arm_linux_发行迁移_24982563.plan.md`
+- 文档分层：
+  - `3rd/CoralinkerHost/README.md`：
+    - 新增“运行布局与发布”。
+    - 说明 `Development` / `Published`、`ContentRoot`、`DataDir`、`CompilerResourcesDir`、`RuntimeAssembliesDir`。
+    - 说明 `CORALINKER_DATA_DIR`、`CORALINKER_COMPILER_RES_DIR`。
+    - 说明 linux-arm64 framework-dependent 发布命令、ARM 端 .NET 8 SDK 要求、`standard` / `with-history` 包内容。
+  - `3rd/CoralinkerSDK/README.md`：
+    - 新增“平台抽象与部署边界”。
+    - 说明 `ISerialPortDiscovery`、Windows WMI/Registry、Linux `/dev/serial/by-id`、native library 名称解析。
+    - 说明 Host/Medulla/CLI 如何复用统一平台接口。
+  - `MCUSerialBridge/README.md`：
+    - 新增“跨平台 native bridge”。
+    - 说明当前 Win32 串口/线程依赖、`serial_transport_win32/posix`、`os_sync_win32/posix`。
+    - 说明 Windows `mcu_serial_bridge.dll` 与 Linux ARM64 `libmcu_serial_bridge.so` 产物。
+    - 说明 Linux 串口权限、udev/dialout、交叉编译工具链要求。
+- 验证要求补充：
+  - README 中发布命令、环境变量、目录结构、平台边界必须与最终实现一致。
+
+### [implementation] DiverCompilerPortable 工程拆分
+- 用户要求：
+  - 原 `DiverCompiler` 工程必须继续保留给 Windows/VS 调试，不再迁移或修改其 `.csproj`。
+  - 新建同级 `DiverCompilerPortable`，引用原工程内部 C# 源文件，仅新增工程配置。
+  - Host 使用 `DiverCompilerPortable` 产物作为可发布/跨平台编译器资源。
+- 实施：
+  - 使用 `git checkout -- DiverCompiler/DiverCompiler.csproj` 撤销此前对原工程文件的迁移改动，恢复原 `net48` VS 工程。
+  - 新增 `DiverCompilerPortable/DiverCompilerPortable.csproj`：
+    - `TargetFramework=netstandard2.0`。
+    - `AssemblyName=DiverCompiler`，保证 Fody weaver 名称仍为 `DiverCompiler.dll`。
+    - `EnableDefaultCompileItems=false`，显式链接原 `DiverCompiler` 下的 `ModuleWeaver.cs`、`Processor.cs`、`Processor.Builtin.cs`、`Processor.StringInterpolationHandler.cs`、`Program.cs`。
+    - 复制 `DiverTest` 中 Host build 所需的 `RunOnMCU.cs`、`DIVERInterface.cs`、`DIVERCommonUtils.cs`、`Extensions.cs`、`extra_methods.txt` 到输出目录。
+    - 复制 `DiverCompiler/native/**/*` 到输出目录。
+    - 早期曾加入构建后同步输出到 `DiverTest`，但该目标会把内容资源也复制过去并覆盖 `DiverTest/native` 文件，随后已删除。
+  - 修改 `3rd/CoralinkerHost/CoralinkerHost.csproj`：
+    - 不使用普通 `ProjectReference` 引用 Portable，避免发布时把 Portable 输出默认复制到发布根目录。
+    - 新增 `BuildDiverCompilerPortable` MSBuild target，在 Host build/publish 前对 Portable 工程执行 `Clean;Build`，避免输出目录残留旧文件进入发布包。
+    - 新增 `CollectDiverCompilerPortablePublishResources` target，将 Portable 输出映射到发布包 `res/compiler/`。
+    - 第一次 publish 发现 `NETSDK1152` 重复发布项，原因是直接在 `ResolvedFileToPublish` 上使用未限定 metadata 导致重复；改为先收集到 `DiverCompilerPortablePublishFile`，再映射到 `ResolvedFileToPublish`。
+  - 修改 `HostRuntimePaths`：
+    - Development 下优先查找 `DiverCompilerPortable/bin/Debug/netstandard2.0` 和 `bin/Release/netstandard2.0`。
+    - 再 fallback 到 `DiverTest`。
+  - 清理副作用：
+    - 还原 `DiverTest/native/compile_native_binary.py`。
+    - 删除误复制到 `DiverTest` 根目录的 `DIVERCommonUtils.cs`、`DIVERInterface.cs`。
+    - 用户复查发现 `DiverTest` 下仍有 untracked 生成物；已删除 `DiverCompiler.deps.json`、`DiverCompiler.dll.config` 和 `native/arm_ram_overlay.ld`、`native/dll_test.cpp`、`native/testcpp.*`。
+- 验证：
+  - `dotnet build DiverCompilerPortable\DiverCompilerPortable.csproj -c Debug`：成功，1 warning，0 error。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release --no-restore`：成功，既有 warnings，0 error。
+  - `dotnet publish 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release -o ai-deck\publish-portable-check --no-restore`：成功，确认发布目录 `res/compiler/DiverCompiler.dll` 存在。
+  - `git status --short -- DiverTest`：无输出，确认 `DiverTest` 已恢复干净。
+
+### [implementation] Host Publish 专用目录和忽略规则修正
+- 用户要求：
+  - 给 Host 加一个 Publish 专用文件夹。
+  - publish 时目录名最好带 commit 号和时间。
+  - 后续明确指出：不要把 publish 目录放进 git 提交范围；根 `.gitignore` 已有 `publish/` 通用规则，不应额外放行。
+- 实施：
+  - 新增 `3rd/CoralinkerHost/publish-host.ps1`。
+    - 默认 `Release` 发布。
+    - 输出目录为 `3rd/CoralinkerHost/Publish/CoralinkerHost_<commit>_<yyyyMMdd-HHmmss>/`。
+    - 写入 `publish-info.json`，包含 app、configuration、runtime、commit、commitTime、dirty、publishTime、outputDirectory。
+  - 曾短暂添加 `/3rd/CoralinkerHost/Publish/` 和 `/3rd/CoralinkerHost/Publish/.gitignore` 放行规则，用户指出这是误解；已撤销。
+  - 已删除 `3rd/CoralinkerHost/Publish/.gitignore`，让根 `.gitignore` 的 `publish/` 通用规则直接忽略整个发布目录。
+- 验证：
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File 3rd\CoralinkerHost\publish-host.ps1 -NoRestore` 成功。
+  - 本次输出目录：`3rd/CoralinkerHost/Publish/CoralinkerHost_612697a_20260525-223825/`。
+  - `publish-info.json` 已写入 commit `612697a`、commit 时间 `2026-05-17T14:37:29+08:00`、publish 时间 `2026-05-25T22:38:25.4813643+08:00`。
+  - `git check-ignore -v 3rd/CoralinkerHost/Publish/CoralinkerHost_612697a_20260525-223825/publish-info.json` 命中 `.gitignore:187:publish/`，确认发布产物不进入 git。
+
+### [verification] Host 发布目录启动测试
+- 用户要求：
+  - 测试发布出来的文件能不能启动，并说明启动位置。
+- 测试目录：
+  - `3rd/CoralinkerHost/Publish/CoralinkerHost_612697a_20260525-223825/`
+- 启动命令：
+  - 在上述目录执行 `.\CoralinkerHost.exe`。
+  - 曾尝试设置 `ASPNETCORE_URLS=http://127.0.0.1:5099`，但当前 `Program.cs` 里硬编码 `builder.WebHost.UseUrls("http://0.0.0.0:4499")`，所以实际监听端口仍是 `4499`。
+- 结果：
+  - 进程启动后输出 `Runtime paths: Layout=Published`。
+  - `ContentRoot`、`DataDir`、`CompilerResources` 均指向发布目录。
+  - `netstat -ano | findstr 4499` 显示发布目录下的 `CoralinkerHost.exe` 正在监听 `0.0.0.0:4499`。
+  - `curl.exe -I --max-time 10 http://127.0.0.1:4499/` 返回 `HTTP/1.1 200 OK`，`Content-Type: text/html`。
+  - `Get-Process -Id 16984` 确认监听进程路径为 `D:\Documents\Coral\DIVER\3rd\CoralinkerHost\Publish\CoralinkerHost_612697a_20260525-223825\CoralinkerHost.exe`。
+- 清理：
+  - 测试结束后执行 `taskkill /PID 16984 /T /F` 关闭发布 Host。
+  - 后台 shell 的 exit code 1 来自强制结束进程，不代表启动失败。
+
+### [implementation] 移除过时 Coralinker_arch 工程
+- 用户说明：
+  - `Coralinker_arch` 代码非常过时且没有适配，构建不了是正常的。
+  - 用户已删除 `3rd/Coralinker_arch` 目录，需要删除其余工程文件/解决方案引用。
+- 相关排查：
+  - VS 报错中 `Coralinker_arch` 的 `System.Management`、`System.IO.Ports`、`DIVERVehicle` 缺失属于该过时工程自身问题，不再修复。
+  - 另外 Host 报大量重复定义的根因是 `3rd/CoralinkerHost/Publish/**` 被 SDK-style 默认纳入编译；已在 `CoralinkerHost.csproj` 中排除 `Publish/**`，并验证 Host Release 构建通过。
+- 实施：
+  - 从 `DIVER.sln` 删除 `Coralinker_arch` 项目项：
+    - 项目 GUID `{FEBBD16F-0950-4125-95F9-B02C85DA9737}`。
+    - 路径 `3rd\Coralinker_arch\Coralinker_arch.csproj`。
+  - 从 `ProjectConfigurationPlatforms` 删除该 GUID 的 Debug/Release、Any CPU/x64/x86 配置。
+  - 从 `NestedProjects` 删除该 GUID 到 `3rd-party` solution folder 的挂载。
+  - `3rd/Coralinker_arch` 下 tracked 文件当前均为 deleted，符合用户删除工程目录的意图。
+- 验证：
+  - `dotnet sln DIVER.sln list` 输出不再包含 `3rd\Coralinker_arch\Coralinker_arch.csproj`。
+  - `rg "Coralinker_arch|FEBBD16F-0950-4125-95F9-B02C85DA9737"` 只剩 `DiverTest/ChangeLogForDIVERCommonUtils.md` 的历史说明文本。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release --no-restore` 成功，0 error。
+
+### [fix] DiverTest 调用 net48 DiverCompiler 时继承 TargetFramework
+- 用户反馈：
+  - 移除 `Coralinker_arch` 后，VS 重新生成仍剩 1 个失败。
+  - 失败点在 `DiverTest` 的 `RebuildDiverCompiler` target 调用旧 `DiverCompiler.csproj`：
+    `Your project does not reference ".NETFramework,Version=v4.8" framework.`
+- 根因：
+  - `DiverTest` 是 SDK-style `net8.0` 项目。
+  - `DiverTest.csproj` 里的 `<MSBuild Projects="..\DiverCompiler\DiverCompiler.csproj" Targets="Rebuild" />` 会把父项目全局属性传给被调用项目。
+  - 旧 `DiverCompiler` 是非 SDK-style `net48` 工程，继承 `TargetFramework=net8.0` 后 NuGet/MSBuild framework 判断错乱。
+- 修复：
+  - 修改 `DiverTest/DiverTest.csproj` 的 `RebuildDiverCompiler` target：
+    - `Properties="Configuration=$(Configuration);Platform=AnyCPU"`。
+    - `RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier;RuntimeIdentifiers;SelfContained"`。
+  - 保持 `DiverCompiler/DiverCompiler.csproj` 不变，仍可供 Windows/VS 调试。
+- 验证：
+  - `dotnet build DiverTest\DiverTest.csproj -c Release --no-restore` 成功。
+  - 输出显示旧 `DiverCompiler` 正常构建为 `DiverCompiler\bin\Release\DiverCompiler.exe`，随后 `DiverTest` 生成成功。
+  - `git status --short -- DiverTest DiverCompiler` 仅显示 `M DiverTest/DiverTest.csproj`，没有额外生成物进入 git 状态。
+
+### [correction] 保留 DiverCompiler 在主解决方案中
+- 用户反馈：
+  - 不同意把 `DiverCompiler` 从主 `DIVER.sln` 移除。
+  - 需要保留同事在 VS 主解决方案里看到/调试旧 `DiverCompiler` 工程的工作流。
+- 纠正：
+  - 撤回“从主 sln 移除 `DiverCompiler`”的做法。
+  - 已把 `DiverCompiler` 项目项、solution 配置映射和 NestedProjects 挂载加回 `DIVER.sln`。
+  - `Coralinker_arch` 仍保持移除。
+  - 根本修复仍保留在 `DiverTest/DiverTest.csproj`：间接调用旧 `DiverCompiler.csproj` 时清掉父项目继承的 `TargetFramework`/Runtime 属性。
+- 验证：
+  - `dotnet sln DIVER.sln list`：包含 `DiverCompiler\DiverCompiler.csproj`，不包含 `Coralinker_arch`。
+  - `dotnet build DiverCompiler\DiverCompiler.csproj -c Release --no-restore`：成功，0 error。
+  - `dotnet restore DIVER.sln`：成功，未再出现 `.NETFramework v4.8` 错误。
+  - `dotnet build DIVER.sln -c Release --no-restore`：成功，0 error。
+
+### [fix] VS MSBuild 下 DiverCompiler packages.config 误走 NuGet assets
+- 用户反馈：
+  - VS 输出显示 `DiverCompiler` 在 `Release|Any CPU` 下被跳过生成，但随后 `DiverCompiler.csproj` 又报：
+    `Your project does not reference ".NETFramework,Version=v4.8" framework.`
+  - 用户要求严查是否存在两个同名项目及引用关系。
+- 严查结果：
+  - `DIVER.sln` 中只有一个 `DiverCompiler` 项目：
+    `DiverCompiler\DiverCompiler.csproj`，GUID `{F9E5081B-0F60-4C0C-9794-B2EB9E6947E1}`。
+  - `DiverCompilerPortable` 不在 `DIVER.sln` 中，项目名不同；只是 `AssemblyName=DiverCompiler`，供 Host 发布和跨平台 weaver 使用。
+  - 直接引用/调用关系：
+    - `DIVER.sln` 包含旧 `DiverCompiler`。
+    - `DiverTest/DiverTest.csproj` 的 `RebuildDiverCompiler` target 会调用旧 `DiverCompiler.csproj`。
+    - `3rd/CoralinkerHost/CoralinkerHost.csproj` 调用 `DiverCompilerPortable`，不调用旧 `DiverCompiler.csproj`。
+- 根因：
+  - `DIVER.sln` 中 `DiverCompiler` 原本缺少 `Debug|Any CPU.Build.0` 和 `Release|Any CPU.Build.0`，所以 VS solution build 显示“已跳过生成”。
+  - 旧 `DiverCompiler` 是 `packages.config` + explicit `HintPath` 的 net48 工程，但 VS MSBuild 默认进入 `Microsoft.NuGet.targets` 的 `ResolveNuGetPackageAssets`，该逻辑面向 `project.assets.json`/PackageReference，导致 framework 判断错乱。
+- 修复：
+  - `DIVER.sln`：给 `DiverCompiler` 补齐：
+    - `Debug|Any CPU.Build.0 = Debug|Any CPU`
+    - `Release|Any CPU.Build.0 = Release|Any CPU`
+  - `Directory.Build.props`：仅对 `MSBuildProjectName == DiverCompiler` 设置：
+    - `ResolveNuGetPackages=false`
+  - `DiverTest/DiverTest.csproj`：调用旧 `DiverCompiler.csproj` 时显式传：
+    - `ResolveNuGetPackages=false`
+    - 继续 `RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier;RuntimeIdentifiers;SelfContained"`
+  - 未修改 `DiverCompiler/DiverCompiler.csproj`。
+- 验证：
+  - `MSBuild.exe DiverCompiler\DiverCompiler.csproj /t:Rebuild /p:Configuration=Release /p:Platform=AnyCPU /p:ResolveNuGetPackages=false /v:minimal` 成功。
+  - `MSBuild.exe DIVER.sln /t:Rebuild /p:Configuration=Release /p:Platform="Any CPU" /m:1 /v:minimal` 成功，0 error。
+
+### [docs] Host README 补充发布打包说明
+- 用户反馈：
+  - 发布脚本和发布目录结构没有写入 README。
+  - 如果后续上下文丢失，就无法知道如何发布打包。
+- 实施：
+  - 更新 `3rd/CoralinkerHost/README.md`，新增“发布与运行”章节。
+  - 文档覆盖：
+    - `Development` / `Published` 两种运行布局。
+    - `publish-host.ps1` 基本命令。
+    - `-NoRestore` 用法。
+    - `-Runtime linux-arm64` 用法。
+    - 输出目录格式：`3rd/CoralinkerHost/Publish/CoralinkerHost_<commit>_<yyyyMMdd-HHmmss>/`。
+    - `publish-info.json` 字段：commit、commitTime、dirty、publishTime、configuration、runtime、outputDirectory。
+    - 发布包关键内容：Host 主程序、`wwwroot/`、`res/compiler/`、native bridge、`publish-info.json`。
+    - `res/compiler/` 来源于 `DiverCompilerPortable`，原 `DiverCompiler` 保留给 Windows/VS 调试。
+    - 启动命令和默认地址 `http://127.0.0.1:4499/`。
+    - 当前 `Program.cs` 固定 `UseUrls("http://0.0.0.0:4499")`，`ASPNETCORE_URLS` 暂不能覆盖端口。
+    - 首次运行生成 `data/`，可用 `CORALINKER_DATA_DIR` 覆盖。
+    - 可用 `CORALINKER_COMPILER_RES_DIR` 覆盖 compiler resource。
+    - `Publish/` 被根 `.gitignore` 的 `publish/` 规则忽略，不应提交发布产物。
+    - `CoralinkerHost.csproj` 已排除 `Publish/**`，避免发布包里的 `.cs` 被编进 Host。
+- 验证：
+  - 文档更新，无代码构建验证。
+
+### [docs] Host README 目录结构补充 Publish
+- 用户反馈：
+  - `3rd/CoralinkerHost/README.md` 的“目录结构”树没有体现 `Publish/`。
+- 实施：
+  - 在目录结构树中新增：
+    - `Publish/`
+    - `CoralinkerHost_<commit>_<yyyyMMdd-HHmmss>/`
+    - `CoralinkerHost.exe`
+    - `publish-info.json`
+    - `wwwroot/`
+    - `res/compiler/`
+    - `data/`
+    - `publish-host.ps1`
+  - 保持与“发布与运行”章节中的发布包内容说明一致。

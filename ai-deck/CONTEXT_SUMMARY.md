@@ -4,21 +4,16 @@
 
 ## 最近一次支持
 
-- 时间：2026-05-17 14:35 UTC+8
-- 事项：修复 Project Load 导入 Git 历史时报 Git object 文件 Access denied。
+- 时间：2026-05-25 23:14 UTC+8
+- 事项：补充 Host README 目录结构中的发布目录。
 - 背景：
-  - 用户在 Load project 时遇到 `[UI] ERROR: Import failed: Error: Access to the path '<git-object-hash>' is denied.`。
-  - 根因判断：导入时会清理旧 `data/.git`，Windows 下 Git object 文件可能带只读/隐藏等属性，直接 `Directory.Delete(..., recursive: true)` 会失败。
-- 已实现：
-  - `ApiRoutes.cs` 新增 `DeleteDirectoryIfExists()`：删除目录前递归将所有文件/目录属性设为 `FileAttributes.Normal`。
-  - `ApiRoutes.cs` 新增 `DeleteFileIfExists()`：删除 `.gitignore` 前恢复普通属性。
-  - Project import 清理 `inputs`、`generated`、`.git`、`.gitignore` 时改用上述 helper。
-  - Zip 解压覆盖已有文件前，先将目标文件属性设为 `Normal`，避免覆盖只读文件失败。
+  - 用户指出 `3rd/CoralinkerHost/README.md` 的“目录结构”树没有加入发布相关目录。
+- 已调整：
+  - 在 README “目录结构”中加入 `Publish/CoralinkerHost_<commit>_<yyyyMMdd-HHmmss>/`。
+  - 补充发布目录下的 `CoralinkerHost.exe`、`publish-info.json`、`wwwroot/`、`res/compiler/`、`data/`。
+  - 补充 `publish-host.ps1` 在 Host 根目录中的位置。
 - 验证：
-  - `ReadLints` 检查 `ApiRoutes.cs` 无错误。
-  - 起初常规 Release 构建因运行中的 `CoralinkerHost (38248)` 锁住 `bin/Release/net8.0/CoralinkerHost.exe` / `.dll` 无法覆盖。
-  - 使用临时输出目录验证：`dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release -p:OutputPath="bin\Release-importfix\"` 成功，0 error，仍有既有 50 个 warning。
-  - 用户随后要求正常编译一次；标准命令 `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release` 已成功，0 error，仍有既有 50 个 warning。
+  - 文档更新，无代码验证项。
 
 ## 本次工作记录
 

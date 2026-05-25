@@ -12,13 +12,15 @@ public sealed class DiverBuildService
     private readonly TerminalBroadcaster _terminal;
     private readonly ProjectStore _store;
     private readonly GitHistoryService _history;
+    private readonly HostRuntimePaths _paths;
     private int _isBuilding;
 
-    public DiverBuildService(TerminalBroadcaster terminal, ProjectStore store, GitHistoryService history)
+    public DiverBuildService(TerminalBroadcaster terminal, ProjectStore store, GitHistoryService history, HostRuntimePaths paths)
     {
         _terminal = terminal;
         _store = store;
         _history = history;
+        _paths = paths;
     }
 
     public bool IsBuilding => Volatile.Read(ref _isBuilding) != 0;
@@ -50,6 +52,9 @@ public sealed class DiverBuildService
         await _terminal.BuildLineAsync($"Source length: {logicCs.Length} characters", ct);
         await _terminal.BuildLineAsync($"Source commit: {sourceHead.ShortHash} ({sourceHead.CommitTime:yyyy-MM-dd HH:mm:ss zzz})", ct);
         await _terminal.BuildLineAsync($"Build time: {buildTime:yyyy-MM-dd HH:mm:ss zzz}", ct);
+        await _terminal.BuildLineAsync($"Runtime paths: {_paths.Describe()}", ct);
+        EnsureDotnetSdkAvailable();
+        EnsureCompilerResourcesAvailable();
 
         // Use single fixed build folder - clear it before each build
         var buildRoot = Path.Combine(_store.BuildsDir, "current");
@@ -91,36 +96,33 @@ public sealed class DiverBuildService
         var projDir = Path.Combine(buildRoot, "proj");
         Directory.CreateDirectory(projDir);
 
-        // Copy only the essentials from the repo (no bin/obj/pdb/etc).
-        // Repo layout: <repo>/3rd/CoralinkerHost -> repo root is ../../ from HostRoot
-        var repoRoot = Path.GetFullPath(Path.Combine(_store.HostRoot, "..", ".."));
-        var diverTestDir = Path.Combine(repoRoot, "DiverTest");
+        var compilerDir = _paths.CompilerResourcesDir;
+        await _terminal.BuildLineAsync($"Compiler resources: {compilerDir}", ct);
 
-        var weaverExe = Path.Combine(diverTestDir, "DiverCompiler.exe");
-        if (!File.Exists(weaverExe))
-            throw new FileNotFoundException("Missing DiverCompiler.exe (expected in DiverTest).", weaverExe);
+        var weaverPath = ResolveWeaverPath(compilerDir);
+        var weaverFileName = Path.GetFileName(weaverPath);
 
-        File.Copy(weaverExe, Path.Combine(projDir, "DiverCompiler.exe"), overwrite: true);
+        CopyCompilerDirectory(compilerDir, projDir);
 
-        var extraMethods = Path.Combine(diverTestDir, "extra_methods.txt");
+        var extraMethods = Path.Combine(compilerDir, "extra_methods.txt");
         if (File.Exists(extraMethods))
             File.Copy(extraMethods, Path.Combine(projDir, "extra_methods.txt"), overwrite: true);
 
-        var runOnMcu = Path.Combine(diverTestDir, "RunOnMCU.cs");
+        var runOnMcu = Path.Combine(compilerDir, "RunOnMCU.cs");
         if (!File.Exists(runOnMcu))
-            throw new FileNotFoundException("Missing RunOnMCU.cs (expected in DiverTest).", runOnMcu);
+            throw new FileNotFoundException("Missing RunOnMCU.cs.", runOnMcu);
         File.Copy(runOnMcu, Path.Combine(projDir, "RunOnMCU.cs"), overwrite: true);
 
         // Minimal references for common user inputs (e.g., DiverTest/TestLogic.cs) that derive from LocalDebugDIVERVehicle.
-        var diverInterface = Path.Combine(diverTestDir, "DIVER", "DIVERInterface.cs");
+        var diverInterface = ResolveCompilerFile(compilerDir, "DIVERInterface.cs", Path.Combine("DIVER", "DIVERInterface.cs"));
         if (File.Exists(diverInterface))
             File.Copy(diverInterface, Path.Combine(projDir, "DIVERInterface.cs"), overwrite: true);
 
-        var diverCommonUtils = Path.Combine(diverTestDir, "DIVER", "DIVERCommonUtils.cs");
+        var diverCommonUtils = ResolveCompilerFile(compilerDir, "DIVERCommonUtils.cs", Path.Combine("DIVER", "DIVERCommonUtils.cs"));
         if (File.Exists(diverCommonUtils))
             File.Copy(diverCommonUtils, Path.Combine(projDir, "DIVERCommonUtils.cs"), overwrite: true);
 
-        var extensions = Path.Combine(diverTestDir, "Extensions.cs");
+        var extensions = Path.Combine(compilerDir, "Extensions.cs");
         if (File.Exists(extensions))
             File.Copy(extensions, Path.Combine(projDir, "Extensions.cs"), overwrite: true);
 
@@ -174,11 +176,12 @@ public sealed class DiverBuildService
                          <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
                          <PackageReference Include="System.IO.Ports" Version="9.0.3" />
                          <PackageReference Include="System.Management" Version="9.0.4" />
-                         <WeaverFiles Include="DiverCompiler.exe" />
+                         <WeaverFiles Include="__WEAVER_FILE__" />
                        </ItemGroup>
                      </Project>
                      """;
         csproj = csproj.Replace("__ASSEMBLY_NAME__", assemblyName, StringComparison.Ordinal);
+        csproj = csproj.Replace("__WEAVER_FILE__", weaverFileName, StringComparison.Ordinal);
         await File.WriteAllTextAsync(Path.Combine(projDir, "LogicBuild.csproj"), csproj, Encoding.UTF8, ct);
 
         var fodyWeavers = """
@@ -296,7 +299,8 @@ public sealed class DiverBuildService
             buildId
         );
         var artifacts = ExtractArtifacts(dllPath, _store.GeneratedDir, versionInfo);
-        var rootLogics = ExtractRootLogics(dllPath, _store.GeneratedDir, versionInfo);
+        var rootAssemblyPath = CopyRootRuntimeAssembly(dllPath, _store.GeneratedDir, buildId, assemblyName);
+        var rootLogics = ExtractRootLogics(rootAssemblyPath, _store.GeneratedDir, versionInfo);
         
         foreach (var kv in artifacts)
         {
@@ -345,6 +349,68 @@ public sealed class DiverBuildService
             ring.Add(line);
             // MSBuild 输出不加时间戳，直接发送
             await _terminal.BuildLineRawAsync(line, ct);
+        }
+    }
+
+    private void EnsureCompilerResourcesAvailable()
+    {
+        if (!_paths.HasCompilerResources)
+        {
+            throw new InvalidOperationException(
+                $"Compiler resources are incomplete. Expected DiverCompiler.dll or DiverCompiler.exe and RunOnMCU.cs under {_paths.CompilerResourcesDir}.");
+        }
+    }
+
+    private static void EnsureDotnetSdkAvailable()
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            Arguments = "--list-sdks",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+
+        using var proc = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start dotnet SDK check.");
+        var output = proc.StandardOutput.ReadToEnd();
+        var error = proc.StandardError.ReadToEnd();
+        proc.WaitForExit();
+        if (proc.ExitCode != 0 || string.IsNullOrWhiteSpace(output))
+        {
+            throw new InvalidOperationException($"dotnet SDK is required for Build but was not found. {error}".Trim());
+        }
+    }
+
+    private static string ResolveCompilerFile(string compilerDir, string publishedName, string developmentRelative)
+    {
+        var published = Path.Combine(compilerDir, publishedName);
+        if (File.Exists(published)) return published;
+        return Path.Combine(compilerDir, developmentRelative);
+    }
+
+    private static string ResolveWeaverPath(string compilerDir)
+    {
+        var dll = Path.Combine(compilerDir, "DiverCompiler.dll");
+        if (File.Exists(dll)) return dll;
+
+        var exe = Path.Combine(compilerDir, "DiverCompiler.exe");
+        if (File.Exists(exe)) return exe;
+
+        throw new FileNotFoundException("Missing DiverCompiler.dll or DiverCompiler.exe.", dll);
+    }
+
+    private static void CopyCompilerDirectory(string sourceDir, string destinationDir)
+    {
+        foreach (var file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDir, file);
+            var dest = Path.Combine(destinationDir, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+            File.Copy(file, dest, overwrite: true);
         }
     }
 
@@ -464,7 +530,7 @@ public sealed class DiverBuildService
                 var meta = new RootLogicMetadata(
                     type.Name,
                     type.FullName ?? type.Name,
-                    Path.GetFullPath(builtDllPath),
+                    Path.GetRelativePath(outDir, builtDllPath).Replace('\\', '/'),
                     scanInterval,
                     versionInfo.SourceCommit,
                     versionInfo.SourceCommitShort,
@@ -489,6 +555,22 @@ public sealed class DiverBuildService
         }
 
         return dict;
+    }
+
+    private static string CopyRootRuntimeAssembly(string builtDllPath, string generatedDir, string buildId, string assemblyName)
+    {
+        var sourceDir = Path.GetDirectoryName(builtDllPath)
+            ?? throw new InvalidOperationException("Built DLL has no parent directory.");
+        var runtimeDir = Path.Combine(generatedDir, "assemblies", buildId);
+        Directory.CreateDirectory(runtimeDir);
+
+        foreach (var file in Directory.GetFiles(sourceDir, assemblyName + ".*", SearchOption.TopDirectoryOnly))
+        {
+            var dest = Path.Combine(runtimeDir, Path.GetFileName(file));
+            File.Copy(file, dest, overwrite: true);
+        }
+
+        return Path.Combine(runtimeDir, Path.GetFileName(builtDllPath));
     }
 
     private static bool TryGetRootCartType(Type type, out Type cartType)

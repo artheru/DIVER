@@ -4,4 +4,9 @@
 	<PropertyGroup>
 		<LangVersion>latest</LangVersion>
 	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(MSBuildProjectName)' == 'DiverCompiler'">
+		<!-- DiverCompiler is a legacy packages.config net48 project with explicit HintPath references. -->
+		<ResolveNuGetPackages>false</ResolveNuGetPackages>
+	</PropertyGroup>
 </Project>

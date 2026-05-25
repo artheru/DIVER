@@ -11,19 +11,19 @@ namespace CoralinkerHost.Services;
 public sealed class ProjectStore
 {
     private readonly object _gate = new();
-    private readonly IHostEnvironment _env;
+    private readonly HostRuntimePaths _paths;
 
     private ProjectState _state = ProjectState.CreateDefault();
 
-    public ProjectStore(IHostEnvironment env)
+    public ProjectStore(HostRuntimePaths paths)
     {
-        _env = env;
+        _paths = paths;
         EnsureDataLayout();
         LoadFromDiskIfExists();
     }
 
-    public string HostRoot => _env.ContentRootPath;
-    public string DataDir => Path.Combine(_env.ContentRootPath, "data");
+    public string HostRoot => _paths.ContentRoot;
+    public string DataDir => _paths.DataDir;
     public string AssetsDir => Path.Combine(DataDir, "assets");
     public string InputsDir => Path.Combine(AssetsDir, "inputs");
     public string GeneratedDir => Path.Combine(AssetsDir, "generated");

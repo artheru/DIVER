@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>DiverCompiler</AssemblyName>
+    <RootNamespace>DiverCompiler</RootNamespace>
+    <Nullable>disable</Nullable>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\DiverCompiler\ModuleWeaver.cs" Link="ModuleWeaver.cs" />
+    <Compile Include="..\DiverCompiler\Processor.cs" Link="Processor.cs" />
+    <Compile Include="..\DiverCompiler\Processor.Builtin.cs" Link="Processor.Builtin.cs" />
+    <Compile Include="..\DiverCompiler\Processor.StringInterpolationHandler.cs" Link="Processor.StringInterpolationHandler.cs" />
+    <Compile Include="..\DiverCompiler\Program.cs" Link="Program.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FodyHelpers" Version="6.8.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\DiverCompiler\native\**\*"
+      Link="native\%(RecursiveDir)%(Filename)%(Extension)"
+      CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\DiverTest\extra_methods.txt"
+      Link="extra_methods.txt"
+      CopyToOutputDirectory="PreserveNewest"
+      Condition="Exists('..\DiverTest\extra_methods.txt')" />
+    <Content Include="..\DiverTest\RunOnMCU.cs"
+      Link="RunOnMCU.cs"
+      CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\DiverTest\DIVER\DIVERInterface.cs"
+      Link="DIVERInterface.cs"
+      CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\DiverTest\DIVER\DIVERCommonUtils.cs"
+      Link="DIVERCommonUtils.cs"
+      CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\DiverTest\Extensions.cs"
+      Link="Extensions.cs"
+      CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

@@ -181,7 +181,7 @@ public sealed class RootRuntimeService : IDisposable
     {
         _alc?.Unload();
         _alc = new AssemblyLoadContext("RootRuntime-" + Guid.NewGuid().ToString("N"), isCollectible: true);
-        var asm = _alc.LoadFromAssemblyPath(meta.AssemblyPath);
+        var asm = _alc.LoadFromAssemblyPath(ResolveAssemblyPath(meta.AssemblyPath));
         var type = asm.GetType(meta.TypeName) ?? throw new InvalidOperationException($"Root type not found: {meta.TypeName}");
         _logic = Activator.CreateInstance(type) ?? throw new InvalidOperationException($"Cannot create Root logic: {meta.TypeName}");
 
@@ -191,6 +191,16 @@ public sealed class RootRuntimeService : IDisposable
         _metadata = meta;
         _iteration = 0;
         _statusText = "/";
+    }
+
+    private string ResolveAssemblyPath(string assemblyPath)
+    {
+        if (Path.IsPathRooted(assemblyPath))
+        {
+            return assemblyPath;
+        }
+
+        return Path.GetFullPath(Path.Combine(_store.GeneratedDir, assemblyPath.Replace('/', Path.DirectorySeparatorChar)));
     }
 
     private async Task RunLoopAsync(CancellationToken token)

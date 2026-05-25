@@ -77,6 +77,129 @@ dotnet run
 
 ---
 
+## 发布与运行
+
+Host 支持两种运行布局：
+
+- **Development**：从源码仓库里的 `3rd/CoralinkerHost` 直接 `dotnet run` 或 VS 启动。
+- **Published**：从 `3rd/CoralinkerHost/Publish/<包名>/` 启动，不依赖源码目录运行。
+
+### 发布命令
+
+在仓库根目录执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish-host.ps1
+```
+
+脚本默认使用 `Release` 配置，输出到：
+
+```text
+3rd/CoralinkerHost/Publish/CoralinkerHost_<commit>_<yyyyMMdd-HHmmss>/
+```
+
+例如：
+
+```text
+3rd/CoralinkerHost/Publish/CoralinkerHost_612697a_20260525-223825/
+```
+
+如果已经 restore 过，可以跳过 restore：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish-host.ps1 -NoRestore
+```
+
+发布特定 RID，例如 Linux ARM64 framework-dependent 包：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish-host.ps1 -Runtime linux-arm64
+```
+
+发布脚本会生成 `publish-info.json`，记录：
+
+- `commit`：当前 Git 短 hash
+- `commitTime`：该 commit 的提交时间
+- `dirty`：发布时工作区是否有未提交改动
+- `publishTime`：发布时间
+- `configuration` / `runtime` / `outputDirectory`
+
+### 发布包包含什么
+
+发布目录中至少应包含：
+
+- `CoralinkerHost.exe` / `CoralinkerHost.dll` / `CoralinkerHost.runtimeconfig.json`：Host 主程序。
+- `wwwroot/`：前端静态资源。若前端有改动，发布前先在 `ClientApp` 下执行 `npm run build`。
+- `res/compiler/`：部署后 Build 所需的编译资源。
+  - `DiverCompiler.dll`
+  - `DiverCompiler.deps.json`
+  - `RunOnMCU.cs`
+  - `DIVERInterface.cs`
+  - `DIVERCommonUtils.cs`
+  - `Extensions.cs`
+  - `extra_methods.txt`
+  - `native/`
+- `mcu_serial_bridge.dll`：Windows native bridge，存在时会复制。
+- `libmcu_serial_bridge.so`：Linux native bridge，存在时会复制。
+- `publish-info.json`：发布信息清单。
+
+`res/compiler/` 来自同级 `DiverCompilerPortable` 工程。原 `DiverCompiler` 工程仍保留给 Windows/VS 调试，不作为发布包内的 compiler resource 来源。
+
+### 启动发布包
+
+进入发布目录后运行：
+
+```powershell
+cd .\3rd\CoralinkerHost\Publish\CoralinkerHost_<commit>_<yyyyMMdd-HHmmss>\
+.\CoralinkerHost.exe
+```
+
+默认监听：
+
+```text
+http://127.0.0.1:4499/
+```
+
+当前 `Program.cs` 中固定了：
+
+```csharp
+builder.WebHost.UseUrls("http://0.0.0.0:4499");
+```
+
+所以 `ASPNETCORE_URLS` 暂时不会覆盖端口。
+
+### 运行时数据
+
+发布目录首次启动后会在自身目录下创建：
+
+```text
+data/
+```
+
+`data/` 用于保存项目状态、输入源码、生成产物、Git history 和 build 临时目录。它是运行时工作区，不是发布脚本预先打包的源码目录。
+
+可用环境变量覆盖运行时目录：
+
+```powershell
+$env:CORALINKER_DATA_DIR = "D:\CoralinkerData"
+.\CoralinkerHost.exe
+```
+
+可用环境变量覆盖 compiler resource 目录：
+
+```powershell
+$env:CORALINKER_COMPILER_RES_DIR = "D:\CompilerResources"
+.\CoralinkerHost.exe
+```
+
+### Git 与清理规则
+
+- `Publish/` 目录由仓库根 `.gitignore` 的通用 `publish/` 规则忽略，不应提交发布产物。
+- `CoralinkerHost.csproj` 已排除 `Publish/**`，避免 VS/MSBuild 把发布包里的 `.cs` 文件当作 Host 源码编译。
+- 需要重新发布时直接再次运行 `publish-host.ps1`，脚本会生成新的带 commit 和时间戳的目录。
+
+---
+
 ## 目录结构
 
 ```
@@ -109,6 +232,22 @@ dotnet run
 │   │       ├── HomeView.vue         # 主页面（节点图编辑器）
 │   │       └── ControlPanelView.vue # 独立遥控器页面 (/control)
 │   └── vite.config.ts
+├── Publish/                 # 发布输出目录 (gitignored)
+│   └── CoralinkerHost_<commit>_<yyyyMMdd-HHmmss>/
+│       ├── CoralinkerHost.exe
+│       ├── CoralinkerHost.dll
+│       ├── publish-info.json # commit / 时间 / dirty / 输出目录
+│       ├── wwwroot/          # 前端静态资源
+│       ├── res/
+│       │   └── compiler/     # 部署后 Build 所需编译资源
+│       │       ├── DiverCompiler.dll
+│       │       ├── RunOnMCU.cs
+│       │       ├── DIVERInterface.cs
+│       │       ├── DIVERCommonUtils.cs
+│       │       ├── Extensions.cs
+│       │       ├── extra_methods.txt
+│       │       └── native/
+│       └── data/             # 发布包运行时数据，首次运行/构建后生成
 ├── Services/
 │   ├── RuntimeSessionService.cs  # DIVERSession 异步封装 + 日志广播
 │   ├── ProjectStore.cs           # 项目文件管理 (调用 DIVERSession.Export/Import)
@@ -123,6 +262,7 @@ dotnet run
 │   └── assets/
 │       ├── inputs/          # 用户代码 (.cs)
 │       └── generated/       # 编译产物 (.bin, .bin.json)
+├── publish-host.ps1         # 发布脚本，输出到 Publish/<commit>_<time>/
 └── wwwroot/                 # 前端构建产物
 ```
 
