@@ -50,6 +50,10 @@
     <None Remove="data\**\*" />
     <Content Remove="data\**\*" />
     <EmbeddedResource Remove="data\**\*" />
+    <Compile Remove="ClientApp\**\*" />
+    <None Remove="ClientApp\**\*" />
+    <Content Remove="ClientApp\**\*" />
+    <EmbeddedResource Remove="ClientApp\**\*" />
     <Compile Remove="Publish\**\*" />
     <None Remove="Publish\**\*" />
     <Content Remove="Publish\**\*" />
@@ -60,7 +64,8 @@
     <MSBuild
       Projects="$(MSBuildThisFileDirectory)..\..\DiverCompilerPortable\DiverCompilerPortable.csproj"
       Targets="Clean;Build"
-      Properties="Configuration=$(Configuration)" />
+      Properties="Configuration=$(Configuration)"
+      RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier;RuntimeIdentifiers;SelfContained;PublishSingleFile;PublishTrimmed" />
   </Target>
 
   <Target Name="CollectDiverCompilerPortablePublishResources" BeforeTargets="ComputeFilesToPublish">

@@ -4,16 +4,35 @@
 
 ## 最近一次支持
 
-- 时间：2026-05-25 23:14 UTC+8
-- 事项：补充 Host README 目录结构中的发布目录。
+- 时间：2026-05-26 12:03 UTC+8
+- 事项：启动脚本补充 Git 依赖检查并重新打包。
 - 背景：
-  - 用户指出 `3rd/CoralinkerHost/README.md` 的“目录结构”树没有加入发布相关目录。
+  - 用户指出文件记录日志模块依赖 Git，启动脚本漏查 `git`。
+  - 用户要求再查是否还有其他运行期外部命令依赖。
 - 已调整：
-  - 在 README “目录结构”中加入 `Publish/CoralinkerHost_<commit>_<yyyyMMdd-HHmmss>/`。
-  - 补充发布目录下的 `CoralinkerHost.exe`、`publish-info.json`、`wwwroot/`、`res/compiler/`、`data/`。
-  - 补充 `publish-host.ps1` 在 Host 根目录中的位置。
+  - 搜索 `ProcessStartInfo` / `Process.Start` / `FileName=` 等运行期外部命令使用点。
+  - 确认 Host 运行期外部命令依赖：
+    - `dotnet`：`DiverBuildService` 执行 restore/build 和 SDK 检查。
+    - `git`：`GitHistoryService` 执行文件历史、diff、checkout/revert 等。
+    - `sha256sum`：Linux 启动脚本用于包体完整性校验。
+  - `packaging/start-host.ps1`：
+    - 新增 `Check-GitEnvironment`。
+    - 缺少 Git 时提示 Windows 安装 Git for Windows，Ubuntu/Debian 使用 apt，其他 Linux 使用发行版包管理器。
+  - `packaging/start-host.sh`：
+    - 新增 `git` 命令存在性和 `git --version` 检查。
+    - 缺少 Git 时输出安装提示。
+  - `packaging/install-dotnet-sdk-ubuntu.sh`：
+    - 安装 prerequisites 时同步安装 `git`。
+    - 安装完成输出 `git --version`。
+  - `3rd/CoralinkerHost/README.md`：
+    - 启动检查列表加入 Git。
+    - Ubuntu 安装脚本说明更新为同时安装 .NET SDK 和 Git。
 - 验证：
-  - 文档更新，无代码验证项。
+  - 默认 portable 发布成功：`3rd/CoralinkerHost/Publish/CoralinkerHost_df02128_20260526-120305/`。
+  - `start-host.ps1 -CheckOnly` 成功，输出包含 `Checking Git...`。
+  - 直接读取发布包内 `start-host.sh`，确认 Git 安装提示已进入包内。
+  - 直接读取发布包内 `install-dotnet-sdk-ubuntu.sh`，确认会安装 `git` 并输出 `git --version`。
+  - 已压缩：`3rd/CoralinkerHost/Publish/CoralinkerHost_df02128_20260526-120305.tar.gz`，大小 `8,870,445` bytes。
 
 ## 本次工作记录
 

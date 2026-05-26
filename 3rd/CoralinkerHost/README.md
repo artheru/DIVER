@@ -98,6 +98,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish
 3rd/CoralinkerHost/Publish/CoralinkerHost_<commit>_<yyyyMMdd-HHmmss>/
 ```
 
+默认不要传 `-Runtime`。默认产物是 framework-dependent portable 包，统一通过目标机安装的 .NET 8 SDK/Runtime 运行，可用于 Windows x64、Linux x64、Linux ARM64。由于部署后仍需要在目标机执行用户逻辑 Build，目标机应安装 .NET 8 SDK，而不只是 runtime。
+
 例如：
 
 ```text
@@ -110,7 +112,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish
 powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish-host.ps1 -NoRestore
 ```
 
-发布特定 RID，例如 Linux ARM64 framework-dependent 包：
+发布脚本默认不保留 `.pdb` 调试符号。需要生成可调试包时显式加 `-IncludePdb`：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish-host.ps1 -IncludePdb
+```
+
+默认发布包会保留 `.NET publish` 生成的 IIS 与静态资源端点文件。若明确只做 Kestrel 直接运行的精简包，可以显式排除：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish-host.ps1 -ExcludeIisConfig -ExcludeStaticWebAssetsEndpoints
+```
+
+默认 Host 发布包只保留 `CoralinkerSDK.dll` 作为引用库，不保留 SDK 独立可执行入口。若需要把 `CoralinkerSDK` CLI 一起放入包中，可以加：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish-host.ps1 -IncludeSdkExecutable
+```
+
+如确实需要生成某个 RID 的平台专用包，可传 `-Runtime`。这不是默认发行方式，例如 Linux ARM64 framework-dependent 包：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish-host.ps1 -Runtime linux-arm64
@@ -122,7 +142,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish
 - `commitTime`：该 commit 的提交时间
 - `dirty`：发布时工作区是否有未提交改动
 - `publishTime`：发布时间
-- `configuration` / `runtime` / `outputDirectory`
+- `configuration` / `runtime` / `includePdb` / `includeSdkExecutable` / `excludeIisConfig` / `excludeStaticWebAssetsEndpoints` / `startScripts` / `setupScripts` / `outputDirectory`
 
 ### 发布包包含什么
 
@@ -142,17 +162,100 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish
 - `mcu_serial_bridge.dll`：Windows native bridge，存在时会复制。
 - `libmcu_serial_bridge.so`：Linux native bridge，存在时会复制。
 - `publish-info.json`：发布信息清单。
+- `start-host.ps1` / `start-host.bat` / `start-host.sh`：Windows PowerShell、Windows CMD、Linux shell 启动入口。
+- `install-dotnet-sdk-ubuntu.sh`：Ubuntu 目标机安装 .NET 8 SDK 的辅助脚本，会根据当前 Ubuntu `VERSION_ID` 下载对应 Microsoft apt 源配置包。
+- `package-manifest.sha256`：发布包文件完整性清单，启动脚本会在启动前校验。
 
 `res/compiler/` 来自同级 `DiverCompilerPortable` 工程。原 `DiverCompiler` 工程仍保留给 Windows/VS 调试，不作为发布包内的 compiler resource 来源。
 
+`res/compiler/DiverCompiler.dll` 是 `netstandard2.0` 的 Fody weaver，在目标机执行 `dotnet build` 时由 .NET SDK 加载运行。它不是 Windows-only `DiverCompiler.exe`，因此同一个 portable 发布包可让 Compiler 在 Windows x64、Linux x64、Linux ARM64 上随目标机 SDK 运行。
+
+发布包不应包含 `ClientApp/` 源目录、`package*.json`、`tsconfig*.json` 或 `data/` 初始运行时工作区。`ClientApp` 只用于开发和前端构建，运行时读取的是 `wwwroot/`；`data/` 会在发布包首次启动后按需创建。
+
+由于 `CoralinkerSDK` 工程本身也可作为独立测试程序运行，`.NET publish` 可能会把 `CoralinkerSDK.exe`、`CoralinkerSDK.deps.json`、`CoralinkerSDK.runtimeconfig.json` 这类 SDK 可执行入口副产物复制到 Host 发布目录。Host 只需要 `CoralinkerSDK.dll` 作为引用库，`publish-host.ps1` 会清理这些 SDK sidecar 文件。
+
+`web.config` 是 IIS / ASP.NET Core Module 部署入口；如果用 `CoralinkerHost.exe` 或 `dotnet CoralinkerHost.dll` 直接运行，则不是必需文件。`CoralinkerHost.staticwebassets.endpoints.json` 是 ASP.NET Core 静态资源端点清单；当前程序使用 `UseDefaultFiles()` + `UseStaticFiles()` 直接读取 `wwwroot/`，没有使用 `MapStaticAssets()`，因此直跑模式下通常不是必需文件。发布脚本默认保留这两个 `.NET publish` 生成的文件，只有显式传 `-ExcludeIisConfig` / `-ExcludeStaticWebAssetsEndpoints` 时才删除。
+
 ### 启动发布包
 
-进入发布目录后运行：
+推荐使用包内启动脚本。启动脚本会先检查：
+
+- `dotnet` 是否可用。
+- 是否安装 .NET 8 runtime 和 ASP.NET Core 8 runtime。
+- 是否安装 .NET SDK 8 或更高版本，用于部署后 Build 用户逻辑。
+- `git` 是否可用；文件历史、diff、checkout/revert、项目导入导出历史依赖 Git。
+- Linux 下当前用户是否为 `root`；非 root 会直接失败，需使用 `sudo` 或 root 用户运行。
+- Host 主程序、`wwwroot/`、`res/compiler/`、`publish-info.json` 等必需文件是否存在。
+- `package-manifest.sha256` 中记录的包内文件 SHA256 是否匹配。
+
+Windows PowerShell：
+
+```powershell
+cd .\3rd\CoralinkerHost\Publish\CoralinkerHost_<commit>_<yyyyMMdd-HHmmss>\
+.\start-host.ps1
+```
+
+Windows CMD：
+
+```bat
+cd 3rd\CoralinkerHost\Publish\CoralinkerHost_<commit>_<yyyyMMdd-HHmmss>\
+start-host.bat
+```
+
+Linux：
+
+```shell
+cd 3rd/CoralinkerHost/Publish/CoralinkerHost_<commit>_<yyyyMMdd-HHmmss>/
+chmod +x ./start-host.sh
+sudo ./start-host.sh
+```
+
+只做启动前检查、不启动服务器：
+
+```powershell
+.\start-host.ps1 -CheckOnly
+```
+
+```shell
+sudo ./start-host.sh --check-only
+```
+
+若 Ubuntu 目标机缺少 `dotnet` 或 `git`，先运行包内安装脚本：
+
+```shell
+chmod +x ./install-dotnet-sdk-ubuntu.sh
+sudo ./install-dotnet-sdk-ubuntu.sh
+```
+
+该脚本仅支持 Ubuntu，会读取 `/etc/os-release` 的 `VERSION_ID`，从 `https://packages.microsoft.com/config/ubuntu/<VERSION_ID>/packages-microsoft-prod.deb` 下载对应 apt 源配置，然后安装 `dotnet-sdk-8.0`，同时安装 `git`。当前支持 `amd64` / `arm64` 架构。
+
+如果是其他 Linux 发行版，需要使用发行版包管理器安装 `git`，并参考 Microsoft 官方安装说明安装 .NET SDK 8.0：
+
+```text
+https://learn.microsoft.com/dotnet/core/install/linux
+```
+
+版本要求说明：
+
+- Host 本体目标框架是 `net8.0`，运行时必须存在 `Microsoft.NETCore.App 8.x` 和 `Microsoft.AspNetCore.App 8.x`。
+- 部署后 Build 用户逻辑需要 .NET SDK，`8.x` 或更高版本都可以。也就是说 SDK 9 可以用于 Build。
+- 但 SDK 9 不能替代 .NET 8 runtime；如果机器只有 SDK/Runtime 9，而没有 runtime 8，`net8.0` Host 仍可能无法启动。
+
+也可以直接进入发布目录运行：
 
 ```powershell
 cd .\3rd\CoralinkerHost\Publish\CoralinkerHost_<commit>_<yyyyMMdd-HHmmss>\
 .\CoralinkerHost.exe
 ```
+
+跨平台统一启动方式：
+
+```shell
+cd 3rd/CoralinkerHost/Publish/CoralinkerHost_<commit>_<yyyyMMdd-HHmmss>/
+dotnet CoralinkerHost.dll
+```
+
+Windows portable 包中出现的 `CoralinkerHost.exe` 是 Windows apphost 便捷入口；`CoralinkerHost.dll` 是三平台通用的托管程序集入口。
 
 默认监听：
 
@@ -195,7 +298,7 @@ $env:CORALINKER_COMPILER_RES_DIR = "D:\CompilerResources"
 ### Git 与清理规则
 
 - `Publish/` 目录由仓库根 `.gitignore` 的通用 `publish/` 规则忽略，不应提交发布产物。
-- `CoralinkerHost.csproj` 已排除 `Publish/**`，避免 VS/MSBuild 把发布包里的 `.cs` 文件当作 Host 源码编译。
+- `CoralinkerHost.csproj` 已排除 `Publish/**`、`ClientApp/**` 和 `data/**`，避免 VS/MSBuild 把发布产物、前端源文件或运行时工作区当作 Host 发布内容。
 - 需要重新发布时直接再次运行 `publish-host.ps1`，脚本会生成新的带 commit 和时间戳的目录。
 
 ---
@@ -232,11 +335,21 @@ $env:CORALINKER_COMPILER_RES_DIR = "D:\CompilerResources"
 │   │       ├── HomeView.vue         # 主页面（节点图编辑器）
 │   │       └── ControlPanelView.vue # 独立遥控器页面 (/control)
 │   └── vite.config.ts
+├── packaging/               # 发布包脚本源文件
+│   ├── start-host.ps1
+│   ├── start-host.bat
+│   ├── start-host.sh
+│   └── install-dotnet-sdk-ubuntu.sh
 ├── Publish/                 # 发布输出目录 (gitignored)
 │   └── CoralinkerHost_<commit>_<yyyyMMdd-HHmmss>/
 │       ├── CoralinkerHost.exe
 │       ├── CoralinkerHost.dll
 │       ├── publish-info.json # commit / 时间 / dirty / 输出目录
+│       ├── start-host.ps1
+│       ├── start-host.bat
+│       ├── start-host.sh
+│       ├── install-dotnet-sdk-ubuntu.sh
+│       ├── package-manifest.sha256
 │       ├── wwwroot/          # 前端静态资源
 │       ├── res/
 │       │   └── compiler/     # 部署后 Build 所需编译资源

@@ -946,3 +946,264 @@
     - `data/`
     - `publish-host.ps1`
   - 保持与“发布与运行”章节中的发布包内容说明一致。
+
+### [publish] CoralinkerHost 发布包内容收敛与 PDB 开关
+- 用户反馈：
+  - 旧发布目录 `3rd/CoralinkerHost/Publish/CoralinkerHost_612697a_20260525-223825` 中出现 `ClientApp/`，但其中只有 `package*.json` 与 `tsconfig*.json`，不是运行时需要内容。
+  - 发布包默认不需要 `.pdb` 调试符号，希望加开关控制是否保留。
+- 判断：
+  - Host 运行时需要的是 `wwwroot/`，不是 `ClientApp/` 前端源目录。
+  - 发布包首次运行后才会创建 `data/`，发布脚本不应预置运行时工作区。
+  - `CoralinkerSDK` 当前是 `OutputType=Exe`，Host 引用它时 `.NET publish` 会带出 SDK 独立程序 sidecar；Host 包只需要 `CoralinkerSDK.dll`。
+- 实施：
+  - `3rd/CoralinkerHost/CoralinkerHost.csproj`：新增排除 `ClientApp/**` 的 `Compile/None/Content/EmbeddedResource Remove`。
+  - `3rd/CoralinkerHost/publish-host.ps1`：
+    - 新增 `[switch]$IncludePdb`。
+    - 默认增加 publish 参数 `-p:DebugType=None -p:DebugSymbols=false`。
+    - 发布后删除 `ClientApp/`。
+    - 默认删除所有 `.pdb`。
+    - 删除 Host 包不需要的 `CoralinkerSDK.exe`、`CoralinkerSDK`、`CoralinkerSDK.deps.json`、`CoralinkerSDK.runtimeconfig.json`。
+    - `publish-info.json` 增加 `includePdb`。
+  - `3rd/CoralinkerHost/README.md`：
+    - 记录默认不保留 PDB。
+    - 记录 `-IncludePdb` 用法。
+    - 记录发布包不应包含 `ClientApp/`、`package*.json`、`tsconfig*.json`、初始 `data/`。
+    - 记录 SDK sidecar 清理逻辑。
+- 验证：
+  - 执行 `powershell -NoProfile -ExecutionPolicy Bypass -File 3rd\CoralinkerHost\publish-host.ps1 -NoRestore` 成功，生成 `3rd/CoralinkerHost/Publish/CoralinkerHost_df02128_20260526-103436/`。
+  - 新包顶层包含：`CoralinkerHost.exe/.dll/.deps.json/.runtimeconfig.json`、`CoralinkerSDK.dll`、`wwwroot/`、`res/`、`runtimes/`、native bridge、依赖 DLL、`publish-info.json`、`web.config`。
+  - 验证 `ClientApp` 不存在、`data` 不存在、`CoralinkerSDK.exe` 不存在。
+  - `dir /s /b ...\*.pdb` 无输出，默认包未包含 PDB。
+  - 发布后一次 `Get-ChildItem -Recurse` 验证命令在 PowerShell 中长时间未返回，被用户中断；后续改用窄范围 `cmd /c if exist` 与 `dir` 验证完成。发布流程本身正常。
+
+### [publish] 修正 web.config/static web assets 清理策略
+- 用户反馈：
+  - 询问 `CoralinkerHost.staticwebassets.endpoints.json`、`web.config` 是否必要，以及为什么 Host 同时有 `.exe` 和 `.dll`。
+  - 用户指出只是询问必要性，不应直接决定默认删除；未来可能走 IIS。
+- 修正判断：
+  - `web.config` 是 IIS / ASP.NET Core Module 部署所需文件；Kestrel 直接运行 `CoralinkerHost.exe` 或 `dotnet CoralinkerHost.dll` 时不需要。
+  - `CoralinkerHost.staticwebassets.endpoints.json` 是 ASP.NET Core static web assets 端点清单；当前 Host 代码使用 `UseDefaultFiles()` + `UseStaticFiles()` 从 `wwwroot/` 提供静态文件，没有调用 `MapStaticAssets()`，直跑模式通常不依赖该文件，但默认保留更稳妥。
+  - `CoralinkerHost.exe` 是 Windows apphost 启动器；`CoralinkerHost.dll` 是托管程序集本体。Windows 可直接运行 exe，也可 `dotnet CoralinkerHost.dll`；跨平台包通常依赖 dll 或对应 RID 的 apphost。
+- 实施：
+  - `3rd/CoralinkerHost/publish-host.ps1`：
+    - 默认不再删除 `web.config`。
+    - 默认不再删除 `CoralinkerHost.staticwebassets.endpoints.json`。
+    - 新增 `-ExcludeIisConfig`：显式精简直跑包时删除 `web.config`。
+    - 新增 `-ExcludeStaticWebAssetsEndpoints`：显式精简直跑包时删除 static web assets endpoints 清单。
+    - 新增 `-IncludeSdkExecutable`：需要 SDK 独立 CLI 时保留 `CoralinkerSDK.exe` 等 sidecar。
+    - `publish-info.json` 增加 `includeSdkExecutable`、`excludeIisConfig`、`excludeStaticWebAssetsEndpoints`。
+  - `3rd/CoralinkerHost/README.md`：
+    - 改写为部署模式说明，不再说脚本默认清理 IIS/static assets 文件。
+    - 补充 `-ExcludeIisConfig`、`-ExcludeStaticWebAssetsEndpoints`、`-IncludeSdkExecutable` 用法。
+- 验证：
+  - 默认发布成功：`3rd/CoralinkerHost/Publish/CoralinkerHost_df02128_20260526-110536/`。
+  - 默认包验证：`web.config` 存在，`CoralinkerHost.staticwebassets.endpoints.json` 存在，`CoralinkerHost.exe` 存在，`CoralinkerHost.dll` 存在。
+
+### [publish] 调整为三平台统一 portable 发布包并准备 SSH 部署
+- 用户要求：
+  - 回忆 `c:\Users\lvzhe\.cursor\plans\arm_linux_发行迁移_24982563.plan.md` 中的 ARM Linux 发行迁移计划。
+  - 准备发布到 `industio@192.168.0.116`。
+  - 不希望按 Windows/Linux/ARM 分多个版本；希望一个发布包兼容 Windows x64、Linux x64、Linux ARM64。
+  - 本轮先不处理 native bridge，只保证 Host 本体和 Compiler 能在三个平台运行。
+- 决策：
+  - 最终发布形态改为无 RID 的 framework-dependent portable 包。
+  - 默认不传 `-Runtime`；`-Runtime linux-arm64` 仅作为可选 RID 专用包，不作为当前发行方式。
+  - 三平台统一启动入口为 `dotnet CoralinkerHost.dll`。
+  - Windows 包中的 `CoralinkerHost.exe` 只是 Windows apphost 便捷入口，不作为跨平台依赖。
+  - 目标机需要 .NET 8 SDK，因为部署后 Build 用户逻辑需要执行 `dotnet restore/build`，并由 Fody 加载 `res/compiler/DiverCompiler.dll`。
+  - `res/compiler/DiverCompiler.dll` 来自 `DiverCompilerPortable`，目标为 `netstandard2.0`，作为 Fody weaver 由目标机 .NET SDK 加载，适用于 Windows x64、Linux x64、Linux ARM64。
+- 实施：
+  - `3rd/CoralinkerHost/CoralinkerHost.csproj`：`BuildDiverCompilerPortable` 的 MSBuild 调用增加：
+    - `RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier;RuntimeIdentifiers;SelfContained;PublishSingleFile;PublishTrimmed"`
+  - 原因：尝试 `-Runtime linux-arm64` 时，Host 的 `RuntimeIdentifier` 污染了 `DiverCompilerPortable` 构建，导致其查找 `netstandard2.0/linux-arm64` assets。隔离属性后可避免类似问题。
+  - `3rd/CoralinkerHost/README.md`：
+    - 补充默认无 RID portable 包才是当前三平台统一发行方式。
+    - 补充目标机需要 .NET 8 SDK。
+    - 补充 `dotnet CoralinkerHost.dll` 跨平台启动方式。
+    - 补充 `DiverCompiler.dll` 是 `netstandard2.0` Fody weaver，不是 Windows-only exe。
+- 验证：
+  - 第一次执行 `publish-host.ps1 -Runtime linux-arm64` 失败，错误为 `DiverCompilerPortable` assets 缺少 `netstandard2.0/linux-arm64`。
+  - 修正 MSBuild `RemoveProperties` 后，`publish-host.ps1 -Runtime linux-arm64` 成功，但该包不是最终目标。
+  - 执行默认 portable 发布成功：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_df02128_20260526-111558/`
+  - `publish-info.json` 中 `runtime: null`。
+  - 验证包内存在：
+    - `CoralinkerHost.dll`
+    - `CoralinkerHost.runtimeconfig.json`
+    - `res/compiler/DiverCompiler.dll`
+    - `res/compiler/RunOnMCU.cs`
+  - 已压缩：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_df02128_20260526-111558.tar.gz`
+    - 大小约 8.85 MB。
+- SSH/网络状态：
+  - 本机有 `ssh.exe`、`scp.exe`、`tar.exe`。
+  - `ssh -o BatchMode=yes -o ConnectTimeout=8 industio@192.168.0.116 ...` 连接超时。
+  - `ping -n 2 192.168.0.116`：100% 丢包。
+  - `Test-NetConnection -ComputerName 192.168.0.116 -Port 22 -InformationLevel Quiet`：`False`。
+  - 当前判断：不是密码/认证问题，而是网络或目标 SSH 服务不可达；暂未上传。
+
+### [publish] 发布包新增启动脚本和 SHA256 完整性校验
+- 用户要求：
+  - 包内加启动命令。
+  - Windows 需要 PowerShell 和 BAT。
+  - Linux 需要 SH。
+  - 启动命令需检查 .NET 环境和 SDK、所需文件、包体完整性，然后启动服务器。
+- 实施：
+  - `3rd/CoralinkerHost/publish-host.ps1` 发布后生成：
+    - `start-host.ps1`
+    - `start-host.bat`
+    - `start-host.sh`
+    - `package-manifest.sha256`
+  - `start-host.ps1`：
+    - 检查 `dotnet` 命令。
+    - 检查 .NET SDK 8 或更高版本。
+    - 检查 `Microsoft.NETCore.App 8.x` 和 `Microsoft.AspNetCore.App 8.x` runtime。
+    - 检查 `CoralinkerHost.dll`、`CoralinkerHost.deps.json`、`CoralinkerHost.runtimeconfig.json`、`publish-info.json`、`wwwroot/`、`res/compiler/`、`DiverCompiler.dll`、`RunOnMCU.cs`、`DIVERInterface.cs`、`DIVERCommonUtils.cs`、`Extensions.cs`。
+    - 读取 `package-manifest.sha256` 并用 `Get-FileHash` 校验包体 SHA256。
+    - 支持 `-CheckOnly`，只检查不启动。
+  - `start-host.bat`：
+    - 代理调用 `start-host.ps1`，方便 Windows CMD/双击入口。
+  - `start-host.sh`：
+    - 检查 `dotnet`、SDK 8+、.NET 8 runtime、ASP.NET Core 8 runtime。
+    - 检查同样的必需文件和目录。
+    - 使用 `sha256sum -c package-manifest.sha256` 校验包体。
+    - 支持 `--check-only`，只检查不启动。
+  - `package-manifest.sha256`：
+    - 发布脚本对包内所有文件生成 SHA256，排除清单文件自身。
+    - 使用 Linux `sha256sum -c` 兼容格式：`<hash> *<relative/path>`。
+  - `publish-info.json`：
+    - 新增 `startScripts` 和 `integrityManifest` 字段。
+  - `3rd/CoralinkerHost/README.md`：
+    - 补充启动脚本、检查项、`CheckOnly` 用法和完整性清单说明。
+- 修正：
+  - 第一次生成清单失败，原因是 Windows PowerShell 5.1 不支持 `[System.IO.Path]::GetRelativePath`。
+  - 改为基于输出根目录字符串前缀计算相对路径，兼容 Windows PowerShell 5.1。
+  - 第一次 `start-host.ps1 -CheckOnly` 失败，原因是检查逻辑要求 SDK 必须为 8.x，而本机 SDK 是 9.0.309。
+  - 改为：Host 运行必须有 .NET 8 runtime / ASP.NET Core 8 runtime；Build 能力需要 SDK 8 或更高版本。
+- 验证：
+  - 发布成功：`3rd/CoralinkerHost/Publish/CoralinkerHost_df02128_20260526-112335/`。
+  - 包内存在 `start-host.ps1`、`start-host.bat`、`start-host.sh`、`package-manifest.sha256`。
+  - `publish-info.json` 已记录启动脚本和完整性清单。
+  - 执行：
+    - `powershell -NoProfile -ExecutionPolicy Bypass -File 3rd\CoralinkerHost\Publish\CoralinkerHost_df02128_20260526-112335\start-host.ps1 -CheckOnly`
+  - 结果成功：
+    - `Checking .NET runtime and SDK...`
+    - `Checking required package files...`
+    - `Checking package integrity...`
+    - `Startup checks passed.`
+  - 已压缩：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_df02128_20260526-112335.tar.gz`
+    - 大小约 8.87 MB。
+
+### [publish] 重新生成最新 portable 包
+- 用户要求：
+  - 用户已删除原来的 `3rd/CoralinkerHost/Publish/` 内容。
+  - 需要直接重新打一个最新发布包。
+- 实施：
+  - 执行默认 portable 发布：
+    - `powershell -NoProfile -ExecutionPolicy Bypass -File 3rd\CoralinkerHost\publish-host.ps1 -NoRestore`
+  - 生成发布目录：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_df02128_20260526-113039/`
+  - 压缩为：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_df02128_20260526-113039.tar.gz`
+- 验证：
+  - `publish-info.json` 中 `runtime: null`，确认仍是无 RID 三平台 portable 包。
+  - `start-host.sh` 包含 Linux root 检查：
+    - `CURRENT_UID=$(id -u 2>/dev/null || echo "")`
+    - 非 `0` 会提示 `Linux startup must run as root. Re-run with sudo or root user.`
+  - 执行 `start-host.ps1 -CheckOnly` 成功：
+    - `Checking .NET runtime and SDK...`
+    - `Checking required package files...`
+    - `Checking package integrity...`
+    - `Startup checks passed.`
+  - 压缩包大小：`8,869,850` bytes。
+
+### [deploy] 目标机缺少 dotnet SDK
+- 用户反馈：
+  - 目标机运行发布包启动检查时提示：
+    - `dotnet command was not found. Install .NET 8 SDK.`
+- 判断：
+  - 当前 portable 包是 framework-dependent 包，不自带 .NET runtime/SDK。
+  - Host 运行需要 .NET 8 runtime / ASP.NET Core 8 runtime。
+  - 部署后 Build 用户逻辑需要 .NET SDK 8+，因为目标机会执行 `dotnet restore/build` 并加载 `res/compiler/DiverCompiler.dll`。
+- 建议：
+  - 在目标机上安装 `.NET 8 SDK`。
+  - 目标机此前 SSH banner 显示 `OpenSSH_8.9p1 Ubuntu-3ubuntu0.12`，大概率是 Ubuntu 22.04，可使用 Microsoft apt 源安装 `dotnet-sdk-8.0`。
+  - 安装后重新运行：
+    - `sudo ./start-host.sh --check-only`
+
+### [publish] 整理 packaging 脚本并增强 .NET 安装提示
+- 用户要求：
+  - 包内加入 `install-dotnet-sdk-ubuntu.sh`。
+  - 打包相关文件在开发库中放到合理位置。
+  - 安装脚本应根据当前 Ubuntu 版本下载对应资源。
+  - 启动检查不过时，应手动提示用户安装 .NET SDK，并说明 Ubuntu / 其他 Linux 的处理方式。
+  - 解释为什么需要版本 8，以及版本 9 是否可以。
+- 实施：
+  - 新增 `3rd/CoralinkerHost/packaging/`，作为发布包脚本源文件目录。
+  - 新增：
+    - `packaging/start-host.ps1`
+    - `packaging/start-host.bat`
+    - `packaging/start-host.sh`
+    - `packaging/install-dotnet-sdk-ubuntu.sh`
+  - `publish-host.ps1`：
+    - 发布时从 `packaging/` 复制这些脚本到包根目录。
+    - `publish-info.json` 增加 `setupScripts: ["install-dotnet-sdk-ubuntu.sh"]`。
+    - `package-manifest.sha256` 包含安装脚本和启动脚本。
+  - `install-dotnet-sdk-ubuntu.sh`：
+    - 要求 root。
+    - 读取 `/etc/os-release`。
+    - 要求 `ID=ubuntu`。
+    - 使用 `VERSION_ID` 拼接 Microsoft apt 源 URL：`https://packages.microsoft.com/config/ubuntu/<VERSION_ID>/packages-microsoft-prod.deb`。
+    - 支持 `amd64` / `arm64`。
+    - 安装 `dotnet-sdk-8.0` 并输出 SDK/runtime 列表。
+  - `start-host.ps1` / `start-host.sh`：
+    - 缺少 `dotnet`、SDK 或 runtime 时输出安装提示。
+    - Ubuntu 提示运行：`sudo ./install-dotnet-sdk-ubuntu.sh`。
+    - 其他 Linux 提示使用发行版包管理器或 Microsoft 文档：`https://learn.microsoft.com/dotnet/core/install/linux`。
+    - PowerShell 版额外提示 Windows 下载页：`https://dotnet.microsoft.com/download/dotnet/8.0`。
+    - 版本说明：Host 是 `net8.0`，运行时必须有 `Microsoft.NETCore.App 8.x` 和 `Microsoft.AspNetCore.App 8.x`；SDK 9.x 可以用于 Build，但不能替代缺失的 .NET 8 runtime。
+  - `3rd/CoralinkerHost/README.md`：
+    - 补充 `packaging/` 目录结构。
+    - 补充 `install-dotnet-sdk-ubuntu.sh` 使用方法。
+    - 补充版本 8 vs SDK 9 的说明。
+- 验证：
+  - 发布成功：`3rd/CoralinkerHost/Publish/CoralinkerHost_df02128_20260526-115545/`。
+  - `start-host.ps1 -CheckOnly` 成功。
+  - 直接读取发布包内 `start-host.ps1` / `start-host.sh`，确认包含 Ubuntu/其他 Linux 安装提示和版本说明。
+  - 已压缩：`3rd/CoralinkerHost/Publish/CoralinkerHost_df02128_20260526-115545.tar.gz`。
+  - 压缩包大小：`8,870,305` bytes。
+
+### [publish] 启动脚本补充 Git 依赖检查
+- 用户反馈：
+  - 文件记录日志模块依赖 Git。
+  - 启动脚本应检查 `git`。
+  - 要求再查是否还有其他类似运行期外部命令依赖。
+- 排查：
+  - 搜索 `3rd/CoralinkerHost` 和 `3rd/CoralinkerSDK` 的 `ProcessStartInfo`、`Process.Start`、`FileName=`、`git`、`dotnet`。
+  - 运行期外部命令依赖结论：
+    - `dotnet`：`DiverBuildService` 执行 `dotnet restore/build`，并检查 SDK。
+    - `git`：`GitHistoryService` 执行 `git add/commit/log/diff/show/checkout/status` 等，用于文件历史、diff、checkout/revert、项目历史。
+    - `sha256sum`：仅 Linux 启动脚本用于 `package-manifest.sha256` 校验。
+  - 未在 SDK 中发现额外运行期外部命令调用。
+- 实施：
+  - `packaging/start-host.ps1`：
+    - 新增 `GitInstallHint`。
+    - 新增 `Check-GitEnvironment`，检查 `git` 命令存在且 `git --version` 可执行。
+    - 启动检查流程中加入 `Checking Git...`。
+  - `packaging/start-host.sh`：
+    - 新增 `git_install_hint` / `fail_git`。
+    - 检查 `command -v git` 和 `git --version`。
+  - `packaging/install-dotnet-sdk-ubuntu.sh`：
+    - prerequisites 中安装 `git`。
+    - 安装完成输出 `git --version`。
+  - `3rd/CoralinkerHost/README.md`：
+    - 启动检查列表加入 `git`。
+    - Ubuntu 安装脚本说明改为同时安装 `.NET SDK` 和 `git`。
+- 验证：
+  - 发布成功：`3rd/CoralinkerHost/Publish/CoralinkerHost_df02128_20260526-120305/`。
+  - 执行 `start-host.ps1 -CheckOnly` 成功，输出包含 `Checking Git...`。
+  - 读取包内 `start-host.sh`，确认 Git 安装提示存在。
+  - 读取包内 `install-dotnet-sdk-ubuntu.sh`，确认安装 `git` 并输出版本。
+  - 已压缩：`3rd/CoralinkerHost/Publish/CoralinkerHost_df02128_20260526-120305.tar.gz`。
+  - 压缩包大小：`8,870,445` bytes。
