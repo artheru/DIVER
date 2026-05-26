@@ -4,7 +4,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <windows.h>
 
 #include "c_core_common.h"
 #include "msb_handle.h"
@@ -548,8 +547,8 @@ DWORD WINAPI parse_thread_func(LPVOID param)
                                 handle->fatal_error_callback_ctx);
                     }
                 } else {
-                    DBG_PRINT("Fatal Error: Duplicate within 5s (elapsed=%llums), seq=%u skipped", 
-                              elapsed_ms, seq);
+                    DBG_PRINT("Fatal Error: Duplicate within 5s (elapsed=%llums), seq=%u skipped",
+                              (unsigned long long)elapsed_ms, seq);
                 }
             } else {
                 // -------------------------------

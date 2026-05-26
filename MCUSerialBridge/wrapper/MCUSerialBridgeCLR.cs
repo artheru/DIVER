@@ -795,7 +795,12 @@ namespace MCUSerialBridgeCLR
     /// </summary>
     internal static class MCUSerialBridgeCoreAPI
     {
-        private const string DLL = @"mcu_serial_bridge.dll";
+        private const string DLL = "mcu_serial_bridge";
+
+        static MCUSerialBridgeCoreAPI()
+        {
+            NativeBridgeLibraryResolver.EnsureRegistered();
+        }
 
         [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
         internal static extern MCUSerialBridgeError msb_open(

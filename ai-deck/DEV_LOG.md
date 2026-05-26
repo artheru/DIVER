@@ -1207,3 +1207,332 @@
   - 读取包内 `install-dotnet-sdk-ubuntu.sh`，确认安装 `git` 并输出版本。
   - 已压缩：`3rd/CoralinkerHost/Publish/CoralinkerHost_df02128_20260526-120305.tar.gz`。
   - 压缩包大小：`8,870,445` bytes。
+
+### [mcu-serial-bridge] Linux native bridge 移植第一版
+- 用户要求：
+  - 开始移植 `mcu_serial_bridge` 到 Linux，作为 ARM Linux 平台迁移的下一步。
+- 排查：
+  - native C 层 Win32 依赖集中在：
+    - `MCUSerialBridge/c_core/include/msb_handle.h`
+    - `MCUSerialBridge/c_core/src/msb_handle.c`
+    - `MCUSerialBridge/c_core/src/msb_bridge.c`
+    - `MCUSerialBridge/c_core/src/msb_thread.c`
+    - `MCUSerialBridge/c_core/src/msb_packet.c`
+    - `MCUSerialBridge/bootloader/src/mbl_bootloader.c`
+  - C# wrapper P/Invoke 原先硬编码 `mcu_serial_bridge.dll`，Linux 下不合适。
+- 实施：
+  - 新增 `MCUSerialBridge/c_core/include/msb_platform.h`：
+    - Windows 分支继续使用 `windows.h`。
+    - Linux 分支声明当前 C 层使用的 Win32 子集类型/API。
+  - 新增 `MCUSerialBridge/c_core/src/msb_platform_posix.c`：
+    - `pthread` 实现 `CRITICAL_SECTION`、`CONDITION_VARIABLE`、`CreateThread`、`WaitForSingleObject`、auto-reset event。
+    - `termios` + POSIX fd 实现 `CreateFileA`、`ReadFile`、`WriteFile`、`SetCommState`、`PurgeComm`、`FlushFileBuffers`。
+    - `clock_gettime/gettimeofday/usleep` 实现 tick、local time、sleep。
+  - `MCUSerialBridge/c_core/SConscript`：
+    - 按 `env['PLATFORM']` 分 Windows / 非 Windows。
+    - 非 Windows 增加 `-std=c11 -Wall -Wextra -fPIC -D_GNU_SOURCE`，链接 `pthread`，编译 `msb_platform_posix.c`。
+    - Linux 下 SCons `SharedLibrary('mcu_serial_bridge')` 会生成 `libmcu_serial_bridge.so`。
+  - `MCUSerialBridge/c_core/src/msb_bridge.c`：
+    - Windows 保留 `\\.\COMx` 规范化。
+    - Linux 保留传入串口设备路径，如 `/dev/ttyUSB0`。
+  - `MCUSerialBridge/bootloader/src/mbl_bootloader.c`：
+    - 改用 `msb_platform.h`。
+    - Linux 保留原始串口路径，避免拼 Windows 前缀。
+  - `MCUSerialBridge/wrapper/MCUSerialBridgeCLR.cs` 与 `MCUSerialBridge/wrapper/MCUBootloaderHandlerCLR.cs`：
+    - P/Invoke 库名从 `mcu_serial_bridge.dll` 改为 `mcu_serial_bridge`，交给 .NET 按平台解析。
+  - `MCUSerialBridge/README.md`：
+    - 记录 Windows / Linux native bridge 构建方式、Linux 依赖、串口路径规则、验证边界。
+- 验证：
+  - `scons` 在 Windows 本机通过，生成 `MCUSerialBridge/build/mcu_serial_bridge.dll`。
+  - `dotnet build MCUSerialBridge\wrapper\MCUSerialBridgeWrapper.csproj` 成功，只有既有 nullable warning。
+  - `dotnet build 3rd\CoralinkerSDK\CoralinkerSDK.csproj` 成功，只有既有 nullable / Windows-only API warning。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release --no-restore` 成功，只有既有 warning。
+  - 当前机器没有可用 WSL/Linux 构建环境，尚未在 Linux x64/ARM64 上实际生成 `.so`。
+
+### [mcu-serial-bridge] Windows 交叉编译 Linux native 库方案
+- 用户纠正：
+  - 不要在 Linux 目标机上编译 `mcu_serial_bridge`。
+  - 需要指导如何在 Windows 开发机上编译 Linux `.so`。
+- 结论：
+  - Windows 本机已有的 Strawberry `gcc` 是 Windows 目标编译器，只能生成 Windows 目标产物，不能直接生成 Linux ELF `.so`。
+  - 推荐使用 Zig 作为 Windows 上的交叉编译器：
+    - `zig cc -target x86_64-linux-gnu` 生成 Linux x64 `.so`。
+    - `zig cc -target aarch64-linux-gnu` 生成 Linux ARM64 `.so`。
+  - LLVM/Clang 也可行，但需要额外维护 Linux sysroot、glibc headers/libs、linker 配置，复杂度高。
+- 后续建议：
+  - 将 `MCUSerialBridge/c_core/SConscript` 扩展为支持 `TARGET_OS=linux TARGET_ARCH=x64|arm64`。
+  - 交叉编译输出目录建议分平台：
+    - `MCUSerialBridge/build/linux-x64/libmcu_serial_bridge.so`
+    - `MCUSerialBridge/build/linux-arm64/libmcu_serial_bridge.so`
+  - Host 发布包应携带这些预编译 native 库，不在目标机上编译。
+
+### [mcu-serial-bridge] Zig 交叉编译与 Host 发布集成
+- 用户要求：
+  - 已安装 Zig。
+  - 用最优雅的方式把环境、编译、发布都搞定，然后用户测试。
+- 实施：
+  - 新增 `MCUSerialBridge/build-native.ps1`：
+    - 参数：`-Target all|windows|linux-x64|linux-arm64`、`-ZigPath`。
+    - 自动生成 `msb_error_c.h` 和 `MCUSerialBridgeError.cs`。
+    - Windows 目标调用 `scons`，并把 `build/mcu_serial_bridge.dll` 复制到 `build/runtimes/win-x64/native/`。
+    - Linux x64 目标调用 `zig cc -target x86_64-linux-gnu`。
+    - Linux ARM64 目标调用 `zig cc -target aarch64-linux-gnu`。
+  - 新增 `MCUSerialBridge/wrapper/NativeBridgeLibraryResolver.cs`：
+    - 使用 `NativeLibrary.SetDllImportResolver`。
+    - 根据当前 OS 和 `RuntimeInformation.ProcessArchitecture` 选择：
+      - `runtimes/win-x64/native/mcu_serial_bridge.dll`
+      - `runtimes/linux-x64/native/libmcu_serial_bridge.so`
+      - `runtimes/linux-arm64/native/libmcu_serial_bridge.so`
+    - 保留根目录 native 文件作为 fallback。
+  - `MCUSerialBridge/wrapper/MCUSerialBridgeCLR.cs` 和 `MCUBootloaderHandlerCLR.cs`：
+    - 静态构造中调用 `NativeBridgeLibraryResolver.EnsureRegistered()`。
+  - `MCUSerialBridge/wrapper/MCUSerialBridgeWrapper.csproj`、`3rd/CoralinkerSDK/CoralinkerSDK.csproj`、`3rd/CoralinkerHost/CoralinkerHost.csproj`：
+    - 纳入 resolver 源文件。
+    - Host/SDK 按 `.NET runtimes/<rid>/native/` 目录复制三平台 native assets。
+  - `3rd/CoralinkerHost/publish-host.ps1`：
+    - 默认发布前执行 `MCUSerialBridge/build-native.ps1 -Target all`。
+    - 新增 `-SkipNativeBuild` 和 `-ZigPath`。
+    - `publish-info.json` 增加 `skipNativeBuild` 与 `nativeBridgeRuntimes`。
+  - `3rd/CoralinkerHost/packaging/start-host.ps1` / `start-host.sh`：
+    - 启动检查加入三平台 native bridge 必需文件。
+  - README：
+    - `MCUSerialBridge/README.md` 改为 Windows 开发机使用 Zig 交叉编译 Linux native 库。
+    - `3rd/CoralinkerHost/README.md` 记录发布脚本默认构建和打包三平台 native assets，并说明 `-SkipNativeBuild`。
+- 验证：
+  - `zig version` 输出 `0.16.0`。
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File MCUSerialBridge\build-native.ps1 -Target all` 成功。
+  - 生成文件：
+    - `MCUSerialBridge/build/runtimes/win-x64/native/mcu_serial_bridge.dll`，`186880` bytes。
+    - `MCUSerialBridge/build/runtimes/linux-x64/native/libmcu_serial_bridge.so`，`173896` bytes。
+    - `MCUSerialBridge/build/runtimes/linux-arm64/native/libmcu_serial_bridge.so`，`177168` bytes。
+  - `dotnet build MCUSerialBridge\wrapper\MCUSerialBridgeWrapper.csproj` 成功，只有既有 nullable warning。
+  - `dotnet build 3rd\CoralinkerSDK\CoralinkerSDK.csproj` 成功，只有既有 warning。
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File 3rd\CoralinkerHost\publish-host.ps1 -NoRestore` 成功。
+  - 发布目录：`3rd/CoralinkerHost/Publish/CoralinkerHost_43b8087_20260526-125449/`。
+  - 发布包包含三平台 native bridge，`package-manifest.sha256` 中也包含对应条目。
+  - `start-host.ps1 -CheckOnly` 成功。
+
+### [deploy] 上传并解压 Host 发布包到 192.168.0.117
+- 用户要求：
+  - 复制安装包到 `/home/industio/Coralinker` 下面，然后解压。
+- 前置确认：
+  - 本机存在 SSH key：
+    - `C:\Users\lvzhe\.ssh\id_ecdsa`
+    - `C:\Users\lvzhe\.ssh\id_ecdsa.pub`
+  - 目标机 `192.168.0.117` 的 host key 已在 `known_hosts` 中。
+  - 重新测试 key 登录成功：
+    - `ssh -o BatchMode=yes -i "$env:USERPROFILE\.ssh\id_ecdsa" industio@192.168.0.117 "hostname && whoami"`
+    - 输出：`industio` / `industio`。
+- 实施：
+  - 为最新发布目录创建 tar 包：
+    - 源目录：`3rd/CoralinkerHost/Publish/CoralinkerHost_43b8087_20260526-125449/`
+    - 包：`3rd/CoralinkerHost/Publish/CoralinkerHost_43b8087_20260526-125449.tar.gz`
+    - 大小：`9,010,358` bytes。
+  - 远端创建目录：
+    - `/home/industio/Coralinker`
+  - 使用 `scp` 上传到：
+    - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-125449.tar.gz`
+  - 在远端执行：
+    - `cd /home/industio/Coralinker && tar -xzf CoralinkerHost_43b8087_20260526-125449.tar.gz`
+- 验证：
+  - 远端目录存在：
+    - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-125449`
+  - 远端 ARM64 native bridge 存在：
+    - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-125449/runtimes/linux-arm64/native/libmcu_serial_bridge.so`
+  - 同目录也包含 `libSystem.IO.Ports.Native.so`。
+
+### [publish/deploy] 修复 shell 脚本 CRLF 并完整重发
+- 用户反馈：
+  - 远端运行 `start-host.sh` 报错：
+    - `start-host.sh: 2 set: Illegal option -`
+- 排查：
+  - 远端执行 `file start-host.sh`：
+    - `ASCII text executable, with CRLF line terminators`
+  - 读取前几个字节确认：
+    - `#!/usr/bin/env sh\r\nset -eu\r\n`
+  - 根因：
+    - 之前 `publish-host.ps1` 里既有内联生成启动脚本，又从 `packaging/` 复制静态脚本，后者覆盖了前者。
+    - `packaging/start-host.sh` 在 Windows 工作区中是 CRLF，导致包内 `.sh` 也是 CRLF。
+- 用户纠正：
+  - 不要在 `publish-host.ps1` 里面内联字符生成静态文件。
+  - 有需要打包的静态文件，应直接放在 `packaging/`，并把 `.sh` 源文件做成 LF。
+- 实施：
+  - 从 `publish-host.ps1` 删除 `startHostPs1` / `startHostBat` / `startHostSh` 内联字符串与写文件逻辑。
+  - `publish-host.ps1` 现在只复制：
+    - `packaging/start-host.ps1`
+    - `packaging/start-host.bat`
+    - `packaging/start-host.sh`
+    - `packaging/install-dotnet-sdk-ubuntu.sh`
+  - 新增 `.gitattributes`：
+    - `3rd/CoralinkerHost/packaging/*.sh text eol=lf`
+  - 将 `packaging/start-host.sh` 和 `packaging/install-dotnet-sdk-ubuntu.sh` 当前文件内容转为 LF。
+- 完整重建：
+  - 执行：
+    - `powershell -NoProfile -ExecutionPolicy Bypass -File 3rd\CoralinkerHost\publish-host.ps1`
+  - 发布目录：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_43b8087_20260526-131325/`
+  - 本地确认：
+    - `start-host.sh CRLF=False`
+    - `install-dotnet-sdk-ubuntu.sh CRLF=False`
+    - `start-host.ps1 -CheckOnly` 成功。
+  - 打包：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_43b8087_20260526-131325.tar.gz`
+    - 大小：`9,010,389` bytes。
+- 远端部署：
+  - 上传到：
+    - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-131325.tar.gz`
+  - 解压到：
+    - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-131325/`
+  - `file start-host.sh install-dotnet-sdk-ubuntu.sh` 不再显示 CRLF。
+  - `sh -n start-host.sh` 和 `sh -n install-dotnet-sdk-ubuntu.sh` 通过。
+  - `sudo -n ./start-host.sh --check-only` 通过，输出 `Startup checks passed.`。
+
+### [mcu-serial-bridge] Linux 高波特率支持修复
+- 用户反馈：
+  - Windows 发布包运行可 Probe 到节点。
+  - Linux ARM64 发布包使用 `/dev/ttyACM0` 和 `1000000` 波特率时 Reset 超时：
+    - `Probe Reset failed: Proto_Timeout`
+- 判断：
+  - Linux Posix 串口层 `msb_baud_to_speed()` 原先没有 `1000000` 映射。
+  - 对 USB CDC/ACM 设备，Linux 应支持更多 line coding 波特率；不能静默退回低速。
+  - `B115200` 等宏来自系统 `<termios.h>` 及 libc/内核平台头文件，不是项目内定义；标准宏覆盖范围有限。
+- 实施：
+  - `MCUSerialBridge/c_core/src/msb_platform_posix.c`：
+    - 保留标准 termios 波特率映射。
+    - 新增常见高速标准宏映射：`500000`、`576000`、`921600`、`1000000`、`1500000`、`2000000`、`2500000`、`3000000`、`3500000`、`4000000`。
+    - 新增 Linux `termios2 + BOTHER` 自定义波特率路径。
+    - 非标准波特率支持范围：`1..12000000`。
+    - 超出范围返回 `ERROR_INVALID_PARAMETER`，不再静默降速。
+  - `MCUSerialBridge/c_core/include/msb_platform.h`：
+    - 新增 `ERROR_INVALID_PARAMETER`。
+- 验证：
+  - 首次 Zig 编译发现系统头已有 `TCGETS2/TCSETS2` 但缺少 `struct termios2` 定义；改为按 Linux ABI 定义 `struct termios2` 后通过。
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File MCUSerialBridge\build-native.ps1 -Target all` 成功。
+  - 重新发布：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_43b8087_20260526-132546/`
+  - 本地 `start-host.ps1 -CheckOnly` 成功。
+  - 已上传并解压到：
+    - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-132546/`
+  - 远端 `sudo -n ./start-host.sh --check-only` 成功。
+  - 远端 ARM64 `libmcu_serial_bridge.so` 已更新，大小 `179472` bytes。
+
+### [publish/deploy] Linux start-host 支持跳过完整性校验
+- 用户反馈：
+  - 现场调试时只替换发布包内新的 `libmcu_serial_bridge.so`，每次都重新计算 `package-manifest.sha256` 太麻烦。
+  - 需要 `start-host.sh` 加一个选项，允许跳过完整性检查。
+- 实施：
+  - `3rd/CoralinkerHost/packaging/start-host.sh`：
+    - 新增 `SKIP_INTEGRITY_CHECK`。
+    - 参数解析改为循环，支持组合：
+      - `--check-only`
+      - `--skip-integrity-check`
+      - `--`
+    - 使用 `--skip-integrity-check` 时仍执行 root、dotnet、SDK/runtime、git、Host 文件、`wwwroot/`、`res/compiler/`、三平台 native 库等检查。
+    - 只跳过 `package-manifest.sha256` 的存在性和 `sha256sum -c` 校验。
+    - 默认行为保持不变：仍要求 `package-manifest.sha256` 并校验完整性。
+  - `3rd/CoralinkerHost/README.md`：
+    - 补充 Linux 调试命令：
+      - `sudo ./start-host.sh --skip-integrity-check`
+      - `sudo ./start-host.sh --check-only --skip-integrity-check`
+    - 明确该选项用于临时替换 native `.so` 的调试场景，正式发布仍应使用默认完整性校验或重新发布。
+- 远端验证：
+  - 将更新后的 `start-host.sh` 复制到：
+    - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-132546/start-host.sh`
+  - 远端执行：
+    - `sh -n ./start-host.sh`
+    - `sudo -n ./start-host.sh --check-only --skip-integrity-check`
+  - 输出：
+    - `WARNING: package integrity check skipped by --skip-integrity-check.`
+    - `Startup checks passed.`
+
+### [mcu-serial-bridge] 修复 Linux ARM64 Probe 1M baud timeout
+- 用户反馈：
+  - Windows 发布包可以 Probe 到 `CORAL-NODE-V2.1`。
+  - Linux ARM64 发布包使用 `/dev/ttyACM0`、`1000000` baud 时 `Probe Reset failed: Proto_Timeout`。
+  - 用户要求不要继续排查 DTR/RTS，因为物理上没有连接；需要一次性看完其他串口差异。
+- 排查过程：
+  - 写了 `ai-deck/tools/raw_msb_probe_acm0.sh`，支持：
+    - `reset`
+    - `version`
+    - `layout`
+    - `hex:<frame_hex>`
+  - raw 脚本保持同一个 fd 打开，直接向 `/dev/ttyACM0` 写 MSB 帧并读取返回。
+  - raw Reset/Version/Layout 均成功，证明设备链路和 `1000000` baud 可用。
+  - 为 native 增加 `MSB_TRACE_IO=1` 诊断：
+    - native 写出的 Reset 帧完整且 CRC 正确。
+    - `after-write poll=0 queued=0` 时没有回包。
+    - `tcgetattr` 校验显示请求 `baud=1000000` 时曾实际落为 `ispeed=13/ospeed=13`，即 Linux `B9600` 编码。
+  - 直接 raw 发送 native 写出的同一帧能收到 `0x82`，排除 timestamp/CRC/协议帧问题。
+- 根因：
+  - Windows/Zig 交叉编译到 Linux ARM64 时，不能可靠依赖目标 libc/termios 标准 `B1000000` 常量路径。
+  - `cfsetispeed/cfsetospeed` 标准路径可能没有真正把目标 fd 配到 1M，导致 MCU 看不到正确波特率的数据。
+- 实施：
+  - `MCUSerialBridge/c_core/src/msb_platform_posix.c`：
+    - 保留 raw/8N1/无软件流控/无硬件流控配置。
+    - `tcsetattr()` 后始终使用 `termios2 + BOTHER` 对 fd 写入精确数值波特率。
+    - baud 支持范围仍为 `1..12000000`，超出返回 `ERROR_INVALID_PARAMETER`。
+    - `ReadFile` 改为先 `poll()` 等待可读，再 `read()`，降低 Linux tty 0-timeout busy read 差异。
+    - `DBG_PRINT` 增加 `fflush(stdout)`，避免 Host 重定向日志时 native 输出不及时落盘。
+    - 保留 `MSB_TRACE_IO=1` 可选诊断输出；默认不输出。
+  - `MCUSerialBridge/README.md`：
+    - 增加 Linux 高波特率串口配置说明。
+    - 记录 `sudo env MSB_TRACE_IO=1 ./start-host.sh --skip-integrity-check` 的诊断用法。
+- 验证：
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File MCUSerialBridge\build-native.ps1 -Target linux-arm64` 成功。
+  - 更新后的 `.so` 已复制到：
+    - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-132546/runtimes/linux-arm64/native/libmcu_serial_bridge.so`
+  - 远端默认静默启动：
+    - `sudo ./start-host.sh --skip-integrity-check`
+  - 远端 API Probe 成功：
+    - `serial://name=/dev/ttyACM0&baudrate=1000000`
+    - Version: `CORAL-NODE-V2.1`, Commit `f1d8f16`, BuildTime `2026-05-13 17:14:38`
+    - Layout: DI=27, DO=20, Ports=5
+
+### [publish/deploy] 完整构建、打包、上传并解压新 Host 发布包
+- 用户要求：
+  - 重新跑一次完整构建、打包、推送和解压。
+- 本地完整发布：
+  - 执行：
+    - `powershell -NoProfile -ExecutionPolicy Bypass -File 3rd\CoralinkerHost\publish-host.ps1`
+  - 发布脚本自动执行：
+    - `MCUSerialBridge/build-native.ps1 -Target all`
+    - `dotnet publish 3rd/CoralinkerHost/CoralinkerHost.csproj -c Release`
+    - 清理默认不需要的 SDK apphost sidecars 和 PDB。
+    - 复制 `packaging/` 启动脚本。
+    - 生成 `publish-info.json` 和 `package-manifest.sha256`。
+  - 输出目录：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_43b8087_20260526-141521/`
+  - 构建结果：
+    - 成功，无 error。
+    - 仍有既有 warning：
+      - `DiverCompiler/Processor.cs` unreachable code。
+      - `MCUSerialBridgeCLR.cs` nullable warning。
+      - `SerialPortResolver.cs` Windows-only API analyzer warning。
+- 打包：
+  - 执行 tar 打包：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_43b8087_20260526-141521.tar.gz`
+  - 包大小：
+    - `9024272` bytes（远端显示约 `8.7M`）。
+- 上传与解压：
+  - 上传到：
+    - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-141521.tar.gz`
+  - 远端解压目录：
+    - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-141521/`
+- 远端验证：
+  - 在新目录执行：
+    - `sudo -n ./start-host.sh --check-only`
+  - 结果：
+    - 所有 `package-manifest.sha256` 条目校验 `OK`。
+    - 输出 `Startup checks passed.`。
+  - 停止旧 Host 后，从新目录启动 Host。
+  - 远端 API Probe 成功：
+    - `serial://name=/dev/ttyACM0&baudrate=1000000`
+    - Version: `CORAL-NODE-V2.1`
+    - Commit: `f1d8f16`
+    - BuildTime: `2026-05-13 17:14:38`
+    - Layout: DI=27, DO=20, Ports=5
+- 当前远端状态：
+  - 新 Host 从以下目录运行：
+    - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-141521/`
+  - 进程命令：
+    - `dotnet /home/industio/Coralinker/CoralinkerHost_43b8087_20260526-141521/CoralinkerHost.dll`

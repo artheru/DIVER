@@ -1,6 +1,10 @@
 #ifndef C_CORE_COMMON_H
 #define C_CORE_COMMON_H
 
+#include <stdio.h>
+
+#include "msb_platform.h"
+
 #define DBG_PRINT(fmt, ...)                                    \
     do {                                                       \
         SYSTEMTIME st;                                         \
@@ -11,6 +15,7 @@
                st.wSecond,                                     \
                st.wMilliseconds,                               \
                ##__VA_ARGS__);                                 \
+        fflush(stdout);                                         \
     } while (0)
 
 #endif

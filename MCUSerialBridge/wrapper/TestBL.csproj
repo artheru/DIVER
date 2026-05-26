@@ -13,6 +13,7 @@
   <ItemGroup>
     <Compile Include="TestBL.cs" />
     <Compile Include="MCUBootloaderHandlerCLR.cs" />
+    <Compile Include="NativeBridgeLibraryResolver.cs" />
   </ItemGroup>
 
   <ItemGroup>

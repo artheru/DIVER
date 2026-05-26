@@ -23,14 +23,14 @@
    上位机侧最核心的纯 C 实现，是整个 PC 端系统的“地基”。不依赖任何 .NET 或 STL，具有极高的可移植性与性能。
    主要功能：
 
-   * 打开/管理 Windows 串口
+   * 打开/管理上位机串口（Windows `mcu_serial_bridge.dll` / Linux `libmcu_serial_bridge.so`）
    * 完整的协议粘包拆包、校验、解析逻辑
    * 三线程模型（接收线程、解析线程、发送线程）
    * 高性能无锁环形队列
    * 错误处理与超时机制
 
 3. **C# 封装层（wrapper 目录）**
-   使用 **P/Invoke** 直接调用 C 核心库 DLL（`mcu_serial_bridge.dll`），封装为面向对象的 C# API：
+   使用 **P/Invoke** 直接调用 C 核心库（逻辑库名 `mcu_serial_bridge`，由 .NET 按平台解析为 `.dll` 或 `.so`），封装为面向对象的 C# API：
 
    * 提供 `MCUSerialBridge` 类，管理句柄生命周期
    * 提供 `MCUSerialBridgeError` 枚举、`VersionInfo`、`MCUState`、`PortConfig` 等结构
@@ -65,6 +65,8 @@ C# 上位机应用（可直接调用 MCUSerialBridge 类）
 .
 ├── mcu/          # MCU 固件完整工程
 ├── c_core/       # 纯 C 核心库（include + src）
+│   ├── include/msb_platform.h      # Win32 / Posix 平台兼容层声明
+│   └── src/msb_platform_posix.c    # Linux 串口、线程、锁、事件实现
 ├── wrapper/      # C# P/Invoke 封装层，输出可直接引用的类
 ├── SConstruct    # SCons 顶层构建脚本
 ├── README.md
@@ -96,7 +98,7 @@ C# 上位机应用（可直接调用 MCUSerialBridge 类）
 * **高性能**：三线程分离（接收、解析、发送），避免阻塞
 * **抗粘包/拆包**：完整状态机处理任意拆分与合并的字节流
 * **无锁队列**：单生产者-单消费者环形缓冲区，保证线程安全且零拷贝
-* **跨平台潜力**：当前实现 Windows 串口 API，后续可轻松移植到 Linux
+* **跨平台**：协议逻辑保持一致，平台相关的串口、线程、锁、事件、时间函数通过 `msb_platform.h` 隔离
 * **不依赖任何托管环境**：可在纯 C 程序、DLL、甚至嵌入式上位机中使用
 
 ### 2.1 串口传输错误与自动重连上报（2026-03）
@@ -144,9 +146,23 @@ C# 上位机应用（可直接调用 MCUSerialBridge 类）
 
 * `c_core/src/msb_packet.c`：`mcu_send_packet_and_wait` 中的通信就绪检查
 
+### 2.3 Linux 高波特率串口配置
+
+Linux POSIX 平台的串口配置实现在 `c_core/src/msb_platform_posix.c`。对于 `/dev/ttyACM*` 这类 USB CDC/ACM 设备，不能只依赖交叉编译环境中的 `B1000000`、`B2000000` 等标准 baud 常量；在 Windows 交叉编译到 Linux ARM64 时，标准常量路径可能让实际 speed 落回 `B9600`，表现为写包成功但 MCU 不回包。
+
+当前 Linux 实现会在 `tcsetattr()` 完成 raw/8N1/无流控配置后，再通过 `termios2 + BOTHER` 对同一个 fd 写入精确数值波特率。支持范围为 `1..12000000`，超出范围返回 `ERROR_INVALID_PARAMETER`。
+
+排查串口问题时可临时设置环境变量打开 native IO 追踪：
+
+```shell
+sudo env MSB_TRACE_IO=1 ./start-host.sh --skip-integrity-check
+```
+
+该追踪会打印实际 `TCSETS2`、读写字节和少量 tty 状态，只用于现场诊断，默认不输出。
+
 ### 3. C# 封装层（wrapper）
 
-* 直接 P/Invoke 调用 `mcu_serial_bridge.dll`，封装为面向对象 C# API
+* 直接 P/Invoke 调用逻辑库名 `mcu_serial_bridge`，封装为面向对象 C# API；Windows 解析为 `mcu_serial_bridge.dll`，Linux 解析为 `libmcu_serial_bridge.so`
 * wrapper 目录已迁移为 `csproj` 工程（不再由 SCons 编译 C#）
 * 管理底层句柄生命周期（Open/Close）
 * 提供串口与 CAN 的读写方法：`ReadSerial`、`WriteSerial`、`ReadCAN`、`WriteCAN`
@@ -307,3 +323,45 @@ if (err == MSB_Error_OK) {
 
 * 所需工具链（arm-none-eabi-gcc、pyOCD、SCons、MSVC、.NET SDK）
 * 常见问题排查
+
+### PC 端 native bridge 跨平台构建
+
+`c_core` 的上位机 native bridge 现在从 Windows 开发机统一构建三平台 native runtime assets：
+
+```powershell
+cd MCUSerialBridge
+.\build-native.ps1 -Target all
+```
+
+输出目录：
+
+```text
+build/runtimes/win-x64/native/mcu_serial_bridge.dll
+build/runtimes/linux-x64/native/libmcu_serial_bridge.so
+build/runtimes/linux-arm64/native/libmcu_serial_bridge.so
+```
+
+`build-native.ps1` 会先用 SCons/MSVC 构建 Windows DLL，再用 Zig 交叉编译 Linux x64 和 Linux ARM64 `.so`。也可以只构建单个平台：
+
+```powershell
+.\build-native.ps1 -Target windows
+.\build-native.ps1 -Target linux-x64
+.\build-native.ps1 -Target linux-arm64
+```
+
+依赖：
+
+* Windows native：MSVC + SCons。
+* Linux native 交叉编译：Zig，可用 `winget install zig.zig` 安装。
+
+运行时规则：
+
+* Linux 端串口名称直接使用设备路径，例如 `/dev/ttyUSB0`、`/dev/ttyACM0`，不会再自动追加 Windows 的 `\\.\` 前缀。
+* C# wrapper 的 P/Invoke 使用逻辑库名 `mcu_serial_bridge`，并通过 `NativeBridgeLibraryResolver` 优先从 `runtimes/<rid>/native/` 加载当前平台对应文件。
+* Host 发布脚本会默认调用 `build-native.ps1 -Target all`，并把三平台 native runtime assets 放入发布包。
+
+当前 Linux 移植边界：
+
+* 已隔离并实现：线程、互斥锁、条件变量、auto-reset event、sleep/time、串口 open/read/write/flush、基础串口参数配置。
+* 已覆盖共享库中同时包含的 Bootloader 串口访问路径。
+* 已在 Windows 开发机使用 Zig 成功生成 Linux x64 / Linux ARM64 `.so`；仍需在目标 Linux 机器上做实际串口联调验证。

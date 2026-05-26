@@ -372,7 +372,12 @@ namespace MCUBootloaderCLR
 
     internal static class MCUBootloaderCoreAPI
     {
-        private const string DLL = "mcu_serial_bridge.dll";
+        private const string DLL = "mcu_serial_bridge";
+
+        static MCUBootloaderCoreAPI()
+        {
+            NativeBridgeLibraryResolver.EnsureRegistered();
+        }
 
         [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
         internal static extern MCUBootloaderError mbl_open(

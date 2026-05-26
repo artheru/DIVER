@@ -6,8 +6,14 @@ env = Environment()
 build_dir = '../build'
 env.Execute(Mkdir(build_dir))
 
-# 使用 UTF-8 编译，解决中文注释 C4819 警告
-env.Append(CCFLAGS=['/utf-8'])
+is_windows = env['PLATFORM'] == 'win32'
+
+if is_windows:
+    # 使用 UTF-8 编译，解决中文注释 C4819 警告
+    env.Append(CCFLAGS=['/utf-8'])
+else:
+    env.Append(CCFLAGS=['-std=c11', '-Wall', '-Wextra', '-fPIC', '-D_GNU_SOURCE'])
+    env.Append(LIBS=['pthread'])
 
 # 脚本和输出路径
 gen_script = os.path.abspath(os.path.join('include', 'msb_error.py'))
@@ -25,20 +31,27 @@ c_header = env.GenCError(c_error_file, gen_script)
 cs_header = env.GenCSError(cs_error_file, gen_script)
 
 # 核心库 (生成 DLL，包含 MSB 和 Bootloader)
+core_sources = [
+    # MCU Serial Bridge
+    'src/msb_handle.c',
+    'src/msb_packet.c',
+    'src/msb_thread.c',
+    'src/msb_bridge.c',
+    # MCU Bootloader
+    '../bootloader/src/mbl_bootloader.c',
+]
+if not is_windows:
+    core_sources.append('src/msb_platform_posix.c')
+
+core_linkflags = ['/DLL', '/nologo'] if is_windows else []
+core_cflags = ['/utf-8'] if is_windows else []
+
 core_dll = env.SharedLibrary(
     target=os.path.join(build_dir, 'mcu_serial_bridge'),
-    source=[
-        # MCU Serial Bridge
-        'src/msb_handle.c',
-        'src/msb_packet.c',
-        'src/msb_thread.c',
-        'src/msb_bridge.c',
-        # MCU Bootloader
-        '../bootloader/src/mbl_bootloader.c',
-    ],
+    source=core_sources,
     CPPPATH=['include', '../bootloader/include'],
-    CFLAGS=['/utf-8'],          # 编译 UTF-8
-    LINKFLAGS=['/DLL', '/nologo']  # DLL 标志
+    CFLAGS=core_cflags,
+    LINKFLAGS=core_linkflags
 )
 env.Depends(core_dll, c_header)
 env.Depends(core_dll, cs_header)

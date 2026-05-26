@@ -4,10 +4,26 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$SCRIPT_DIR"
 CHECK_ONLY=0
-if [ "${1:-}" = "--check-only" ]; then
-  CHECK_ONLY=1
-  shift
-fi
+SKIP_INTEGRITY_CHECK=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --check-only)
+      CHECK_ONLY=1
+      shift
+      ;;
+    --skip-integrity-check)
+      SKIP_INTEGRITY_CHECK=1
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 fail() {
   echo "ERROR: $*" >&2
@@ -88,12 +104,19 @@ require_file "res/compiler/RunOnMCU.cs"
 require_file "res/compiler/DIVERInterface.cs"
 require_file "res/compiler/DIVERCommonUtils.cs"
 require_file "res/compiler/Extensions.cs"
-require_file "package-manifest.sha256"
+require_file "runtimes/win-x64/native/mcu_serial_bridge.dll"
+require_file "runtimes/linux-x64/native/libmcu_serial_bridge.so"
+require_file "runtimes/linux-arm64/native/libmcu_serial_bridge.so"
 
-if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum -c package-manifest.sha256
+if [ "$SKIP_INTEGRITY_CHECK" = "1" ]; then
+  echo "WARNING: package integrity check skipped by --skip-integrity-check."
 else
-  fail "sha256sum command was not found; cannot verify package integrity."
+  require_file "package-manifest.sha256"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -c package-manifest.sha256
+  else
+    fail "sha256sum command was not found; cannot verify package integrity."
+  fi
 fi
 
 if [ "$CHECK_ONLY" = "1" ]; then

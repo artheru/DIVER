@@ -3,10 +3,10 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <windows.h>
 
 #include "msb_bridge.h"
 #include "msb_error_c.h"
+#include "msb_platform.h"
 #include "msb_protocol.h"
 
 #ifdef __cplusplus

@@ -3,11 +3,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <windows.h>
 
 #include "c_core_common.h"
 #include "msb_bridge.h"
 #include "msb_handle.h"
+#include "msb_packet.h"
 #include "msb_thread.h"
 
 #define MSB_CLOSE_THREAD_TIMEOUT_MS 2000
@@ -52,6 +52,7 @@ MCUSerialBridgeError msb_open(
     }
 
     // 保存端口名（规范化）
+#ifdef _WIN32
     if (strncmp(port, "\\\\.\\", 4) == 0) {
         // 已经是 \\.\COMx 形式
         strncpy((*handle)->port_name, port, sizeof((*handle)->port_name) - 1);
@@ -63,6 +64,9 @@ MCUSerialBridgeError msb_open(
                 "\\\\.\\%s",
                 port);
     }
+#else
+    strncpy((*handle)->port_name, port, sizeof((*handle)->port_name) - 1);
+#endif
     (*handle)->port_name[sizeof((*handle)->port_name) - 1] = '\0';
 
     (*handle)->baud = baud;
@@ -234,7 +238,7 @@ MCUSerialBridgeError mcu_state(
     }
 
     MCUSerialBridgeError ret = mcu_send_packet_and_wait(
-            handle, CommandState, 0, 0, state, sizeof(MCUStateC), timeout_ms);
+            handle, CommandState, 0, 0, (uint8_t*)state, sizeof(MCUStateC), timeout_ms);
 
     DBG_PRINT("State finished with result[0x%08X], state[0x%08X]", ret, state->raw);
     return ret;
@@ -262,7 +266,7 @@ MCUSerialBridgeError msb_version(
             CommandVersion,
             0,
             0,
-            version,
+            (uint8_t*)version,
             sizeof(VersionInfoC),
             timeout_ms);
 
@@ -307,7 +311,7 @@ MCUSerialBridgeError mcu_get_layout(
             CommandGetLayout,
             0,
             0,
-            layout,
+            (uint8_t*)layout,
             sizeof(LayoutInfoC),
             timeout_ms);
 

@@ -100,6 +100,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish
 
 默认不要传 `-Runtime`。默认产物是 framework-dependent portable 包，统一通过目标机安装的 .NET 8 SDK/Runtime 运行，可用于 Windows x64、Linux x64、Linux ARM64。由于部署后仍需要在目标机执行用户逻辑 Build，目标机应安装 .NET 8 SDK，而不只是 runtime。
 
+发布脚本默认会先调用 `MCUSerialBridge/build-native.ps1 -Target all`，在 Windows 开发机上生成并打包三平台 native bridge：
+
+- `runtimes/win-x64/native/mcu_serial_bridge.dll`
+- `runtimes/linux-x64/native/libmcu_serial_bridge.so`
+- `runtimes/linux-arm64/native/libmcu_serial_bridge.so`
+
+Linux native bridge 使用 Zig 交叉编译，不需要在 Linux 目标机上编译。若只是调试托管发布流程、且确认 native assets 已经存在，可以传 `-SkipNativeBuild` 跳过这一步。
+
 例如：
 
 ```text
@@ -130,6 +138,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish
 powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish-host.ps1 -IncludeSdkExecutable
 ```
 
+若已手动执行过 `MCUSerialBridge/build-native.ps1 -Target all`，并且只想重新打托管发布包，可以跳过 native bridge 重编译：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish-host.ps1 -SkipNativeBuild
+```
+
 如确实需要生成某个 RID 的平台专用包，可传 `-Runtime`。这不是默认发行方式，例如 Linux ARM64 framework-dependent 包：
 
 ```powershell
@@ -142,7 +156,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish
 - `commitTime`：该 commit 的提交时间
 - `dirty`：发布时工作区是否有未提交改动
 - `publishTime`：发布时间
-- `configuration` / `runtime` / `includePdb` / `includeSdkExecutable` / `excludeIisConfig` / `excludeStaticWebAssetsEndpoints` / `startScripts` / `setupScripts` / `outputDirectory`
+- `configuration` / `runtime` / `includePdb` / `includeSdkExecutable` / `excludeIisConfig` / `excludeStaticWebAssetsEndpoints` / `skipNativeBuild` / `nativeBridgeRuntimes` / `startScripts` / `setupScripts` / `outputDirectory`
 
 ### 发布包包含什么
 
@@ -159,8 +173,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish
   - `Extensions.cs`
   - `extra_methods.txt`
   - `native/`
-- `mcu_serial_bridge.dll`：Windows native bridge，存在时会复制。
-- `libmcu_serial_bridge.so`：Linux native bridge，存在时会复制。
+- `runtimes/win-x64/native/mcu_serial_bridge.dll`：Windows x64 native bridge。
+- `runtimes/linux-x64/native/libmcu_serial_bridge.so`：Linux x64 native bridge。
+- `runtimes/linux-arm64/native/libmcu_serial_bridge.so`：Linux ARM64 native bridge。
 - `publish-info.json`：发布信息清单。
 - `start-host.ps1` / `start-host.bat` / `start-host.sh`：Windows PowerShell、Windows CMD、Linux shell 启动入口。
 - `install-dotnet-sdk-ubuntu.sh`：Ubuntu 目标机安装 .NET 8 SDK 的辅助脚本，会根据当前 Ubuntu `VERSION_ID` 下载对应 Microsoft apt 源配置包。
@@ -185,7 +200,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish
 - 是否安装 .NET SDK 8 或更高版本，用于部署后 Build 用户逻辑。
 - `git` 是否可用；文件历史、diff、checkout/revert、项目导入导出历史依赖 Git。
 - Linux 下当前用户是否为 `root`；非 root 会直接失败，需使用 `sudo` 或 root 用户运行。
-- Host 主程序、`wwwroot/`、`res/compiler/`、`publish-info.json` 等必需文件是否存在。
+- Host 主程序、`wwwroot/`、`res/compiler/`、三平台 `runtimes/*/native/`、`publish-info.json` 等必需文件是否存在。
 - `package-manifest.sha256` 中记录的包内文件 SHA256 是否匹配。
 
 Windows PowerShell：
@@ -219,6 +234,20 @@ sudo ./start-host.sh
 ```shell
 sudo ./start-host.sh --check-only
 ```
+
+Linux 下如果只是临时替换了发布包内的 native `.so` 做调试，可以显式跳过 SHA256 完整性校验：
+
+```shell
+sudo ./start-host.sh --skip-integrity-check
+```
+
+也可以只检查环境和必需文件、不校验 `package-manifest.sha256`：
+
+```shell
+sudo ./start-host.sh --check-only --skip-integrity-check
+```
+
+该选项只建议用于本地/现场调试手动替换文件的场景。正式发布包仍应使用默认完整性校验，或重新运行 `publish-host.ps1` 生成新的 `package-manifest.sha256`。
 
 若 Ubuntu 目标机缺少 `dotnet` 或 `git`，先运行包内安装脚本：
 
@@ -351,6 +380,10 @@ $env:CORALINKER_COMPILER_RES_DIR = "D:\CompilerResources"
 │       ├── install-dotnet-sdk-ubuntu.sh
 │       ├── package-manifest.sha256
 │       ├── wwwroot/          # 前端静态资源
+│       ├── runtimes/
+│       │   ├── win-x64/native/mcu_serial_bridge.dll
+│       │   ├── linux-x64/native/libmcu_serial_bridge.so
+│       │   └── linux-arm64/native/libmcu_serial_bridge.so
 │       ├── res/
 │       │   └── compiler/     # 部署后 Build 所需编译资源
 │       │       ├── DiverCompiler.dll

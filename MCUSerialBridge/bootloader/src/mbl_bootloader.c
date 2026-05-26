@@ -8,11 +8,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <windows.h>
 
 #include "mbl_bootloader.h"
 #include "mbl_error.h"
 #include "mbl_protocol.h"
+#include "msb_platform.h"
 
 /*==============================================================================
  * 内部句柄结构
@@ -193,7 +193,11 @@ static MCUBootloaderError configure_serial(HANDLE hComm, uint32_t baud) {
  */
 static MCUBootloaderError open_serial(mbl_handle* h, uint32_t baud) {
     char port_path[128];
+#ifdef _WIN32
     snprintf(port_path, sizeof(port_path), "\\\\.\\%s", h->port_name);
+#else
+    snprintf(port_path, sizeof(port_path), "%s", h->port_name);
+#endif
 
     h->hComm = CreateFileA(port_path,
                            GENERIC_READ | GENERIC_WRITE,

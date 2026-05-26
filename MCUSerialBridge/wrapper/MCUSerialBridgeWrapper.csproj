@@ -12,6 +12,7 @@
   <ItemGroup>
     <Compile Include="MCUSerialBridgeCLR.cs" />
     <Compile Include="MCUSerialBridgeError.cs" />
+    <Compile Include="NativeBridgeLibraryResolver.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -4,35 +4,36 @@
 
 ## 最近一次支持
 
-- 时间：2026-05-26 12:03 UTC+8
-- 事项：启动脚本补充 Git 依赖检查并重新打包。
-- 背景：
-  - 用户指出文件记录日志模块依赖 Git，启动脚本漏查 `git`。
-  - 用户要求再查是否还有其他运行期外部命令依赖。
-- 已调整：
-  - 搜索 `ProcessStartInfo` / `Process.Start` / `FileName=` 等运行期外部命令使用点。
-  - 确认 Host 运行期外部命令依赖：
-    - `dotnet`：`DiverBuildService` 执行 restore/build 和 SDK 检查。
-    - `git`：`GitHistoryService` 执行文件历史、diff、checkout/revert 等。
-    - `sha256sum`：Linux 启动脚本用于包体完整性校验。
-  - `packaging/start-host.ps1`：
-    - 新增 `Check-GitEnvironment`。
-    - 缺少 Git 时提示 Windows 安装 Git for Windows，Ubuntu/Debian 使用 apt，其他 Linux 使用发行版包管理器。
-  - `packaging/start-host.sh`：
-    - 新增 `git` 命令存在性和 `git --version` 检查。
-    - 缺少 Git 时输出安装提示。
-  - `packaging/install-dotnet-sdk-ubuntu.sh`：
-    - 安装 prerequisites 时同步安装 `git`。
-    - 安装完成输出 `git --version`。
-  - `3rd/CoralinkerHost/README.md`：
-    - 启动检查列表加入 Git。
-    - Ubuntu 安装脚本说明更新为同时安装 .NET SDK 和 Git。
+- 时间：2026-05-26 14:17 UTC+8
+- 事项：完整重新构建、发布打包、上传并解压到 Linux ARM64 目标机。
+- 已执行：
+  - 本地完整运行：
+    - `powershell -NoProfile -ExecutionPolicy Bypass -File 3rd\CoralinkerHost\publish-host.ps1`
+  - 发布脚本自动完成：
+    - `MCUSerialBridge/build-native.ps1 -Target all`
+    - Windows DLL、Linux x64 `.so`、Linux ARM64 `.so` 构建
+    - `dotnet publish` Host
+    - 生成 `publish-info.json`
+    - 生成 `package-manifest.sha256`
+  - 新发布目录：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_43b8087_20260526-141521/`
+  - 新打包文件：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_43b8087_20260526-141521.tar.gz`
+    - 大小：`9024272` bytes
+  - 已上传到远端：
+    - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-141521.tar.gz`
+  - 已解压到远端：
+    - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-141521/`
 - 验证：
-  - 默认 portable 发布成功：`3rd/CoralinkerHost/Publish/CoralinkerHost_df02128_20260526-120305/`。
-  - `start-host.ps1 -CheckOnly` 成功，输出包含 `Checking Git...`。
-  - 直接读取发布包内 `start-host.sh`，确认 Git 安装提示已进入包内。
-  - 直接读取发布包内 `install-dotnet-sdk-ubuntu.sh`，确认会安装 `git` 并输出 `git --version`。
-  - 已压缩：`3rd/CoralinkerHost/Publish/CoralinkerHost_df02128_20260526-120305.tar.gz`，大小 `8,870,445` bytes。
+  - 远端执行 `sudo -n ./start-host.sh --check-only` 成功，完整 `package-manifest.sha256` 校验通过。
+  - 停掉旧 Host 后，从新目录启动：
+    - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-141521/CoralinkerHost.dll`
+  - 远端 `/api/node/probe` 使用 `serial://name=/dev/ttyACM0&baudrate=1000000` 成功：
+    - Version: `CORAL-NODE-V2.1`, Commit `f1d8f16`, BuildTime `2026-05-13 17:14:38`
+    - Layout: DI=27, DO=20, Ports=5
+- 注意：
+  - 本次完整构建有既有 warning，无 error。
+  - 当前远端正在运行新发布目录下的 Host，PID 曾显示为 `21571`。
 
 ## 本次工作记录
 
