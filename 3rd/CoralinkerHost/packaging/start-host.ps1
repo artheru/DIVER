@@ -123,6 +123,8 @@ function Check-PackageFiles {
     Require-File "res/compiler/DIVERInterface.cs"
     Require-File "res/compiler/DIVERCommonUtils.cs"
     Require-File "res/compiler/Extensions.cs"
+    Require-File "res/compiler/build-packages.json"
+    Require-Directory "res/compiler/nuget-packages"
     Require-File "runtimes/win-x64/native/mcu_serial_bridge.dll"
     Require-File "runtimes/linux-x64/native/libmcu_serial_bridge.so"
     Require-File "runtimes/linux-arm64/native/libmcu_serial_bridge.so"

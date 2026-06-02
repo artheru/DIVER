@@ -53,6 +53,7 @@ internal static class Program
         builder.Services.AddSingleton<FileTreeService>();
         builder.Services.AddSingleton<TerminalBroadcaster>();
         builder.Services.AddSingleton<GitHistoryService>();
+        builder.Services.AddSingleton<HostAboutService>();
         builder.Services.AddSingleton<DiverBuildService>();
         builder.Services.AddSingleton<RootRuntimeService>();
         builder.Services.AddSingleton<RuntimeSessionService>();

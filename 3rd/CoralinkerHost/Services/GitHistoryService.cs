@@ -106,22 +106,34 @@ public sealed class GitHistoryService
         lock (_gate)
         {
             EnsureRepository();
-            var path = NormalizeOptionalInputPath(relativePath);
+            var requestedPath = NormalizeOptionalInputPath(relativePath);
             var fromRev = NormalizeRevision(from, "HEAD~1");
             var toRev = NormalizeRevision(to, "HEAD");
             fromRev = ResolveRevisionOrEmptyTreeUnsafe(fromRev);
 
-            var args = new List<string> { "diff", "--no-ext-diff", "--", };
-            if (path == null)
+            var filesText = RunGitAllowFailure(["diff", "--name-only", fromRev, toRev, "--", InputsGitPath], out var nameExit);
+            if (nameExit != 0 && nameExit != 1)
             {
-                args = ["diff", "--no-ext-diff", fromRev, toRev, "--", InputsGitPath];
-            }
-            else
-            {
-                args = ["diff", "--no-ext-diff", fromRev, toRev, "--", path];
+                throw new InvalidOperationException(filesText);
             }
 
-            var unified = RunGitAllowFailure(args.ToArray(), out var diffExit);
+            var files = filesText
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim().TrimEnd('\r').Replace('\\', '/'))
+                .Where(line => !string.IsNullOrWhiteSpace(line))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            var path = requestedPath;
+            if (path == null || (files.Length > 0 && !files.Contains(path, StringComparer.OrdinalIgnoreCase)))
+            {
+                path = files.FirstOrDefault();
+            }
+
+            var args = path == null
+                ? new[] { "diff", "--no-ext-diff", fromRev, toRev, "--", InputsGitPath }
+                : new[] { "diff", "--no-ext-diff", fromRev, toRev, "--", path };
+            var unified = RunGitAllowFailure(args, out var diffExit);
             if (diffExit != 0 && diffExit != 1)
             {
                 throw new InvalidOperationException(unified);
@@ -135,7 +147,7 @@ public sealed class GitHistoryService
                 newText = ReadFileAtRevisionUnsafe(toRev, path);
             }
 
-            return new GitDiffResult(fromRev, toRev, path, unified, oldText, newText);
+            return new GitDiffResult(fromRev, toRev, path, unified, oldText, newText, files);
         }
     }
 
@@ -423,7 +435,7 @@ public sealed record GitStatusSnapshot(string? Head, string? ShortHead, DateTime
 public sealed record GitCommitResult(string? HeadBefore, string? HeadAfter, bool Committed);
 public sealed record GitCommitInfo(string Hash, string ShortHash, DateTimeOffset? CommitTime, string Author, string Subject, string[] Files, int Additions = 0, int Deletions = 0);
 public sealed record GitCommitListResult(GitCommitInfo[] Commits);
-public sealed record GitDiffResult(string From, string To, string? Path, string UnifiedDiff, string? OldText, string? NewText);
+public sealed record GitDiffResult(string From, string To, string? Path, string UnifiedDiff, string? OldText, string? NewText, string[] Files);
 public sealed record GitFileAtCommitResult(string Commit, string Path, string Text);
 public sealed record GitCheckoutResult(string? Head, string? ShortHead, string[] DirtyFiles);
 internal sealed record GitCommitStat(string[] Files, int Additions, int Deletions);

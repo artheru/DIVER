@@ -70,6 +70,7 @@ const selectedLogic = ref<string | null>(null)
 const runtimeStore = useRuntimeStore()
 const filesStore = useFilesStore()
 const { buildVersion } = storeToRefs(filesStore)
+let rootRefreshId = 0
 
 const logicOptions = computed(() => {
   return [
@@ -89,28 +90,37 @@ const buildText = computed(() => {
 })
 
 async function loadRootInfo() {
+  const refreshId = ++rootRefreshId
   const [logicResult, stateResult] = await Promise.all([
     rootApi.getRootLogics().catch(() => null),
     rootApi.getRootState().catch(() => null)
   ])
+  if (refreshId !== rootRefreshId) return false
   rootLogics.value = logicResult?.ok ? logicResult.logics : []
   rootState.value = stateResult?.ok ? stateResult.state : null
   selectedLogic.value = rootState.value?.logicName || '__none__'
+  return true
+}
+
+async function refreshRootNodeRuntime() {
+  const current = await loadRootInfo()
+  if (!current) return
+  await runtimeStore.refreshVariables()
+  await runtimeStore.refreshFieldMetas()
 }
 
 async function configureRootLogic(value?: string | null) {
   selectedLogic.value = value || '__none__'
   await rootApi.configureRoot(selectedLogic.value === '__none__' ? null : selectedLogic.value)
-  await loadRootInfo()
-  await runtimeStore.refreshFieldMetas()
+  await refreshRootNodeRuntime()
 }
 
 onMounted(() => {
-  loadRootInfo()
+  refreshRootNodeRuntime()
 })
 
 watch(buildVersion, () => {
-  loadRootInfo()
+  refreshRootNodeRuntime()
 })
 </script>
 

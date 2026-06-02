@@ -1,165 +1,139 @@
-# CONTEXT_SUMMARY — CORAL-NODE-V2.1 BSP 适配任务
+# CONTEXT_SUMMARY — CoralinkerHost Variables Flow
 
 > 该文件每次任务结束前会被刷新，记录当前工作上下文，便于下次继续。
 
 ## 最近一次支持
 
-- 时间：2026-05-26 14:17 UTC+8
-- 事项：完整重新构建、发布打包、上传并解压到 Linux ARM64 目标机。
+- 时间：2026-06-02 19:36 UTC+8
+- 事项：拆分 Variables Flow 布局/布线模块，并撤掉高开销 A* 路由。
+- 用户反馈：
+  - 问题不只是线避让，还包括变量位置安排，整体更像 PCB 的布局+布线。
+  - `GraphCanvas.vue` 太长，需要把布局布线单独拆出文件。
+  - 用户建议参考 ComfyUI；检索后确认 ComfyUI/LiteGraph 的连线渲染以 slot-based link rendering 为主，支持 Straight/Linear/Spline，不做每帧全局 maze routing。
 - 已执行：
-  - 本地完整运行：
-    - `powershell -NoProfile -ExecutionPolicy Bypass -File 3rd\CoralinkerHost\publish-host.ps1`
-  - 发布脚本自动完成：
-    - `MCUSerialBridge/build-native.ps1 -Target all`
-    - Windows DLL、Linux x64 `.so`、Linux ARM64 `.so` 构建
-    - `dotnet publish` Host
-    - 生成 `publish-info.json`
-    - 生成 `package-manifest.sha256`
-  - 新发布目录：
-    - `3rd/CoralinkerHost/Publish/CoralinkerHost_43b8087_20260526-141521/`
-  - 新打包文件：
-    - `3rd/CoralinkerHost/Publish/CoralinkerHost_43b8087_20260526-141521.tar.gz`
-    - 大小：`9024272` bytes
-  - 已上传到远端：
-    - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-141521.tar.gz`
-  - 已解压到远端：
-    - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-141521/`
+  - 新增 `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`：
+    - 导出 `computeVariableFlowLayout()`。
+    - 包含变量框候选位置评分、变量顺序候选、slot 锚点、正交 polyline 路径生成、几何评分工具。
+    - 统一导出 `NodeRect`、`VariableFlowItem`、`FlowLine`、`ROOT_SIZE`、`NODE_SIZE` 等类型/常量。
+  - `GraphCanvas.vue`：
+    - 删除旧的大段布局/布线/几何/A* 函数。
+    - 只保留节点 DOM 测量、VueFlow 渲染和调用 `computeVariableFlowLayout()`。
+    - 撤掉高开销 A* 路由，改回低成本、Comfy/LiteGraph 风格的 slot-based orthogonal link rendering，避免拖动时卡顿。
 - 验证：
-  - 远端执行 `sudo -n ./start-host.sh --check-only` 成功，完整 `package-manifest.sha256` 校验通过。
-  - 停掉旧 Host 后，从新目录启动：
-    - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-141521/CoralinkerHost.dll`
-  - 远端 `/api/node/probe` 使用 `serial://name=/dev/ttyACM0&baudrate=1000000` 成功：
-    - Version: `CORAL-NODE-V2.1`, Commit `f1d8f16`, BuildTime `2026-05-13 17:14:38`
-    - Layout: DI=27, DO=20, Ports=5
-- 注意：
-  - 本次完整构建有既有 warning，无 error。
-  - 当前远端正在运行新发布目录下的 Host，PID 曾显示为 `21571`。
+  - `ReadLints` 检查 `GraphCanvas.vue`、`variableFlowLayout.ts` 无错误。
+  - `npm run build` 成功，只有既有 Vite/Rollup warning。
 
-## 本次工作记录
+## 上一次支持
 
-- 时间：2026-05-14 04:04 UTC+8
-- 事项：实现 Root Remote Runtime 第一版。
-- 已实现：
-  - `DiverTest/RunOnMCU.cs` 与 `CoralinkerKitDocs/stubs/CartActivator.cs` 新增 `LogicRunOnRootAttribute`、`AsControlItem`、`RootLogic<T>`。
-  - Build 阶段扫描 `[LogicRunOnRoot]`，生成 `assets/generated/<RootLogicName>.root.json`，记录 assembly、scanInterval、cart fields、control fields、commit/build 信息。
-  - 新增 `RootRuntimeService`：加载 Root .NET assembly，实例化 Root logic/cart，周期执行 `Operation()`，读取 DIVERSession 变量，写回 UpperIO，并触发 MCU UpperIO 下发。
-  - `DIVERSession` 新增 `SetCartFieldAndSignalUpperIO()`，用于 Root 写 UpperIO 后唤醒节点发送。
-  - 新增 `/api/root/logics`、`/api/root/configure`、`/api/root/state`、`/api/root/control/meta`、`/api/root/control/set`。
-  - Start/Stop 生命周期集成 Root runtime：Start 成功后启动 Root；Stop 先停 Root 再停 MCU session。
-  - Root 节点 UI 增加 Root Logic 下拉、状态、commit/build 信息；Build 后会刷新 Root logic 列表。
-  - 遥控器变量绑定接入 Root control fields；Root control field 只支持基础类型，UI 控件负责映射。
-- 后续补充：
-  - New Input File 支持 `MCU Logic` / `Root Logic` 模板选择。
-  - Root 默认模板改为纯 Root 差速遥控逻辑：`joystickX/joystickY -> left_diff_speed/right_diff_speed`，不包含 `RunOnMCU` 示例。
+- 时间：2026-06-02 19:27 UTC+8
+- 事项：修正 Variables Flow 线缠绕和锚点不在最近边的问题。
+- 用户反馈：
+  - 线仍然缠在一起。
+  - 线没有落在最近的边缘上。
+- 已执行：
+  - `GraphCanvas.vue`：
+    - `anchorToward()` 不再按上下/左右阈值粗略选边，改为比较目标点到矩形四边距离，选择最近边。
+    - 最近边上的端点坐标使用“目标点投影 + slot 位置”的混合：
+      - 保证端点贴近最近边。
+      - 同一边多条线仍能轻微分散，不完全重合。
+    - `curvePath()` 增加 lane 参数：
+      - 横向曲线在 y 方向按 lane 分层。
+      - 纵向曲线在 x 方向按 lane 分层。
+      - 避免多条线在中间合成一束。
+    - 实际绘制处把变量序号传入 `curvePath()`，让每个变量对应一条稳定 lane。
 - 验证：
-  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release --no-restore` 成功（2026-05-14 04:25 再次通过，0 warning / 0 error）。
+  - `ReadLints` 检查 `GraphCanvas.vue` 无错误。
+  - `npm run build` 成功，只有既有 Vite/Rollup warning。
+
+## 上一次支持
+
+- 时间：2026-06-02 19:18 UTC+8
+- 事项：增强 Variables Flow 的 J/effort 优化：端点分散、变量顺序参与评分、上下/左右曲线自适应。
+- 用户反馈：
+  - 进出线端点不要挤在一起，应该分开一点。
+  - 线可以像示意图一样按弧线排列。
+  - 多节点情况下变量的位置和顺序都可以调整，目标是让总体 J/effort 最小。
+- 已执行：
+  - `GraphCanvas.vue`：
+    - 新增 `FlowLayoutResult`，布局结果包含变量组原点和优化后的变量顺序。
+    - 变量数量 `<= 6` 时对变量顺序做全排列参与评分；更多变量时使用原顺序、反序、按方向启发式排序等候选。
+    - 真实绘制和布局评分都使用同一套 slot 锚点：
+      - Root/Node 边上的端点按变量序号分散。
+      - 变量框边上的端点按 root/target slot 分散。
+    - `anchorToward()` 改为可按上下/左右方向自动选边：
+      - 另一端主要在上/下方时，锚到 top/bottom 边。
+      - 另一端主要在左/右方时，锚到 left/right 边。
+      - 同一边上按 slot 分配 0..1 的位置。
+    - `curvePath()` 改为根据端点关系选择控制点：
+      - 上下关系使用竖向控制点。
+      - 左右关系使用横向控制点。
+    - 评分函数也使用 slot 后的虚拟线段，避免评分认为可行、实际绘制又挤在一起。
+- 验证：
+  - `ReadLints` 检查 `GraphCanvas.vue` 无错误。
+  - `npm run build` 成功，只有既有 Vite/Rollup warning。
+
+## 上一次支持
+
+- 时间：2026-06-02 19:08 UTC+8
+- 事项：将 Variables Flow 变量布局改为轻量自动占位/推挤评分算法。
+- 用户反馈：
+  - 横向排列时变量放中间是好的。
+  - Root/Node 竖向排列时，变量框继续横向卡在中间会挡住节点和线。
+  - 希望变量框、连线都参与自动推挤；前端运算频次不高，可以多算一点。
+- 已执行：
+  - `GraphCanvas.vue` 中重写外部变量布局：
+    - 变量框不再“先选一列再上下推”。
+    - 改为把所有外部变量先视作一个 group/block。
+    - 生成中间、上、下、左、右、四角和网格候选位置。
+    - 对候选位置打分，评分包含：
+      - 变量组是否压 Root/Node。
+      - 连线线段是否穿过 Root/Node 占用区。
+      - 总线长。
+      - 与 Root/Node 中心区域的距离。
+    - 增加竖向拓扑偏置：
+      - 当 Root 和 Node 主要是上下关系时，惩罚停留在节点包围盒的中间高度带。
+      - 优先把变量组推到节点组外侧；Root 在上、Node 在下时更倾向放到下方。
+  - 新增几何工具函数：
+    - `uniquePoints()`
+    - `distance()`
+    - `overlapArea()`
+    - `segmentIntersectsRect()`
+    - `segmentsIntersect()`
+- 验证：
+  - `ReadLints` 检查 `GraphCanvas.vue` 无错误。
+  - `npm run build` 成功，只有既有 Vite/Rollup warning。
+
+## 上一次支持
+
+- 时间：2026-06-02 18:40 UTC+8
+- 事项：修复 Variables Flow 箭头方向语义错误。
+- 用户反馈：
+  - 截图显示方向“好像都很不对”。
+- 根因/判断：
+  - 上一版把 `upper` / `lower` 的语义反了。
+  - 正确语义应为：
+    - `upper` / `AsUpperIO`：Root/上位机 -> 变量 -> MCU 节点。
+    - `lower` / `AsLowerIO`：MCU 节点 -> 变量 -> Root/上位机。
+  - 变量框可能被布局到节点左侧、右侧或中间，因此不能固定使用变量框左/右端点。
+- 已执行：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`：
+    - `upper` 路径改为 Root -> variable -> Node。
+    - `lower` 路径改为 Node -> variable -> Root。
+    - `mutual` 临时绘制双向路径，避免单箭头误导。
+    - 新增 `itemToRect()`，让变量框也走矩形锚点计算。
+    - 每段路径的源/目标端点都用 `anchorToward(rect, point)` 动态选择边，避免变量框位置变化后箭头方向反掉。
+- 验证：
+  - `ReadLints` 检查 `GraphCanvas.vue` 无错误。
+  - `npm run build` 成功，只有既有 Vite/Rollup warning。
+
+## 上一次支持
+
+- 时间：2026-06-02 18:31 UTC+8
+- 事项：修复 Variables Flow 连线端点缩放/偏移和变量框拥挤遮挡问题。
+- 已执行：
+  - SVG `viewBox`、`width`、`height`、CSS 尺寸保持一致，避免 SVG 内部二次缩放。
+  - 连线锚点改为 `anchorToward(rect, point)`。
+  - 外部变量框改为自动布局：候选列评分、Root/Node padding 后碰撞检测、变量框纵向避让。
+- 验证：
+  - `ReadLints` 检查 `GraphCanvas.vue` 无错误。
   - `npm run build` 成功。
-  - 关键文件 `ReadLints` 无 linter 错误。
-
-- 时间：2026-05-14 01:57 UTC+8
-- 事项：实现 CoralinkerHost 前端编辑/构建/运行页面的输入源文件 Git 历史追踪能力。
-- 范围：
-  - 使用 `3rd/CoralinkerHost/data/.git` 独立仓库。
-  - 只跟踪 `data/assets/inputs/*.cs`。
-- 已实现：
-  - 后端 `GitHistoryService`：初始化 `data/.git`、保存自动 commit、status/log/diff/file/checkout/revert API。
-  - `/api/files/write` / 新建 / 删除输入源文件接入自动提交和 Build 中写入锁。
-  - Build 前后端检查 inputs 是否有未提交变更；Build 成功生成 `<logic>.build.json`，包含 `sourceCommit`、`sourceCommitShort`、`sourceCommitTime`、`buildTime`、`buildId`。
-  - Program 节点时读取 `<logic>.build.json`，保存到节点 `buildInfo`；Graph 节点另起一行显示 Commit 和 Build time。
-  - 前端新增 `history` API/store、HistoryPanel 右侧历史抽屉、10 秒 HEAD 轮询、远端变更提示、保存冲突覆盖确认。
-  - Build 期间编辑器只读，保存/新建/上传/删除输入文件被禁用或后端拒绝。
-- 验证：
-  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release --no-restore` 成功，只有既有 warning。
-  - `npm run build` 成功，只有 Vite chunk/动态导入 warning。
-  - `ReadLints` 检查新增/修改关键文件无 linter 错误。
-  - Debug 构建仍受旧 `CoralinkerHost (24968)` 锁定 `bin/Debug/net8.0/CoralinkerSDK.dll` 影响；Release 已验证代码可编译。
-- 最新验证（2026-05-14 02:07 UTC+8）：
-  - 后端 Release 再次构建成功：`dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release --no-restore`。
-  - 前端再次构建成功：`npm run build`。
-  - 前端产物输出到 `3rd/CoralinkerHost/wwwroot`。
-- UI 修正（2026-05-14 02:17 UTC+8）：
-  - History 入口移到主编辑区域左上 Tab 栏，紧邻 `Graph`，始终可见。
-  - History diff 改为固定左右两栏文本对比：左旧右新，删除红色，新增绿色，不再依赖 Monaco DiffEditor 渲染。
-  - 重新执行 `npm run build` 成功。
-  - 已确认构建产物 `wwwroot/assets/HomeView-BkE_xc_y.js` 包含 `Input History` / `All Changes` 等新 UI 文案。
-- 中文路径修复（2026-05-14 02:29 UTC+8）：
-  - 用户新建 `小黄瓜屁股大.cs` 后点 View Diff，后端抛出 `Path must be under assets/inputs and end with .cs`。
-  - 判断根因是 Git 默认 `core.quotepath=true` 会把中文文件名转义为带引号/反斜杠的路径，前端拿到后再传回 diff API 时不再满足路径校验。
-  - 修复 `GitHistoryService`：所有 git 命令统一加 `-c core.quotepath=false`，让中文路径以 UTF-8 原样返回。
-  - 同时将 History diff 改回 Monaco DiffEditor：左右编辑器、行号、联动滚动、原生红绿高亮，不再显示 `+/-` 文本前缀。
-  - `npm run build` 成功；后端 Release 构建被当前运行的 `CoralinkerHost (27416)` 锁住 exe，代码此前 Release 可编译，需重启 Host 后再验证后端构建。
-
-## 任务背景
-用户在 CORAL-NODE-V2.0 板基础上做了 PCB 改版，得到 CORAL-NODE-V2.1。需要在
-`MCUSerialBridge/mcu/bsp/` 下新增对应的 BSP 适配目录，并把固件代码同步适配。
-
-## 关键事实
-
-- 工程：`d:/Documents/Coral/DIVER/MCUSerialBridge`
-- 主芯片：STM32F405RG（沿用 V2.0）
-- BSP 选择机制：`scons PDN=<目录名>`，每个 BSP 目录至少包含
-  - `bsp_config.py`（CHIP_NAME + CPP_DEFINES）
-  - `bsp.c`（板级初始化入口）
-  - `digital_io.c`（数字 IO）
-  - `ports.c`（外部 USART/CAN）
-  - `uplink.c`（主协议串口）
-
-- HAL 抽象层（`mcu/unilib/midware/include/hal/*.h`）已经提供
-  USART / SPI / CAN / TIM / DMA / GPIO 的统一接口，BSP 仅填配置结构体即可。
-  `hal_tim_oc_register` 内部完成 OC + DMA 链接。
-
-- 现有 BSP 可作模板：
-  - `CORAL-NODE-V2.0`：使用 74HC595 / 74HC165 通过 SPI2 扫描数字 IO，结构与 V2.1 接近
-  - `FRLD-DIVERBK-V2`：使用 STM32F446VE，多端口对照参考
-
-## V2.1 vs V2.0 关键变化（已与用户对齐）
-
-| 项 | V2.0 | V2.1 |
-| --- | --- | --- |
-| 数字 IO 移位寄存器 SPI | SPI2（PB13/14/15）+ 控制脚 PC0/PC1/PC2 | SPI2（PB13/14/15）+ 控制脚 PB10(NOE)/PB11(IN_LOAD)/PB12(OUT_LOAD) |
-| F1 急停 / F2 触边 | F1=PC13, F2=PC14 | F1=PB2, F2=PB1 |
-| 24V 检测 | 无 | PB0 |
-| 上行主协议 USART | USART2 (PA2/PA3) | 同 |
-| RS485 数量 | 4 (USART1/4/5/6) | 3 (USART1/4/6) |
-| CAN 数量 | 1 (CAN1) | 2 (CAN1+CAN2) |
-| 灯带 | 无 | TIM1_CH1=PA8（带 DMA） |
-| 板载 LED | 无 | LED1(绿)=PB4, LED2(黄)=PB3，**低电平点亮**，纯 GPIO |
-| 蜂鸣器 | 无 | TIM2_CH1=PA15，正极性 PWM |
-| 板载 FLASH | 无 | W25Q16JV，SPI1，CS=PC4 |
-| KEY1 | 无 | PC13 |
-
-## 用户决策（重要）
-
-1. **F1 急停=PB2**，下拉输入；HIGH=急停未按下、允许运行。
-2. **F2 触边=PB1**，下拉输入；HIGH=触边被按下、禁止运行。
-3. **24V 检测=PB0**，下拉输入；HIGH=24V 存在。若 24V 不存在，上层软件应判断输出无效。
-4. 输入移位寄存器为 **3 级级联，共 24 路**；输出当前为 **20 路**，后续用户会重整。
-5. 输入 bitmap 约定：移位输入占 bit 0..23，24V=bit24，F1=bit25，F2=bit26。
-6. 74HC165 输入为 NPN 漏极开路输入，软件读取后需要整体取反。
-7. **TIM1_CH1=PA8**（灯带），DMA 由用户按图确认。
-8. **LED 不使用 PWM/TIM**：直接 GPIO 控制（低电平点亮）。
-9. **蜂鸣器单独占用 TIM2 CH1**。
-10. **不要助记词 / 不要额外宏**。`bsp_config.py` 必须保持与 V2.0 同样的简洁风格。
-
-## DMA 分配方案（已按用户图确认）
-
-详见 `mcu/bsp/CORAL-NODE-V2.1/sch.md` 的 DMA Usage 表。要点：
-- DMA1: UART4_RX S2C4, UART4_TX S4C4, USART2_RX S5C4, USART2_TX S6C4
-- DMA2: SPI1_RX S0C3, TIM1_CH1 S1C6, USART6_RX S2C5, SPI1_TX S3C3, USART1_RX S5C4, USART6_TX S6C5, USART1_TX S7C4
-- SPI2(IO 扫描) **不分配 DMA**（沿用 V2.0 同步模式，避开与 UART4 的 stream 冲突）
-
-## 当前进度
-
-- [x] 完成代码勘察（HAL/BSP/构建脚本）
-- [x] 与用户对齐 V2.1 引脚分配
-- [x] 落盘 `mcu/bsp/CORAL-NODE-V2.1/sch.md`（管脚 + DMA）
-- [x] 用户确认 DMA 方案
-- [x] 实现 5 个 BSP 源文件
-- [x] 编译验证
-- [x] 生成 UPG：`MCUSerialBridge/build/MCUSerialBridge_CORAL-NODE-V2.1_f1d8f16__20260513_171759.upg`
-
-## 下一步行动
-
-1. 后续按用户重整方案调整 20 路输出位序
-2. 若需要启用灯带/蜂鸣器/板载 Flash 的上层驱动，再新增对应 BSP API 或配置出口
-3. 烧录前使用 `scons BUILD_MCU=1 PDN=CORAL-NODE-V2.1 ENABLE_DIVER_RUNTIME=1 -j 12 debug=1`

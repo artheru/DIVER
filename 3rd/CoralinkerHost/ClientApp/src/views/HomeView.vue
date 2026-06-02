@@ -146,6 +146,13 @@
                     <span class="btn-icon">➕</span>
                     <span class="btn-text">Add Node</span>
                   </button>
+                  <button
+                    class="toolbar-btn about"
+                    @click="handleShowAbout"
+                    title="About Coralinker"
+                  >
+                    <span class="btn-text">About</span>
+                  </button>
                 </div>
               </div>
 
@@ -271,6 +278,49 @@
     <!-- 遥控器浮动窗口 -->
     <ControlWindow v-model:visible="showControlWindow" />
 
+    <n-modal v-model:show="showAboutDialog">
+      <n-card
+        title="About Coralinker"
+        style="width: 560px"
+        :bordered="false"
+        closable
+        @close="showAboutDialog = false"
+      >
+        <div class="about-dialog">
+          <div v-if="aboutLoading" class="about-loading">Loading version information...</div>
+          <div v-else-if="aboutError" class="about-error">{{ aboutError }}</div>
+          <template v-else>
+            <section class="about-section">
+              <h4>Frontend</h4>
+              <div class="about-grid">
+                <span>App</span><code>{{ aboutInfo?.frontend.app || 'CoralinkerHost UI' }}</code>
+                <span>Version</span><code>{{ formatVersionValue(aboutInfo?.frontend.version) }}</code>
+                <span>Tag</span><code>{{ formatVersionValue(aboutInfo?.frontend.tag) }}</code>
+                <span>Commit</span><code>{{ formatVersionValue(aboutInfo?.frontend.commit) }}</code>
+                <span>Build</span><code>{{ formatDateTime(aboutInfo?.frontend.buildTime) }}</code>
+              </div>
+            </section>
+
+            <section class="about-section">
+              <h4>Backend</h4>
+              <div class="about-grid">
+                <span>App</span><code>{{ aboutInfo?.backend.app || 'CoralinkerHost' }}</code>
+                <span>Version</span><code>{{ formatVersionValue(aboutInfo?.backend.version) }}</code>
+                <span>Tag</span><code>{{ formatVersionValue(aboutInfo?.backend.tag) }}</code>
+                <span>Commit</span><code>{{ formatVersionValue(aboutInfo?.backend.commit) }}</code>
+                <span>Build</span><code>{{ formatDateTime(aboutInfo?.backend.buildTime) }}</code>
+                <span>Layout</span><code>{{ formatVersionValue(aboutInfo?.backend.layout) }}</code>
+              </div>
+            </section>
+
+            <div class="about-copyright">
+              Copyright © Coralinker. All rights reserved.
+            </div>
+          </template>
+        </div>
+      </n-card>
+    </n-modal>
+
     <HistoryPanel
       :show="showHistoryPanel"
       :current-path="activeTab?.path"
@@ -291,6 +341,7 @@ import 'splitpanes/dist/splitpanes.css'
 import { useFilesStore, useUiStore, useProjectStore, useLogStore, useRuntimeStore, useHistoryStore } from '@/stores'
 import { useAutoSave } from '@/composables'
 import * as projectApi from '@/api/project'
+import * as aboutApi from '@/api/about'
 import { programNode } from '@/api/device'
 
 // 子组件
@@ -304,6 +355,7 @@ import AddNodeDialog from '@/components/graph/AddNodeDialog.vue'
 import ControlWindow from '@/components/control/ControlWindow.vue'
 import HistoryPanel from '@/components/history/HistoryPanel.vue'
 import type { AddNodeResult } from '@/components/graph/AddNodeDialog.vue'
+import type { HostAboutSnapshot } from '@/types'
 
 // ============================================
 // Store 引用
@@ -337,6 +389,10 @@ const importFileRef = ref<HTMLInputElement | null>(null)
 const showAddNodeDialog = ref(false)
 const showControlWindow = ref(false)
 const showHistoryPanel = ref(false)
+const showAboutDialog = ref(false)
+const aboutLoading = ref(false)
+const aboutError = ref<string | null>(null)
+const aboutInfo = ref<HostAboutSnapshot | null>(null)
 
 // 运行控制状态
 const isBuilding = ref(false)
@@ -790,6 +846,29 @@ function handleAddNode() {
   showAddNodeDialog.value = true
 }
 
+async function handleShowAbout() {
+  showAboutDialog.value = true
+  aboutLoading.value = true
+  aboutError.value = null
+
+  try {
+    const result = await aboutApi.getAbout()
+    aboutInfo.value = result.about
+  } catch (error) {
+    aboutError.value = String(error)
+  } finally {
+    aboutLoading.value = false
+  }
+}
+
+function formatVersionValue(value?: string | null) {
+  return value || '-'
+}
+
+function formatDateTime(value?: string | null) {
+  return value ? new Date(value).toLocaleString() : '-'
+}
+
 /**
  * 处理添加节点确认
  * 节点已经在 AddNodeDialog 中通过 addNode API 添加到后端
@@ -853,7 +932,6 @@ async function handleBuild() {
         logStore.logBuild(`[Version] Build time: ${result.buildTime || 'unknown'}`)
       }
       await filesStore.loadFileTree()
-      filesStore.notifyBuildComplete()
       await filesStore.refreshOpenTabs()
       await historyStore.refreshStatus(true)
       // 先重新编程所有节点，然后再刷新变量和字段元信息
@@ -861,6 +939,7 @@ async function handleBuild() {
       await reprogramAllNodes()
       await runtimeStore.refreshVariables()
       await runtimeStore.refreshFieldMetas()
+      filesStore.notifyBuildComplete()
     } else {
       uiStore.error('Build Failed', result.error || 'Unknown error')
     }
@@ -1110,6 +1189,11 @@ async function handleStop() {
   color: var(--primary);
 }
 
+.toolbar-btn.about:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-color);
+}
+
 .toolbar-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -1125,6 +1209,54 @@ async function handleStop() {
   height: 20px;
   background: var(--border-color);
   margin: 0 6px;
+}
+
+.about-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: var(--text-color);
+}
+
+.about-section h4 {
+  margin: 0 0 10px;
+  color: var(--text-color);
+}
+
+.about-grid {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 8px 12px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.about-grid span {
+  color: var(--text-muted);
+}
+
+.about-grid code {
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-color);
+  word-break: break-all;
+}
+
+.about-loading,
+.about-error,
+.about-copyright {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.about-error {
+  color: var(--danger);
+}
+
+.about-copyright {
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
 }
 
 /* 运行控制组 */

@@ -173,17 +173,54 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\3rd\CoralinkerHost\publish
   - `Extensions.cs`
   - `extra_methods.txt`
   - `native/`
+  - `build-packages.json`
+  - `nuget-packages/`
 - `runtimes/win-x64/native/mcu_serial_bridge.dll`：Windows x64 native bridge。
 - `runtimes/linux-x64/native/libmcu_serial_bridge.so`：Linux x64 native bridge。
 - `runtimes/linux-arm64/native/libmcu_serial_bridge.so`：Linux ARM64 native bridge。
 - `publish-info.json`：发布信息清单。
 - `start-host.ps1` / `start-host.bat` / `start-host.sh`：Windows PowerShell、Windows CMD、Linux shell 启动入口。
 - `install-dotnet-sdk-ubuntu.sh`：Ubuntu 目标机安装 .NET 8 SDK 的辅助脚本，会根据当前 Ubuntu `VERSION_ID` 下载对应 Microsoft apt 源配置包。
+- `refresh-package-manifest.sh`：Linux 目标机上修改发布包内容后，重新生成 `package-manifest.sha256` 的辅助脚本。
 - `package-manifest.sha256`：发布包文件完整性清单，启动脚本会在启动前校验。
 
 `res/compiler/` 来自同级 `DiverCompilerPortable` 工程。原 `DiverCompiler` 工程仍保留给 Windows/VS 调试，不作为发布包内的 compiler resource 来源。
 
 `res/compiler/DiverCompiler.dll` 是 `netstandard2.0` 的 Fody weaver，在目标机执行 `dotnet build` 时由 .NET SDK 加载运行。它不是 Windows-only `DiverCompiler.exe`，因此同一个 portable 发布包可让 Compiler 在 Windows x64、Linux x64、Linux ARM64 上随目标机 SDK 运行。
+
+`res/compiler/build-packages.json` 定义用户逻辑临时工程需要引用的 NuGet 包。`res/compiler/nuget-packages/` 是离线 NuGet 源，发布包默认会包含当前固定依赖及传递依赖：
+
+- `Fody 6.6.4`：Build 阶段加载 `DiverCompiler` weaver。
+- `Newtonsoft.Json 13.0.3`：兼容用户逻辑和 SDK 中对 JSON 的引用。
+- `System.IO.Ports 9.0.3` 与 `runtime.native.System.IO.Ports 9.0.3`：串口相关 API 和 native runtime assets。
+- `System.Management 9.0.4` 与 `System.CodeDom 9.0.4`：兼容 Windows 串口枚举相关代码路径。
+
+常见 .NET 基础类型不需要 NuGet，也不需要放进离线包源，例如 `BitConverter`、`Math` / `MathF`、`List<T>`、`Dictionary<TKey,TValue>`、`Encoding`、`DateTime`、`Task` 等。这些来自目标机安装的 .NET SDK/runtime 基础类库。
+
+如果客户逻辑需要额外第三方 NuGet 包（例如 `CsvHelper`、`NModbus`、`MathNet.Numerics`），需要把对应包和传递依赖预先加入发布包内离线源：
+
+1. 在一台可联网开发机上先让 NuGet 下载目标包，例如创建临时工程执行 `dotnet add package <PackageId> --version <Version>` 和 `dotnet restore`。
+2. 从全局 NuGet cache 复制包目录到目标机发布目录：
+   - Windows cache 通常在 `%USERPROFILE%\.nuget\packages\<lowercase-package-id>\<version>\`
+   - Linux cache 通常在 `$HOME/.nuget/packages/<lowercase-package-id>/<version>/`
+   - 复制到发布包：`res/compiler/nuget-packages/<lowercase-package-id>/<version>/`
+3. 如果该包有传递依赖，也要按同样结构复制每个依赖包。
+4. 在 `res/compiler/build-packages.json` 增加引用，例如：
+
+```json
+{
+  "include": "CsvHelper",
+  "version": "33.0.1"
+}
+```
+
+5. 修改发布包内容后，在发布目录执行：
+
+```shell
+sudo ./refresh-package-manifest.sh
+```
+
+然后再运行 `sudo ./start-host.sh`。如果只是临时调试，也可以用 `sudo ./start-host.sh --skip-integrity-check` 跳过完整性校验。
 
 发布包不应包含 `ClientApp/` 源目录、`package*.json`、`tsconfig*.json` 或 `data/` 初始运行时工作区。`ClientApp` 只用于开发和前端构建，运行时读取的是 `wwwroot/`；`data/` 会在发布包首次启动后按需创建。
 

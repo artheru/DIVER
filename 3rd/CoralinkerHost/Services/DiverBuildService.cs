@@ -159,6 +159,8 @@ public sealed class DiverBuildService
         // Use timestamped assembly name to avoid file locking issues with AssemblyLoadContext
         var buildId = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
         var assemblyName = "LogicBuild_" + buildId;
+        var packageReferences = LoadBuildPackageReferences(compilerDir);
+        var packageReferencesXml = BuildPackageReferencesXml(packageReferences);
         var csproj = """
                      <Project Sdk="Microsoft.NET.Sdk">
                        <PropertyGroup>
@@ -169,20 +171,34 @@ public sealed class DiverBuildService
                          <AssemblyName>__ASSEMBLY_NAME__</AssemblyName>
                        </PropertyGroup>
                        <ItemGroup>
-                         <PackageReference Include="Fody" Version="6.6.4">
-                           <PrivateAssets>all</PrivateAssets>
-                           <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-                         </PackageReference>
-                         <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-                         <PackageReference Include="System.IO.Ports" Version="9.0.3" />
-                         <PackageReference Include="System.Management" Version="9.0.4" />
+                         __PACKAGE_REFERENCES__
                          <WeaverFiles Include="__WEAVER_FILE__" />
                        </ItemGroup>
                      </Project>
                      """;
         csproj = csproj.Replace("__ASSEMBLY_NAME__", assemblyName, StringComparison.Ordinal);
+        csproj = csproj.Replace("__PACKAGE_REFERENCES__", packageReferencesXml, StringComparison.Ordinal);
         csproj = csproj.Replace("__WEAVER_FILE__", weaverFileName, StringComparison.Ordinal);
         await File.WriteAllTextAsync(Path.Combine(projDir, "LogicBuild.csproj"), csproj, Encoding.UTF8, ct);
+
+        var offlineNuGetPackagesDir = Path.Combine(compilerDir, "nuget-packages");
+        if (!Directory.Exists(offlineNuGetPackagesDir))
+        {
+            throw new DirectoryNotFoundException(
+                $"Missing offline NuGet packages directory: {offlineNuGetPackagesDir}. Re-publish Host so res/compiler/nuget-packages is included.");
+        }
+
+        var nugetConfigPath = Path.Combine(projDir, "NuGet.Config");
+        var nugetConfig = $$"""
+                            <?xml version="1.0" encoding="utf-8"?>
+                            <configuration>
+                              <packageSources>
+                                <clear />
+                                <add key="CoralinkerOfflinePackages" value="{{XmlEscape(Path.GetFullPath(offlineNuGetPackagesDir))}}" />
+                              </packageSources>
+                            </configuration>
+                            """;
+        await File.WriteAllTextAsync(nugetConfigPath, nugetConfig, Encoding.UTF8, ct);
 
         var fodyWeavers = """
                           <Weavers xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="FodyWeavers.xsd">
@@ -198,7 +214,7 @@ public sealed class DiverBuildService
         var restorePsi = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = "restore --verbosity minimal",
+            Arguments = $"restore --configfile \"{nugetConfigPath}\" --verbosity minimal",
             WorkingDirectory = projDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -210,6 +226,7 @@ public sealed class DiverBuildService
         restorePsi.Environment["DOTNET_CLI_UI_LANGUAGE"] = "en";
         restorePsi.Environment["DOTNET_NOLOGO"] = "true";
         
+        var restoreExitCode = -1;
         using (var restoreProc = Process.Start(restorePsi))
         {
             if (restoreProc != null)
@@ -219,7 +236,13 @@ public sealed class DiverBuildService
                 var restoreStderr = ConsumeAsync(restoreProc.StandardError, null, restoreRing, ct);
                 await Task.WhenAll(restoreStdout, restoreStderr);
                 await restoreProc.WaitForExitAsync(ct);
+                restoreExitCode = restoreProc.ExitCode;
             }
+        }
+        if (restoreExitCode != 0)
+        {
+            await _terminal.BuildLineAsync($"RESTORE FAILED with exit code {restoreExitCode}", ct);
+            throw new BuildFailedException(restoreExitCode, Path.Combine(buildRoot, "build.log"), Array.Empty<string>());
         }
         
         await _terminal.BuildLineAsync($"---------- MSBuild Compile ----------", ct);
@@ -401,6 +424,98 @@ public sealed class DiverBuildService
         if (File.Exists(exe)) return exe;
 
         throw new FileNotFoundException("Missing DiverCompiler.dll or DiverCompiler.exe.", dll);
+    }
+
+    private static string XmlEscape(string value)
+    {
+        return value
+            .Replace("&", "&amp;", StringComparison.Ordinal)
+            .Replace("\"", "&quot;", StringComparison.Ordinal)
+            .Replace("<", "&lt;", StringComparison.Ordinal)
+            .Replace(">", "&gt;", StringComparison.Ordinal);
+    }
+
+    private static IReadOnlyList<BuildPackageReference> LoadBuildPackageReferences(string compilerDir)
+    {
+        var configPath = Path.Combine(compilerDir, "build-packages.json");
+        if (!File.Exists(configPath))
+        {
+            return DefaultBuildPackageReferences();
+        }
+
+        var json = File.ReadAllText(configPath, Encoding.UTF8);
+        var packages = JsonSerializer.Deserialize<List<BuildPackageReference>>(
+            json,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        if (packages == null || packages.Count == 0)
+        {
+            throw new InvalidOperationException($"No package references found in {configPath}.");
+        }
+
+        foreach (var package in packages)
+        {
+            if (string.IsNullOrWhiteSpace(package.Include) || string.IsNullOrWhiteSpace(package.Version))
+            {
+                throw new InvalidOperationException(
+                    $"Invalid package reference in {configPath}. Each item must include 'include' and 'version'.");
+            }
+        }
+
+        return packages;
+    }
+
+    private static IReadOnlyList<BuildPackageReference> DefaultBuildPackageReferences()
+    {
+        return new[]
+        {
+            new BuildPackageReference("Fody", "6.6.4", "all", "runtime; build; native; contentfiles; analyzers; buildtransitive"),
+            new BuildPackageReference("Newtonsoft.Json", "13.0.3"),
+            new BuildPackageReference("System.IO.Ports", "9.0.3"),
+            new BuildPackageReference("System.Management", "9.0.4")
+        };
+    }
+
+    private static string BuildPackageReferencesXml(IReadOnlyList<BuildPackageReference> packages)
+    {
+        var sb = new StringBuilder();
+        foreach (var package in packages)
+        {
+            var include = XmlEscape(package.Include);
+            var version = XmlEscape(package.Version);
+            if (string.IsNullOrWhiteSpace(package.PrivateAssets) &&
+                string.IsNullOrWhiteSpace(package.IncludeAssets))
+            {
+                sb.Append("                         ");
+                sb.Append("<PackageReference Include=\"");
+                sb.Append(include);
+                sb.Append("\" Version=\"");
+                sb.Append(version);
+                sb.AppendLine("\" />");
+                continue;
+            }
+
+            sb.Append("                         ");
+            sb.Append("<PackageReference Include=\"");
+            sb.Append(include);
+            sb.Append("\" Version=\"");
+            sb.Append(version);
+            sb.AppendLine("\">");
+            if (!string.IsNullOrWhiteSpace(package.PrivateAssets))
+            {
+                sb.Append("                           <PrivateAssets>");
+                sb.Append(XmlEscape(package.PrivateAssets));
+                sb.AppendLine("</PrivateAssets>");
+            }
+            if (!string.IsNullOrWhiteSpace(package.IncludeAssets))
+            {
+                sb.Append("                           <IncludeAssets>");
+                sb.Append(XmlEscape(package.IncludeAssets));
+                sb.AppendLine("</IncludeAssets>");
+            }
+            sb.AppendLine("                         </PackageReference>");
+        }
+
+        return sb.ToString().TrimEnd();
     }
 
     private static void CopyCompilerDirectory(string sourceDir, string destinationDir)
@@ -697,6 +812,12 @@ public sealed record BuildVersionInfo(
     DateTimeOffset? SourceCommitTime,
     DateTimeOffset BuildTime,
     string BuildId);
+
+public sealed record BuildPackageReference(
+    string Include,
+    string Version,
+    string? PrivateAssets = null,
+    string? IncludeAssets = null);
 
 public sealed record RootFieldMetadata(string Name, string Type, int TypeId, string Direction);
 

@@ -535,12 +535,30 @@ export interface GitDiffResult {
   unifiedDiff: string
   oldText?: string | null
   newText?: string | null
+  files: string[]
 }
 
 export interface GitFileAtCommitResult {
   commit: string
   path: string
   text: string
+}
+
+export interface HostVersionInfo {
+  app: string
+  tag?: string | null
+  commit?: string | null
+  commitTime?: string | null
+  buildTime?: string | null
+  configuration?: string | null
+  dirty?: boolean | null
+  version?: string | null
+  layout?: string | null
+}
+
+export interface HostAboutSnapshot {
+  backend: HostVersionInfo
+  frontend: HostVersionInfo
 }
 
 /**

@@ -61,10 +61,11 @@
             <button @click="checkoutSelected">Checkout Temporarily</button>
             <button class="danger" @click="revertSelected">Revert As Current</button>
           </div>
-          <div v-if="diff" class="diff-wrapper">
+          <div v-show="diff" class="diff-wrapper">
             <div ref="diffRef" class="monaco-diff"></div>
           </div>
           <div v-if="!toCommit" class="empty">Select a To commit from the left list</div>
+          <div v-else-if="!diff" class="empty">Loading diff...</div>
         </section>
       </div>
     </div>
@@ -98,10 +99,19 @@ const fromCommit = ref<GitCommitInfo | null>(null)
 const toCommit = ref<GitCommitInfo | null>(null)
 const diff = ref<GitDiffResult | null>(null)
 const selectedPath = ref<string | null>(null)
+const rangeFiles = ref<string[]>([])
 const diffRef = ref<HTMLDivElement | null>(null)
 let diffEditor: monaco.editor.IStandaloneDiffEditor | null = null
+let diffEditorContainer: HTMLDivElement | null = null
+let diffRequestId = 0
 
 const changedFiles = computed(() => {
+  if (rangeFiles.value.length > 0) {
+    return rangeFiles.value
+  }
+  if (scope.value === 'file' && props.currentPath) {
+    return [props.currentPath]
+  }
   const files = new Set<string>()
   fromCommit.value?.files.forEach(file => files.add(file))
   toCommit.value?.files.forEach(file => files.add(file))
@@ -123,6 +133,8 @@ watch(() => props.show, async visible => {
   if (visible) {
     scope.value = props.currentPath ? 'file' : 'all'
     await loadCommits()
+  } else {
+    disposeDiffEditor()
   }
 })
 
@@ -144,6 +156,7 @@ async function loadCommits() {
   fromCommit.value = null
   toCommit.value = null
   diff.value = null
+  rangeFiles.value = []
   await historyStore.loadLog(scope.value === 'file' ? props.currentPath || undefined : undefined)
   const latest = commits.value[0]
   if (latest) {
@@ -159,13 +172,13 @@ async function setTo(commit: GitCommitInfo) {
   }
   selectedPath.value = scope.value === 'file'
     ? props.currentPath || null
-    : changedFiles.value[0] || commit.files[0] || null
+    : null
   await reloadSelectedDiff()
 }
 
 async function setFrom(commit: GitCommitInfo) {
   fromCommit.value = commit
-  selectedPath.value ||= changedFiles.value[0] || null
+  selectedPath.value = scope.value === 'file' ? props.currentPath || null : null
   await reloadSelectedDiff()
 }
 
@@ -184,15 +197,34 @@ async function compareWithUnsaved() {
     path: selectedPath.value,
     oldText: base.oldText ?? '',
     newText: props.currentContent ?? '',
-    unifiedDiff: ''
+    unifiedDiff: '',
+    files: selectedPath.value ? [selectedPath.value] : []
   }
   await renderDiff()
 }
 
 async function reloadSelectedDiff() {
   if (!toCommit.value) return
+  const requestId = ++diffRequestId
   const from = fromCommit.value?.hash || `${toCommit.value.hash}~1`
-  diff.value = await historyStore.loadDiff(from, toCommit.value.hash, selectedPath.value || undefined)
+  const requestedPath = scope.value === 'file'
+    ? props.currentPath || undefined
+    : selectedPath.value || undefined
+  const nextDiff = await historyStore.loadDiff(
+    from,
+    toCommit.value.hash,
+    requestedPath
+  )
+  if (requestId !== diffRequestId) return
+
+  if (scope.value === 'file') {
+    selectedPath.value = props.currentPath || null
+    rangeFiles.value = selectedPath.value ? [selectedPath.value] : []
+  } else {
+    rangeFiles.value = nextDiff.files || []
+    selectedPath.value = nextDiff.path || rangeFiles.value[0] || null
+  }
+  diff.value = nextDiff
   await renderDiff()
 }
 
@@ -217,7 +249,12 @@ function formatTime(value?: string | null) {
 
 async function renderDiff() {
   await nextTick()
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
   if (!diffRef.value || !diff.value) return
+
+  if (diffEditor && diffEditorContainer !== diffRef.value) {
+    disposeDiffEditor()
+  }
 
   if (!diffEditor) {
     diffEditor = monaco.editor.createDiffEditor(diffRef.value, {
@@ -238,17 +275,23 @@ async function renderDiff() {
       fontSize: 13,
       lineHeight: 20
     })
+    diffEditorContainer = diffRef.value
   }
 
-  const oldText = diff.value.oldText ?? ''
-  const newText = diff.value.newText ?? ''
-  const oldModel = monaco.editor.createModel(oldText, languageFor(selectedPath.value))
-  const newModel = monaco.editor.createModel(newText, languageFor(selectedPath.value))
+  const hasTextPair = diff.value.oldText != null || diff.value.newText != null
+  const oldText = hasTextPair ? diff.value.oldText ?? '' : ''
+  const newText = hasTextPair ? diff.value.newText ?? '' : diff.value.unifiedDiff || 'No changes'
+  const language = hasTextPair ? languageFor(selectedPath.value) : 'diff'
+  const oldModel = monaco.editor.createModel(oldText, language)
+  const newModel = monaco.editor.createModel(newText, language)
   const previous = diffEditor.getModel()
   diffEditor.setModel({ original: oldModel, modified: newModel })
   previous?.original.dispose()
   previous?.modified.dispose()
-  diffEditor.layout()
+  diffEditor.layout({
+    width: diffRef.value.clientWidth,
+    height: diffRef.value.clientHeight
+  })
 }
 
 function languageFor(path?: string | null) {
@@ -257,11 +300,17 @@ function languageFor(path?: string | null) {
   return 'plaintext'
 }
 
-onBeforeUnmount(() => {
+function disposeDiffEditor() {
   const model = diffEditor?.getModel()
   model?.original.dispose()
   model?.modified.dispose()
   diffEditor?.dispose()
+  diffEditor = null
+  diffEditorContainer = null
+}
+
+onBeforeUnmount(() => {
+  disposeDiffEditor()
 })
 </script>
 

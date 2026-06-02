@@ -1536,3 +1536,626 @@
     - `/home/industio/Coralinker/CoralinkerHost_43b8087_20260526-141521/`
   - 进程命令：
     - `dotnet /home/industio/Coralinker/CoralinkerHost_43b8087_20260526-141521/CoralinkerHost.dll`
+
+### [build/offline] Ubuntu 内网 Build 使用发布包内离线 NuGet 源
+- 用户反馈：
+  - Ubuntu 内网机器编译用户逻辑时 `dotnet restore` 失败：
+    - `Unable to load the service index for source https://api.nuget.org/v3/index.json`
+    - `Resource temporarily unavailable (api.nuget.org:443)`
+  - 需要确认 `BitConverter`、`Math` 等基础库是否也需要在线包。
+  - 希望梳理可能需要的预编译包，并让客户能在编译发布后的包里自行添加依赖。
+- 判断：
+  - `BitConverter`、`Math` / `MathF`、集合、`Encoding`、`DateTime`、`Task` 等来自 .NET SDK/runtime 基础类库，不需要 NuGet 包。
+  - 失败来自 `LogicBuild.csproj` 固定 `PackageReference`：
+    - `Fody`
+    - `Newtonsoft.Json`
+    - `System.IO.Ports`
+    - `System.Management`
+  - 其中传递依赖还包括：
+    - `runtime.native.System.IO.Ports`
+    - `System.CodeDom`
+- 实施：
+  - `3rd/CoralinkerHost/Services/DiverBuildService.cs`：
+    - 临时用户逻辑工程的 `PackageReference` 改为读取 `res/compiler/build-packages.json`。
+    - 默认清单缺失时仍回退到内置默认包列表。
+    - Build 时生成项目级 `NuGet.Config`：
+      - `<clear />` 清空所有外部源。
+      - 只添加 `res/compiler/nuget-packages` 本地离线源。
+    - `dotnet restore` 改为：
+      - `dotnet restore --configfile <NuGet.Config> --verbosity minimal`
+    - restore 退出码非 0 时明确打印 `RESTORE FAILED` 并抛出 `BuildFailedException`。
+  - `3rd/CoralinkerHost/publish-host.ps1`：
+    - 发布时生成 `res/compiler/build-packages.json`。
+    - 从开发机 NuGet cache 复制离线包到 `res/compiler/nuget-packages/`。
+    - 默认离线包：
+      - `fody/6.6.4`
+      - `newtonsoft.json/13.0.3`
+      - `system.io.ports/9.0.3`
+      - `runtime.native.system.io.ports/9.0.3`
+      - `system.management/9.0.4`
+      - `system.codedom/9.0.4`
+    - `publish-info.json` 增加 `buildPackages` 和 `offlineNuGetPackages` 信息。
+  - `3rd/CoralinkerHost/packaging/refresh-package-manifest.sh`：
+    - 新增发布包内脚本。
+    - 客户修改 `res/compiler/build-packages.json` 或 `res/compiler/nuget-packages/` 后，可在 Linux 目标机执行该脚本重新生成 `package-manifest.sha256`。
+  - `start-host.ps1` / `start-host.sh`：
+    - 启动检查新增：
+      - `res/compiler/build-packages.json`
+      - `res/compiler/nuget-packages/`
+  - `3rd/CoralinkerHost/README.md`：
+    - 记录默认离线包列表。
+    - 记录客户新增第三方包流程：
+      - 在联网开发机下载包和传递依赖。
+      - 复制到 `res/compiler/nuget-packages/<lowercase-package-id>/<version>/`。
+      - 修改 `res/compiler/build-packages.json`。
+      - 执行 `sudo ./refresh-package-manifest.sh`。
+- 验证：
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release` 成功，只有既有 warning。
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File 3rd\CoralinkerHost\publish-host.ps1 -SkipNativeBuild` 成功。
+  - 新发布目录：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_7978a94_20260602-154935/`
+  - 确认包含：
+    - `res/compiler/build-packages.json`
+    - `res/compiler/nuget-packages/fody/6.6.4/fody.nuspec`
+    - `res/compiler/nuget-packages/runtime.native.system.io.ports/9.0.3/runtime.native.system.io.ports.nuspec`
+    - `res/compiler/nuget-packages/system.codedom/9.0.4/system.codedom.nuspec`
+    - `refresh-package-manifest.sh`
+  - 新发布目录 `start-host.ps1 -CheckOnly` 成功。
+  - `ReadLints` 检查相关修改文件无 linter error。
+
+### [frontend/runtime] Root 节点变量刷新与 MCU 节点对齐
+- 用户反馈：
+  - 新增一个文件并编译后，导入到节点新增变量，有时 Variables 表没有立刻刷新。
+  - 用户强调 Root 节点应尽量和 MCU 节点一样当成节点处理，避免后续触发和处理遗漏。
+- 排查：
+  - 后端变量来源：
+    - `/api/variables/meta` 调用 `RootRuntimeService.EnsureConfiguredRegistered()` 后读取 `DIVERSession.Instance.GetAllCartFieldMetas()`。
+    - `/api/variables` 调用 `RootRuntimeService.EnsureConfiguredRegistered()` 后读取 `DIVERSession.Instance.GetAllCartFields()`。
+  - MCU 节点 Program 成功后：
+    - `DIVERSession.ProgramNode()` 会设置 `MetaJson` / `LogicName`。
+    - 立即 `HostRuntime.ParseMetaJson(metaJson)`。
+    - 立即 `InitializeVariables(entry.CartFields)`。
+  - Build 成功后 `HomeView.handleBuild()` 已有 MCU 节点自动刷新链路：
+    - `reprogramAllNodes()`
+    - `runtimeStore.refreshVariables()`
+    - `runtimeStore.refreshFieldMetas()`
+  - MCU 节点手动切换 Logic 后 `CoralNodeView.updateLogicName()` 也会刷新：
+    - `runtimeStore.refreshVariables()`
+    - `runtimeStore.refreshFieldMetas()`
+  - Root 节点遗漏点：
+    - `RootNodeView.configureRootLogic()` 只刷新 `fieldMetas`，没有刷新 `variables`。
+    - `RootNodeView` 监听 `buildVersion` 时只 `loadRootInfo()`，没有刷新 Variables 表。
+- 实施：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/RootNodeView.vue`：
+    - 新增 `refreshRootNodeRuntime()`。
+    - 统一执行：
+      - `loadRootInfo()`
+      - `runtimeStore.refreshVariables()`
+      - `runtimeStore.refreshFieldMetas()`
+    - `configureRootLogic()` 改为调用统一刷新方法。
+    - `onMounted()` 改为调用统一刷新方法。
+    - `watch(buildVersion)` 改为调用统一刷新方法。
+- 验证：
+  - `ReadLints` 检查 `RootNodeView.vue` 无 linter error。
+  - `npm run build` 成功。
+  - 构建中仍有既有 warning：
+    - SignalR `/*#__PURE__*/` 注释位置 warning。
+    - `device.ts` 同时动态/静态导入 warning。
+    - chunk size warning。
+
+### [frontend/history] 修复 From/To 选择后 Diff 显示为空
+- 用户反馈：
+  - History 显示 Diff 有问题。
+  - 后端能拿到 diff，但前端展示为空。
+  - 特别是在选择 From 和 To 以后容易出现；刷新后新打开时可能正常。
+- 排查：
+  - `HistoryPanel.vue` 原先的 Monaco Diff 只渲染 `diff.oldText` / `diff.newText`。
+  - `/api/history/diff` 返回对象中即使 `unifiedDiff` 有内容，只要 `oldText/newText` 为空，前端就会创建两个空 model，表现为空白。
+  - From/To 切换时，前端文件下拉使用 `fromCommit.files + toCommit.files` 的并集。
+  - 这个并集只代表两个端点 commit 各自改过的文件，不代表当前 `from..to` 比较区间真实发生变化的文件。
+  - 因此切换 From/To 后可能保留或默认选中一个“区间内实际无变化”的 `selectedPath`，导致单文件文本 diff 为空。
+- 实施：
+  - `3rd/CoralinkerHost/Services/GitHistoryService.cs`：
+    - `GetDiff()` 增加一次 `git diff --name-only <from> <to> -- <scope>`。
+    - `GitDiffResult` 增加 `Files` 字段，用于返回当前比较区间真实变更文件列表。
+  - `3rd/CoralinkerHost/ClientApp/src/types/index.ts`：
+    - `GitDiffResult` 增加 `files: string[]`。
+  - `3rd/CoralinkerHost/ClientApp/src/components/history/HistoryPanel.vue`：
+    - 新增 `rangeFiles` 状态。
+    - `changedFiles` 优先使用 `rangeFiles`。
+    - `setTo()` / `setFrom()` 在 all scope 下不再直接使用端点 commit 文件并集选默认文件，而是交给 `reloadSelectedDiff()` 根据区间文件选择。
+    - `reloadSelectedDiff()` 先拉取当前范围 diff 得到 `rangeFiles`，如果当前 `selectedPath` 不在区间文件里，则切到第一个区间变更文件。
+    - `renderDiff()` 增加兜底：没有 `oldText/newText` 时显示 `unifiedDiff`，避免 API 有 diff 但 UI 空白。
+- 验证：
+  - `ReadLints` 检查 `HistoryPanel.vue`、`types/index.ts`、`GitHistoryService.cs` 无错误。
+  - `npm run build` 成功。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release` 成功。
+  - 构建中仍有既有 warning：
+    - Vite/Rollup chunk 和动态导入 warning。
+    - .NET nullable / CA1416 等既有 warning。
+
+### [frontend/history] 继续修复 Diff 双请求和 Monaco 空白渲染
+- 用户反馈：
+  - 实测点击 From 或 To 后，前端会请求两次 `/api/history/diff`。
+  - hash 一样。
+  - 后端第一次响应中 `oldText/newText/unifiedDiff` 可能为空，第二次响应有效。
+  - 页面文字栏仍显示空白。
+  - 用户追问新增文件 `oldText=null` 或删除文件 `newText=null` 是否已处理。
+- API 直接验证：
+  - 运行中 Host 地址：`http://localhost:4499`。
+  - `/api/history/log?maxCount=10` 正常返回 4 个测试 input commit。
+  - 对截图中的 `685d44a24767fe29479d9facdcece6cf8d95afc4 -> 99c6b2e8553ebb01453e965d47097db014778e65 / assets/inputs/A.cs` 调 `/api/history/diff`：
+    - `oldText` 非 null，长度 1452。
+    - `newText` 非 null，长度 1451。
+    - `unifiedDiff` 非 null，长度 466。
+    - `files` 为 `assets/inputs/A.cs`。
+  - 新增文件 case：
+    - `oldText = null`。
+    - `newText` 非 null。
+    - `unifiedDiff` 非 null。
+  - 结论：
+    - 新增/删除文件的 null 是正确语义。
+    - 前端 `renderDiff()` 使用 `oldText ?? ""` / `newText ?? ""`，可以显示空旧栏或空新栏。
+    - 当前空白问题更偏向 Monaco DiffEditor 容器生命周期/布局，而不是后端 diff 数据缺失。
+- 后端修正：
+  - `3rd/CoralinkerHost/Services/GitHistoryService.cs`：
+    - `GetDiff()` 改为一次请求完成最终展示数据。
+    - 总是先通过 `git diff --name-only <from> <to> -- assets/inputs` 获取当前区间真实变更文件。
+    - 如果请求 path 为空，或 path 不在当前区间变更文件中，则自动切到第一个区间变更文件。
+    - 再对最终 path 计算 `unifiedDiff` / `oldText` / `newText`。
+    - 同一响应返回 `files`、最终 `path` 和最终文本内容。
+- 前端修正：
+  - `3rd/CoralinkerHost/ClientApp/src/components/history/HistoryPanel.vue`：
+    - 去掉 `reloadSelectedDiff()` 中先请求范围 diff 再请求文件 diff 的双请求。
+    - `setFrom()` / `setTo()` 后只发一次 `historyStore.loadDiff()`。
+    - 增加 `diffRequestId`，旧请求返回时直接丢弃，避免快速点击造成旧响应覆盖新响应。
+    - Diff 容器由 `v-if="diff"` 改为 `v-show="diff"`，避免 `diff=null` 时销毁 Monaco 容器。
+    - `watch(props.show)` 在面板隐藏时调用 `disposeDiffEditor()`。
+    - 新增 `diffEditorContainer`，如果当前 editor 绑定的 DOM 容器不是当前 `diffRef`，则 dispose 并重建。
+    - `renderDiff()` 在 `nextTick()` 后再等待一帧 `requestAnimationFrame()`，确保容器尺寸稳定后再 `layout()`。
+- 验证：
+  - `ReadLints` 检查相关文件无错误。
+  - `npm run build` 成功。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release` 成功。
+  - 重新发布成功：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_7978a94_20260602-163625`
+
+### [host/about] 增加前后端版本信息与发布前端编译
+- 用户反馈：
+  - 怀疑 publish 后前端没有重新编译。
+  - 希望界面能看到前端/后端版本。
+  - 入口建议放在 Graph 标题/工具栏 Add Node 右侧，点击 About 弹窗显示前端版本、后端版本（commit/tag/build）和 Copyright。
+- 排查：
+  - 原 `publish-host.ps1` 直接执行 `dotnet publish`。
+  - `ClientApp` 被 csproj 排除，不会由 `dotnet publish` 自动重新执行 `npm run build`。
+  - 因此发布包可能携带旧 `wwwroot`。
+- 实施：
+  - `3rd/CoralinkerHost/publish-host.ps1`：
+    - 发布前进入 `ClientApp` 执行 `npm run build`。
+    - 生成 `wwwroot/build-info.json`，包含：
+      - `app`
+      - `version`
+      - `tag`
+      - `commit`
+      - `commitTime`
+      - `buildTime`
+      - `configuration`
+      - `dirty`
+    - `publish-info.json` 增加 `tag`。
+  - `3rd/CoralinkerHost/Services/HostAboutService.cs`：
+    - 读取 `publish-info.json` 和 `wwwroot/build-info.json`。
+    - 在开发态尝试从 git 读取 commit/tag。
+    - 返回 Backend/Frontend 两组版本信息。
+  - `3rd/CoralinkerHost/Program.cs`：
+    - 注册 `HostAboutService`。
+  - `3rd/CoralinkerHost/Web/ApiRoutes.cs`：
+    - 新增 `/api/about`。
+  - `3rd/CoralinkerHost/ClientApp/src/api/about.ts`：
+    - 新增 About API。
+  - `3rd/CoralinkerHost/ClientApp/src/types/index.ts`：
+    - 新增 `HostVersionInfo`、`HostAboutSnapshot`。
+  - `3rd/CoralinkerHost/ClientApp/src/views/HomeView.vue`：
+    - Graph 工具栏 Add Node 右侧新增 About 按钮。
+    - 新增 About 弹窗，显示 Frontend/Backend 版本信息与 Copyright。
+- 验证：
+  - `ReadLints` 检查相关文件无错误。
+  - `npm run build` 成功。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release` 成功。
+  - `publish-host.ps1 -SkipNativeBuild` 输出明确先执行 `Building CoralinkerHost frontend...`。
+  - 新发布目录：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_7978a94_20260602-164942`
+  - 确认发布目录存在：
+    - `wwwroot/build-info.json`
+    - `publish-info.json`
+  - 从发布目录启动 Host 后请求 `/api/about` 成功，返回 Backend/Frontend 的 tag/commit/build/layout。
+
+### [frontend/graph] Variables Flow 叠加图层第一版
+- 用户需求：
+  - Variables 现在是平铺表格，希望能以依赖关系图显示。
+  - 在 Graph 左下方增加按钮，默认不开启，避免前端卡顿。
+  - 开关是纯前端行为，不保存。
+  - `ControlItem` 作为 Root 私有变量显示在 Root 框内部。
+  - `mutual` / `upper` / `lower` 作为 Root 和 Node 间交换变量，以小框显示 `Type Name Value`，按类型上色。
+  - 用细线/箭头表示来源和去向，最好为弧线，并随节点拖动自动重排。
+- 实施：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`：
+    - 新增左下角 `Var Flow` 按钮。
+    - 新增 `showVariablesFlow` 前端局部状态，不进入 store，不保存。
+    - 开启时调用：
+      - `runtimeStore.refreshVariables()`
+      - `runtimeStore.refreshFieldMetas()`
+    - 新增 `variables-flow-layer` 叠加层，不加入 VueFlow nodes/edges，避免触发图保存。
+    - 通过读取 `.vue-flow__transformationpane` 的 CSS transform，使 Flow 图层跟随 VueFlow 平移/缩放。
+    - 变量框布局：
+      - `control` 变量放入 Root 节点内部。
+      - 其他变量放在 Root 和节点之间。
+      - 位置由 Root 和 MCU 节点坐标计算。
+    - 线条布局：
+      - `lower`: Root -> Variable -> Nodes。
+      - `upper`: Nodes -> Variable -> Root。
+      - `mutual`: 当前第一版绘制 Root/Nodes 之间共享流。
+      - 使用 SVG cubic bezier 弧线和箭头 marker。
+    - 颜色：
+      - `upper`: blue
+      - `lower`: green
+      - `mutual`: amber
+      - `control`: purple
+- 当前限制：
+  - 由于当前前端变量数据只有全局变量名/direction/value，没有精确到“哪个 Node 产生/消费”的 per-node 依赖元数据，第一版对非 control 变量默认连到所有 MCU 节点。
+  - 后续如果后端补充变量来源/去向 meta，可把边从“全节点广播”改成精确边。
+- 验证：
+  - `ReadLints` 检查 `GraphCanvas.vue` 无错误。
+  - `npm run build` 成功。
+  - 构建中仍有既有 Vite/Rollup warning：
+    - SignalR pure annotation warning。
+    - `device.ts` 动态/静态导入 warning。
+    - chunk size warning。
+
+### [frontend] 拆分 Variables Flow 布局/布线模块并撤掉高开销 A* 路由
+- 用户反馈：
+  - Variables Flow 不只是线避让，还包括变量位置安排，整体更像 PCB 的布局+布线问题。
+  - `GraphCanvas.vue` 文件过长，应把布局布线单独抽出文件。
+  - 用户要求参考 ComfyUI 的做法。
+- 调研：
+  - 查询 ComfyUI / ComfyUI_frontend 后确认：
+    - ComfyUI 当前前端基于 LiteGraph。
+    - 连线渲染以 slot-based link rendering 为主。
+    - 支持 Straight / Linear / Spline 等 Link Render Mode。
+    - 并不是每帧执行全局 A* / maze routing。
+  - 因此撤掉前一版高开销 A* 路由，避免拖动节点时重新路由导致明显卡顿。
+- 实施：
+  - 新增 `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`：
+    - `computeVariableFlowLayout()` 作为唯一入口。
+    - 内部包含：
+      - 变量框候选位置评分。
+      - 变量顺序候选/全排列。
+      - slot 锚点。
+      - 正交 polyline 路径生成。
+      - 几何评分工具。
+    - 导出类型/常量：
+      - `NodeRect`
+      - `VariableFlowItem`
+      - `FlowLine`
+      - `ROOT_SIZE`
+      - `NODE_SIZE`
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`：
+    - 删除旧的大段 layout/routing/geometry/A* 函数。
+    - 只保留 VueFlow、节点 DOM 测量、状态刷新和 SVG 渲染。
+    - 通过 `computeVariableFlowLayout()` 获取变量框和连线路径。
+- 验证：
+  - `ReadLints` 检查 `GraphCanvas.vue`、`variableFlowLayout.ts` 无错误。
+  - `npm run build` 成功。
+  - 构建中仍有既有 Vite/Rollup warning：
+    - SignalR pure annotation warning。
+    - `device.ts` 动态/静态导入 warning。
+    - chunk size warning。
+
+### [frontend] Variables Flow 增强 J/effort 优化：端点分散与变量顺序评分
+- 用户反馈：
+  - 进出线端点不要挤在一起，应分开一点。
+  - 线可以按示意图用弧线排列。
+  - 多节点时变量的位置和顺序都可以调整，目标是让总体 J/effort 最小。
+- 实施：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`：
+    - 新增 `FlowLayoutResult`，布局结果同时包含变量组原点和优化后的变量顺序。
+    - `createVariableOrderCandidates()`：
+      - 变量数量 `<= 6` 时做全排列，直接参与候选评分。
+      - 变量更多时使用原顺序、反序、按方向启发式排序等候选，避免阶乘爆炸。
+    - 真实绘制和评分统一使用 slot 锚点：
+      - Root/Node 边上的锚点按变量序号分散。
+      - 变量框边上的锚点按 Root/target 分散。
+    - `anchorToward()`：
+      - 根据另一端相对位置选择 top/bottom/left/right 边。
+      - 同一边按 slot 分配端点，避免多条线挤在一起。
+    - `curvePath()`：
+      - 上下关系使用竖向三次贝塞尔控制点。
+      - 左右关系使用横向三次贝塞尔控制点。
+    - `scoreVariableConnections()`：
+      - 评分阶段也使用同样的 slot 锚点，保证评分和实际绘制一致。
+- 验证：
+  - `ReadLints` 检查 `GraphCanvas.vue` 无错误。
+  - `npm run build` 成功。
+  - 构建中仍有既有 Vite/Rollup warning：
+    - SignalR pure annotation warning。
+    - `device.ts` 动态/静态导入 warning。
+    - chunk size warning。
+
+### [frontend] Variables Flow 改为自动占位/推挤评分布局
+- 用户反馈：
+  - 横向排列时变量放在 Root 和 Node 之间效果较好。
+  - 竖向排列时变量继续横向放在中间会挡住节点和线。
+  - 希望变量框和连线都参与自动推挤；前端运算频次不高，可以多算。
+- 实施：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`：
+    - 外部变量布局从“选一列 + 纵向避让”改为“整组变量 block 候选点评分”。
+    - 生成候选位置：
+      - Root/Node 中心区域。
+      - 节点包围盒上方、下方、左侧、右侧。
+      - 四角和简单 3x3 网格候选点。
+    - 评分项：
+      - 变量 group 是否与 Root/Node padding 后区域重叠。
+      - 虚拟连线是否穿过 Root/Node padding 后区域。
+      - 连线总长度。
+      - 变量 group 中心与 Root/Node 中心区域的距离。
+    - 新增竖向拓扑偏置：
+      - 当 Root 和 Node 主要呈上下关系时，惩罚变量组停在节点包围盒的中间高度带。
+      - Root 在上、Node 在下时，优先把变量组推到下方。
+    - 新增几何工具：
+      - `uniquePoints()`
+      - `distance()`
+      - `overlapArea()`
+      - `segmentIntersectsRect()`
+      - `segmentsIntersect()`
+- 验证：
+  - `ReadLints` 检查 `GraphCanvas.vue` 无错误。
+  - `npm run build` 成功。
+  - 构建中仍有既有 Vite/Rollup warning：
+    - SignalR pure annotation warning。
+    - `device.ts` 动态/静态导入 warning。
+    - chunk size warning。
+
+### [frontend] 修正 Variables Flow 的 Upper/Lower 箭头方向
+- 用户反馈：
+  - 截图显示 Variables Flow 箭头方向明显不符合预期。
+- 根因：
+  - 上一版将 `upper` / `lower` 的数据流语义反了。
+  - 正确语义：
+    - `upper` / `AsUpperIO`：Root/上位机下发到 MCU 节点。
+    - `lower` / `AsLowerIO`：MCU 节点回传到 Root/上位机。
+  - 变量框在自动布局后可能位于 Root/Node 任意一侧，固定变量框左/右端点会继续造成局部箭头方向看起来反。
+- 实施：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`：
+    - `upper` 改为 Root -> Variable -> Node。
+    - `lower` 改为 Node -> Variable -> Root。
+    - `mutual` 暂按双向路径绘制，避免单箭头误导。
+    - 新增 `itemToRect()`，变量框也按矩形参与动态锚点计算。
+    - 每段线的源端点和目标端点都使用 `anchorToward(rect, point)`，按另一端位置选择矩形左右边。
+- 验证：
+  - `ReadLints` 检查 `GraphCanvas.vue` 无错误。
+  - `npm run build` 成功。
+  - 构建中仍有既有 Vite/Rollup warning：
+    - SignalR pure annotation warning。
+    - `device.ts` 动态/静态导入 warning。
+    - chunk size warning。
+
+### [frontend/graph] 修正 Variables Flow 节点位置计算
+- 用户反馈：
+  - Variables Flow 显示后，节点位置计算不对。
+  - 截图表现为变量框和箭头落点漂移，曲线绕远。
+- 原因：
+  - 第一版使用固定 `ROOT_SIZE/NODE_SIZE` 估算 Root 和 MCU 节点尺寸。
+  - 实际 VueFlow 节点 DOM 尺寸与估算差异明显。
+  - 变量框位置基于固定右侧锚点和平均坐标，容易放到不合理位置。
+- 实施：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`：
+    - 新增 `measuredNodeRects`。
+    - 开启 Flow 后 `nextTick()` 立即测量节点 DOM。
+    - 在 Flow transform 同步循环中读取 `.vue-flow__node[data-id]` 实际 `offsetWidth/offsetHeight`。
+    - 以实际 Root/Node 矩形计算：
+      - Root 右侧锚点。
+      - MCU 节点左侧锚点。
+      - MCU 节点包围盒。
+      - 变量框中间布局位置。
+    - `curvePath()` 支持左右方向，减少节点相对位置变化时的反向控制点错误。
+- 验证：
+  - `ReadLints` 检查 `GraphCanvas.vue` 无错误。
+  - `npm run build` 成功。
+
+### [runtime/variables] API 排查 A.cs 加载后 Variables 缺少 input/output
+- 用户反馈：
+  - Node 加载了编译后的产物 `A.cs`。
+  - `A.cs` 里定义了 `input` 和 `output`。
+  - 但 Variables 表没有显示它们。
+  - 用户要求先直接调用当前运行后端 API，查看后端版本、nodes、files 情况。
+- 当前运行后端：
+  - `/api/about`：
+    - Backend layout: `Published`
+    - Backend tag: `7978a94-dirty`
+    - Backend commit: `7978a94`
+    - Backend buildTime: `2026-06-02T16:49:42.2260707+08:00`
+    - Frontend buildTime: `2026-06-02T16:49:42.2260707+08:00`
+- 节点状态：
+  - `/api/nodes`：
+    - 当前 1 个节点：`b763edcd30594cf48da109f58fee9353`
+    - `nodeName = Node-1-b763edcd`
+    - `logicName = A`
+    - `hasProgram = true`
+    - `programSize = 289`
+    - `cartFields = []`
+    - buildInfo:
+      - `sourceCommitShort = ed3ac25`
+      - `buildTime = 2026-06-02T17:22:37.9404062+08:00`
+      - `buildId = 20260602-092238`
+  - `/api/node/b763edcd30594cf48da109f58fee9353` 返回同样结果，`cartFields = []`。
+- 文件/产物状态：
+  - `/api/logic/list`：
+    - 只有 `A`
+    - `binSize = 289`
+    - `jsonSize = 2`
+  - `/api/files/tree`：
+    - 存在 `assets/inputs/A.cs`
+    - 存在 `assets/generated/A.bin`
+    - 存在 `assets/generated/A.bin.json`
+    - 存在 `assets/generated/A.build.json`
+    - 存在 `assets/generated/A.diver`
+    - 存在 `assets/generated/A.diver.map.json`
+  - `/api/files/read?path=assets/generated/A.bin.json`：
+    - 内容为 `[]`
+  - `/api/files/read?path=assets/inputs/A.cs`：
+    - 源码确实有：
+      - `[AsUpperIO] public int input;`
+      - `[AsLowerIO] public int output;`
+  - `/api/files/read?path=assets/generated/A.diver`：
+    - 不包含 `input`
+    - 不包含 `output`
+  - `/api/files/read?path=assets/generated/A.diver.map.json`：
+    - 不包含 `input`
+    - 不包含 `output`
+- Variables API：
+  - `/api/variables/meta`：
+    - 只有 `Node-1-b763edcd.__iteration`
+  - `/api/variables`：
+    - 只有 `Node-1-b763edcd.__iteration = 0`
+- 结论：
+  - 这次现象不是前端 Variables 刷新没有拿到数据。
+  - 后端当前节点信息的 `cartFields` 已经为空。
+  - 编译产物 `A.bin.json` 是空数组 `[]`。
+  - 因此 Variables 表只显示默认 `__iteration` 是符合当前后端状态的。
+  - 下一步要查 Build/Compiler metadata 生成逻辑，尤其是只在 CartDefinition 里定义字段、但 `Operation()` 中没有实际访问 `cart.input/cart.output` 时，是否没有被 compiler/meta 扫描出来。
+
+### [template/mcu] 默认 MCU 初始例程实际访问 IO 字段
+- 用户决策：
+  - 暂不修改编译器。
+  - 未访问的变量不进入编译 metadata 是合理语义。
+  - 调整默认初始例程，让模板里的 IO 字段被实际访问，从而新建后能进入 Variables 表。
+- 根因确认：
+  - `DiverCompiler/ModuleWeaver.cs` 生成 `<Logic>.bin.json` 时使用 `dll.IOs`。
+  - `dll.IOs` 来自 `Processor` 中实际参与编译/访问的 Cart IO 字段集合。
+  - 只在 `CartDefinition` 中声明字段，但 `Operation()` 不读写该字段时，字段不会进入 `dll.IOs`，因此 `*.bin.json` 为 `[]`。
+- 实施：
+  - `3rd/CoralinkerHost/Web/ApiRoutes.cs`：
+    - `GenerateDefaultTemplate()` 中默认 MCU Cart 字段改名：
+      - UpperIO: `<ClassName>ControlSpeed`
+      - LowerIO: `<ClassName>ActualSpeed`
+    - 删除原 `input` / `output` 字段名。
+    - `Operation()` 中实际读写：
+      - `var random = iteration % 10;`
+      - `cart.<ClassName>ActualSpeed = cart.<ClassName>ControlSpeed + 1 * random;`
+    - 注释同步改为新字段名。
+- 验证：
+  - `ReadLints` 检查 `ApiRoutes.cs` 无错误。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release` 成功。
+  - 构建中仍有既有 warning：
+    - `DiverCompiler/Processor.cs` unreachable code。
+    - SDK/Host nullable 和 Windows-only API warning。
+
+### [frontend/runtime] 修复 Build 后 Root Control 变量在 Variables 表消失
+- 用户反馈：
+  - RootPC 选择 `A` 后 `joystickX/Y` 会出现。
+  - RootPC 选择 None 后 `joystickX/Y` 消失，这是正确行为。
+  - 再次选择 `A` 后变量成功出现。
+  - 但保持 Root=A 时点击 Build，Variables 表里的 `joystickX/Y` 消失。
+  - 用户怀疑可能是编译没完成就刷新，或刷新流程不对。
+- API 排查：
+  - 改用 `curl.exe --max-time`，避免 PowerShell `Invoke-RestMethod` 在 Cursor 工具层卡住。
+  - `/api/ping` 正常。
+  - Root=None 时：
+    - `/api/root/state` 返回 `logicName=null`
+    - `cartFields=[]`
+    - `controlFields=[]`
+    - 这是正确状态。
+  - `/api/root/logics`：
+    - Root logic `A` 存在。
+    - `cartFields` 包含 `left_diff_speed/right_diff_speed`。
+    - `controlFields` 包含 `joystickX/joystickY`。
+  - 用 API 配置 Root=A 后：
+    - `/api/root/state` 返回 `logicName=A`。
+    - `controlFields` 包含 `joystickX/joystickY`。
+    - `/api/variables/meta` 包含 `joystickX/joystickY`。
+  - 触发 `/api/build` 后：
+    - Build 成功。
+    - 返回 `rootLogics=["A"]`。
+    - `/api/root/state` 仍保持 `logicName=A`，且 `controlFields` 仍包含 `joystickX/joystickY`。
+    - `/api/variables/meta` 仍包含 `joystickX/joystickY`。
+    - `/api/variables` 也仍包含 `joystickX/joystickY`。
+- 结论：
+  - 后端 Build 后没有丢 Root 配置。
+  - 后端 Variables API 也没有丢 Root control variables。
+  - 问题在前端 Build 后刷新顺序/异步竞态。
+- 根因：
+  - `HomeView.handleBuild()` 在 Build 成功后较早调用 `filesStore.notifyBuildComplete()`。
+  - 这会触发 `RootNodeView` 的 `watch(buildVersion)`，并发执行 `refreshRootNodeRuntime()`。
+  - 同时 `HomeView` 还在继续：
+    - `reprogramAllNodes()`
+    - `runtimeStore.refreshVariables()`
+    - `runtimeStore.refreshFieldMetas()`
+  - 多条异步刷新链路没有顺序保护，旧请求晚返回时可能覆盖新状态。
+- 实施：
+  - `3rd/CoralinkerHost/ClientApp/src/views/HomeView.vue`：
+    - 将 `filesStore.notifyBuildComplete()` 移到最终刷新之后：
+      - `await reprogramAllNodes()`
+      - `await runtimeStore.refreshVariables()`
+      - `await runtimeStore.refreshFieldMetas()`
+      - `filesStore.notifyBuildComplete()`
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/RootNodeView.vue`：
+    - 增加 `rootRefreshId`。
+    - `loadRootInfo()` 每次请求生成序号。
+    - 如果旧请求晚返回，返回 `false`。
+    - `refreshRootNodeRuntime()` 在旧请求情况下直接停止，不再继续刷新 variables/metas。
+- 验证：
+  - `ReadLints` 检查 `HomeView.vue`、`RootNodeView.vue` 无错误。
+  - `npm run build` 成功。
+  - 构建中仍有既有 Vite/Rollup warning：
+    - SignalR pure annotation warning。
+    - `device.ts` 动态/静态导入 warning。
+    - chunk size warning。
+
+### [publish] 发布测试版本 CoralinkerHost_7978a94_20260602-182113
+- 用户请求：
+  - 打一个 publish 版本，用户自己测试。
+- 执行：
+  - 命令：`powershell -NoProfile -ExecutionPolicy Bypass -File "3rd\CoralinkerHost\publish-host.ps1" -SkipNativeBuild`
+  - 发布脚本先执行前端构建：
+    - `npm run build`
+  - 再执行 Host publish。
+- 结果：
+  - 新发布目录：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_7978a94_20260602-182113`
+  - publish info：
+    - `tag = 7978a94-dirty`
+    - `commit = 7978a94`
+    - `publishTime = 2026-06-02T18:21:13.7242814+08:00`
+  - frontend build info：
+    - `buildTime = 2026-06-02T18:21:13.7242814+08:00`
+- 验证：
+  - `CoralinkerHost.dll` 存在。
+  - `wwwroot/index.html` 存在。
+  - `package-manifest.sha256` 存在。
+- 注意：
+  - 本次使用 `-SkipNativeBuild`，未重新编译 native bridge。
+  - 构建仍有既有 Vite/Rollup warning 和 .NET nullable/平台 API warning。
+
+### [frontend] 修复 Variables Flow 连线缩放和变量布局拥挤
+- 用户反馈：
+  - Variables Flow 连线端点位置不对，拖动节点后方向大致正确，但看起来存在缩放。
+  - 变量框上下挤在一起不好看，希望能分散并尽量不挡住现有节点。
+- 根因判断：
+  - 叠加层本身跟随 VueFlow transformation pane 做 transform 是正确的。
+  - SVG 的 `viewBox` 与 CSS 固定尺寸不一致，会把 path 坐标再次按 SVG 比例缩放，造成端点偏移/缩放感。
+  - 原锚点固定使用 Root 右边、Node 左边，节点位置变化后无法保证端点位于朝向变量框的一侧。
+- 实施：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`：
+    - 新增 `flowCanvasSize`，让 SVG `viewBox`、`width`、`height`、CSS 尺寸一致，避免二次缩放。
+    - 连线端点改为 `anchorToward(rect, point)`，根据变量框所在方向选择节点左/右边，并将端点 y 限制在节点矩形内部。
+    - 新增 `layoutExternalVariables()`：
+      - 根据 Root 和 MCU 节点包围盒选择变量列。
+      - 优先使用 Root/Node 中间空隙，空隙不足时选择整体包围盒左右侧候选列。
+      - 对 Root/Node 占用区做 padding，变量框纵向错开并避让已放置变量。
+    - 曲线路径仍使用三次贝塞尔，但端点改为动态锚点。
+- 验证：
+  - `ReadLints` 检查 `GraphCanvas.vue` 无错误。
+  - `npm run build` 成功。
+  - 构建中仍有既有 Vite/Rollup warning：
+    - SignalR pure annotation warning。
+    - `device.ts` 动态/静态导入 warning。
+    - chunk size warning。

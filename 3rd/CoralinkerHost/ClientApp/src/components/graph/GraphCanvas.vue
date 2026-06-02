@@ -10,7 +10,7 @@
 -->
 
 <template>
-  <div class="graph-canvas-wrapper">
+  <div ref="graphWrapperRef" class="graph-canvas-wrapper">
     <VueFlow
       v-model:nodes="nodes"
       v-model:edges="edges"
@@ -44,11 +44,67 @@
         :mask-color="'rgba(0, 0, 0, 0.6)'"
       />
     </VueFlow>
+
+    <button
+      class="variables-flow-toggle"
+      :class="{ active: showVariablesFlow }"
+      @click="toggleVariablesFlow"
+      title="Show Variables Flow"
+    >
+      Var Flow
+    </button>
+
+    <div
+      v-if="showVariablesFlow"
+      class="variables-flow-layer"
+      :style="{ transform: flowTransform }"
+    >
+      <svg
+        class="variables-flow-svg"
+        :viewBox="flowViewBox"
+        :width="flowCanvasSize.width"
+        :height="flowCanvasSize.height"
+        :style="{ width: `${flowCanvasSize.width}px`, height: `${flowCanvasSize.height}px` }"
+      >
+        <defs>
+          <marker
+            id="var-flow-arrow"
+            markerWidth="8"
+            markerHeight="8"
+            refX="7"
+            refY="4"
+            orient="auto"
+            markerUnits="strokeWidth"
+          >
+            <path d="M 0 0 L 8 4 L 0 8 z" fill="currentColor" />
+          </marker>
+        </defs>
+        <path
+          v-for="line in flowLines"
+          :key="line.id"
+          class="flow-line"
+          :class="`${line.direction}-io`"
+          :d="line.path"
+        />
+      </svg>
+
+      <div
+        v-for="item in variableFlowItems"
+        :key="item.id"
+        class="variable-flow-item"
+        :class="`${item.direction}-io`"
+        :style="{ left: `${item.x}px`, top: `${item.y}px` }"
+      >
+        <span class="var-type">{{ item.type }}</span>
+        <span class="var-name" :title="item.name">{{ item.name }}</span>
+        <span class="var-value" :title="item.value">{{ item.value }}</span>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, markRaw } from 'vue'
+import { computed, nextTick, ref, watch, onMounted, onUnmounted, markRaw } from 'vue'
 import { 
   VueFlow, 
   useVueFlow,
@@ -66,6 +122,14 @@ import { storeToRefs } from 'pinia'
 import * as deviceApi from '@/api/device'
 import CoralNodeView from './CoralNodeView.vue'
 import RootNodeView from './RootNodeView.vue'
+import {
+  computeVariableFlowLayout,
+  NODE_SIZE,
+  ROOT_SIZE,
+  type FlowLine,
+  type NodeRect,
+  type VariableFlowItem
+} from './variableFlowLayout'
 
 // 导入 vue-flow 样式
 import '@vue-flow/core/dist/style.css'
@@ -79,13 +143,15 @@ import '@vue-flow/minimap/dist/style.css'
 
 const logStore = useLogStore()
 const runtimeStore = useRuntimeStore()
-const { nodeStates, isRunning } = storeToRefs(runtimeStore)
+const { nodeStates, isRunning, variableList } = storeToRefs(runtimeStore)
 
 // ============================================
 // vue-flow 交互控制
 // ============================================
 
 const { setInteractive } = useVueFlow()
+
+const graphWrapperRef = ref<HTMLDivElement | null>(null)
 
 // ============================================
 // vue-flow 配置
@@ -110,6 +176,9 @@ const defaultEdgeOptions = {
 
 const nodes = ref<Node[]>([])
 const edges = ref<Edge[]>([])
+const showVariablesFlow = ref(false)
+const flowTransform = ref('translate(50px, 50px) scale(1)')
+let flowTransformFrame: number | null = null
 
 // 是否正在从 store 加载（防止循环）
 let isLoadingFromStore = false
@@ -117,6 +186,44 @@ let isLoadingFromStore = false
 // 节点状态轮询定时器
 let nodeStatePollingTimer: ReturnType<typeof setInterval> | null = null
 const NODE_STATE_POLLING_INTERVAL = 3000 // 3秒轮询一次
+
+const measuredNodeRects = ref<Record<string, NodeRect>>({})
+
+const rootNode = computed(() => nodes.value.find(node => node.type === 'root-node') ?? null)
+const coralNodes = computed(() => nodes.value.filter(node => node.type === 'coral-node'))
+const flowVariables = computed(() => variableList.value.filter(variable => variable.direction !== 'control'))
+const controlVariables = computed(() => variableList.value.filter(variable => variable.direction === 'control'))
+
+const variableFlowLayout = computed(() => {
+  const root = rootNode.value
+  if (!root) {
+    return { items: [] as VariableFlowItem[], lines: [] as FlowLine[] }
+  }
+
+  return computeVariableFlowLayout({
+    rootRect: getNodeRect(root),
+    nodeRects: coralNodes.value.map(getNodeRect),
+    flowVariables: flowVariables.value,
+    controlVariables: controlVariables.value
+  })
+})
+
+const flowCanvasSize = computed(() => {
+  const points = [
+    ...nodes.value.map(node => node.position),
+    ...variableFlowItems.value.map(item => ({ x: item.x + item.width, y: item.y + item.height }))
+  ]
+  const maxX = Math.ceil(Math.max(1200, ...points.map(point => point.x + 360)))
+  const maxY = Math.ceil(Math.max(800, ...points.map(point => point.y + 240)))
+  return { width: maxX, height: maxY }
+})
+
+const flowViewBox = computed(() => {
+  return `0 0 ${flowCanvasSize.value.width} ${flowCanvasSize.value.height}`
+})
+
+const variableFlowItems = computed(() => variableFlowLayout.value.items)
+const flowLines = computed(() => variableFlowLayout.value.lines)
 
 // ============================================
 // 节点状态轮询
@@ -201,6 +308,88 @@ async function pollAllNodeStates() {
 // ============================================
 // 方法
 // ============================================
+
+async function toggleVariablesFlow() {
+  showVariablesFlow.value = !showVariablesFlow.value
+  if (showVariablesFlow.value) {
+    await runtimeStore.refreshVariables()
+    await runtimeStore.refreshFieldMetas()
+    await nextTick()
+    measureNodeRects()
+    startFlowTransformSync()
+  } else {
+    stopFlowTransformSync()
+  }
+}
+
+function startFlowTransformSync() {
+  if (flowTransformFrame != null) return
+
+  const tick = () => {
+    syncFlowTransform()
+    flowTransformFrame = requestAnimationFrame(tick)
+  }
+
+  flowTransformFrame = requestAnimationFrame(tick)
+}
+
+function stopFlowTransformSync() {
+  if (flowTransformFrame != null) {
+    cancelAnimationFrame(flowTransformFrame)
+    flowTransformFrame = null
+  }
+}
+
+function syncFlowTransform() {
+  const wrapper = graphWrapperRef.value
+  const pane = wrapper?.querySelector<HTMLElement>('.vue-flow__transformationpane')
+  if (!pane) return
+
+  const transform = pane.style.transform
+  if (transform && transform !== flowTransform.value) {
+    flowTransform.value = transform
+  }
+  measureNodeRects()
+}
+
+function measureNodeRects() {
+  const wrapper = graphWrapperRef.value
+  if (!wrapper) return
+
+  const next: Record<string, NodeRect> = {}
+  for (const node of nodes.value) {
+    const el = wrapper.querySelector<HTMLElement>(`.vue-flow__node[data-id="${cssEscape(node.id)}"]`)
+    if (!el) continue
+
+    next[node.id] = {
+      x: node.position.x,
+      y: node.position.y,
+      width: el.offsetWidth || fallbackNodeSize(node).width,
+      height: el.offsetHeight || fallbackNodeSize(node).height
+    }
+  }
+
+  measuredNodeRects.value = next
+}
+
+function cssEscape(value: string): string {
+  return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(value) : value.replace(/"/g, '\\"')
+}
+
+function fallbackNodeSize(node: Node): { width: number; height: number } {
+  return node.type === 'root-node' ? ROOT_SIZE : NODE_SIZE
+}
+
+function getNodeRect(node: Node): NodeRect {
+  const measured = measuredNodeRects.value[node.id]
+  const fallback = fallbackNodeSize(node)
+  return measured ?? {
+    x: node.position.x,
+    y: node.position.y,
+    width: fallback.width,
+    height: fallback.height
+  }
+}
 
 /**
  * 添加新节点（需要提供经过 addNode API 返回的数据）
@@ -604,6 +793,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  stopFlowTransformSync()
+
   // 停止节点状态轮询
   stopNodeStatePolling()
   
@@ -658,9 +849,144 @@ defineExpose({
 
 <style scoped>
 .graph-canvas-wrapper {
+  position: relative;
   width: 100%;
   height: 100%;
   background: #0b1220;
+  overflow: hidden;
+}
+
+.variables-flow-toggle {
+  position: absolute;
+  left: 52px;
+  bottom: 14px;
+  z-index: 6;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.variables-flow-toggle:hover,
+.variables-flow-toggle.active {
+  border-color: #60a5fa;
+  background: rgba(37, 99, 235, 0.24);
+  color: #eff6ff;
+}
+
+.variables-flow-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+.variables-flow-svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  color: rgba(148, 163, 184, 0.75);
+  pointer-events: none;
+}
+
+.flow-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-dasharray: 4 6;
+  marker-end: url(#var-flow-arrow);
+  opacity: 0.72;
+}
+
+.flow-line.upper-io {
+  color: #60a5fa;
+}
+
+.flow-line.lower-io {
+  color: #34d399;
+}
+
+.flow-line.mutual-io {
+  color: #fbbf24;
+}
+
+.variable-flow-item {
+  position: absolute;
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  grid-template-rows: 16px 16px;
+  column-gap: 6px;
+  width: 210px;
+  min-height: 38px;
+  padding: 4px 7px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #e2e8f0;
+  font-size: 11px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.38);
+  pointer-events: auto;
+}
+
+.variable-flow-item.upper-io {
+  border-color: rgba(96, 165, 250, 0.7);
+  background: rgba(30, 64, 175, 0.52);
+}
+
+.variable-flow-item.lower-io {
+  border-color: rgba(52, 211, 153, 0.7);
+  background: rgba(6, 95, 70, 0.52);
+}
+
+.variable-flow-item.mutual-io {
+  border-color: rgba(251, 191, 36, 0.7);
+  background: rgba(120, 53, 15, 0.54);
+}
+
+.variable-flow-item.control-io {
+  width: 154px;
+  min-height: 30px;
+  grid-template-columns: 34px 1fr;
+  grid-template-rows: 13px 13px;
+  border-color: rgba(192, 132, 252, 0.72);
+  background: rgba(88, 28, 135, 0.62);
+  font-size: 10px;
+}
+
+.var-type {
+  grid-row: 1 / span 2;
+  align-self: center;
+  justify-self: center;
+  padding: 2px 4px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.12);
+  font-family: var(--font-mono);
+  color: #f8fafc;
+}
+
+.var-name,
+.var-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.var-name {
+  font-weight: 700;
+}
+
+.var-value {
+  color: #cbd5e1;
+  font-family: var(--font-mono);
 }
 
 /* vue-flow 主题覆盖 */

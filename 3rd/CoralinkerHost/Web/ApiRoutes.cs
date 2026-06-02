@@ -12,6 +12,10 @@ public static class ApiRoutes
     public static void Map(WebApplication app)
     {
         app.MapGet("/api/ping", () => JsonHelper.Json(new { ok = true }));
+        app.MapGet("/api/about", (HostAboutService about) =>
+        {
+            return JsonHelper.Json(new { ok = true, about = about.GetAbout() });
+        });
 
         // ============================================
         // 项目管理 API
@@ -1226,10 +1230,10 @@ public static class ApiRoutes
             public class {{className}}Cart : CartDefinition
             {
                 // Host → MCU (在 Variables 面板中可修改)
-                [AsUpperIO] public int input;
+                [AsUpperIO] public int {{className}}ControlSpeed;
 
                 // MCU → Host (在 Variables 面板中可查看)
-                [AsLowerIO] public int output;
+                [AsLowerIO] public int {{className}}ActualSpeed;
             }
 
             /// <summary>
@@ -1243,9 +1247,10 @@ public static class ApiRoutes
                     Console.WriteLine($"Hello World! iteration={iteration}");
 
                     // ---- 变量表读写 ----
-                    // cart.input  : 读取 UpperIO 变量 (Host → MCU)
-                    // cart.output : 写入 LowerIO 变量 (MCU → Host)
-                    // cart.output = cart.input + 1;
+                    // cart.{{className}}ControlSpeed : 读取 UpperIO 变量 (Host → MCU)
+                    // cart.{{className}}ActualSpeed  : 写入 LowerIO 变量 (MCU → Host)
+                    var random = iteration % 10;
+                    cart.{{className}}ActualSpeed = cart.{{className}}ControlSpeed + 1 * random;
 
                     // ---- 串口通信 ----
                     // RunOnMCU.WriteStream(byte[] data, int portIndex)
