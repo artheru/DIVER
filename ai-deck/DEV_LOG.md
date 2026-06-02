@@ -2159,3 +2159,268 @@
     - SignalR pure annotation warning。
     - `device.ts` 动态/静态导入 warning。
     - chunk size warning。
+
+### [frontend/graph] 实现固定 Variables Flow 层级布局
+- 用户请求：
+  - 执行“固定变量流布局”计划，不修改计划文件。
+  - Graph 不再自由布局，VarFlow 常开。
+  - Root 在上，ControlItem 在 Root 下方，IO 变量在 Root/Nodes 中间，Nodes 在下方按顺序排列。
+  - Node 和变量都支持拖拽交换/调整顺序并持久化。
+  - `__` 开头变量不显示。
+- 实施：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`：
+    - 删除候选评分式变量布局，改为 `computeFixedGraphLayout()` 确定性布局。
+    - Root 宽度随 control 变量数量扩展。
+    - Control 变量、外部 IO 变量、Node 分层排列。
+    - 输出 Root/Node 矩形、变量框和 slot-based orthogonal 连线路径。
+    - 新增 `mergeVariableOrder()`，过滤 `__` 变量；无新增变量时保持顺序，有新增变量时按 direction 分组和当前变量列表顺序插入，保留已有变量相对顺序。
+    - 修正 Root/Node 中心被 IO 变量总宽度推远的问题：变量行只自身向右展开，不再反推 Root/Node 布局中心。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`：
+    - `showVariablesFlow` 默认 `true`，挂载后刷新 variables/metas 并启动 overlay transform 同步。
+    - VueFlow 节点坐标由固定布局回写，不再随机初始化或保存 `x/y`。
+    - Root 节点 `draggable=false`。
+    - Node 拖拽停止后按最近水平槽位移动顺序，并保存到每个 Node 的 `extraInfo.order`；保存前合并现有 `extraInfo`，避免覆盖其它字段。
+    - 变量框使用 HTML drag/drop 调整 `variableFlowOrder`。
+    - VueFlow 连接禁用，位置变更不再触发自由布局保存。
+    - 加载和新增节点后触发一次 `fitView()`，避免异步加载后视口停留在空区域。
+  - `3rd/CoralinkerHost/ClientApp/src/types/index.ts`、`stores/project.ts`：
+    - `ProjectState` 新增 `variableFlowOrder?: string[]`。
+    - Pinia project store 新增 `variableFlowOrder` 和 `setVariableFlowOrder()`。
+  - `3rd/CoralinkerHost/Services/ProjectStore.cs`：
+    - 后端 `ProjectState` 新增 `VariableFlowOrder`。
+    - `SaveToDisk()` / `LoadFromDiskIfExists()` 读写 `variableFlowOrder`，随 `project.json` 导入导出。
+  - `RootNodeView.vue`、`CoralNodeView.vue`：
+    - 根元素补 `width: 100%` / `box-sizing: border-box`，让 VueFlow 固定宽度作用到组件。
+- 验证：
+  - `ReadLints`：相关前端文件无 linter error。
+  - `npm run build`：成功；仍有既有 SignalR pure annotation、`device.ts` 动态/静态导入、chunk size warning。
+  - `dotnet build CoralinkerHost.csproj`：成功；仍有既有 nullable 和 Windows-only API warning。
+
+### [frontend/graph] 修复刷新后节点闪现再消失
+- 用户反馈：
+  - 前端 dev 启动后刷新网页，节点会闪现一下然后消失。
+  - 怀疑可能是后端数据缺字段或其它前后端问题。
+- 判断：
+  - 由于节点已经闪现，说明后端节点数据已经到达前端并至少完成过一次渲染。
+  - 更可能是前端在下一帧由变量刷新、DOM 测量或 layout watcher 触发二次布局，把节点状态/视口改坏。
+- 实施：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`：
+    - 固定布局输入不再使用 `getNodeRect(node)` 的 DOM 实测尺寸。
+    - 删除 `measuredNodeRects`、`measureNodeRects()`、`getNodeRect()`、`sameRectMap()` 等测量反馈链路。
+    - `syncFlowTransform()` 只同步 VueFlow transformation pane，不再每帧测量节点。
+    - `flowCanvasSize` 改用 `computeFixedGraphLayout()` 输出的 Root/Node rect 与变量框位置计算。
+  - 保留固定尺寸布局语义：Root/Node 坐标和尺寸由 `variableFlowLayout.ts` 确定，不再受 DOM 渲染结果反向影响。
+- 验证：
+  - `ReadLints` 检查 `GraphCanvas.vue`、`variableFlowLayout.ts` 无错误。
+  - `npm run build` 成功；仍有既有 Vite/Rollup warning。
+
+### [frontend/graph] 修复 Root ControlItem 溢出和 Root 连线锚点
+- 用户反馈：
+  - 变量连接到 Root 的位置不对。
+  - ControlItem 位置超出了 Root 框下方，需要修改 Root 高度。
+- 实施：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`：
+    - Root 高度在存在 ControlItem 时自动增加，包含 control 变量行高度和底部 padding。
+    - ControlItem 不再布局到 `rootRect.y + rootRect.height + gap`，改为放入 Root 内部底部区域。
+    - Root 连接锚点改为 `anchorRootBottom()`，固定落在 Root 底边，并增加左右 inset，避免连线端点挤到 Root 内部文字/控件区域。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/RootNodeView.vue`：
+    - `.root-node` 增加 `height: 100%`，填满 VueFlow 布局给出的高度。
+    - `.node-content` 增加底部 padding，为内嵌 ControlItem 留出空间。
+- 验证：
+  - `ReadLints` 检查 `variableFlowLayout.ts`、`RootNodeView.vue` 无错误。
+  - `npm run build` 成功；仍有既有 Vite/Rollup warning。
+
+### [frontend/graph] 调整固定变量流 UI 尺寸与连线形态
+- 用户反馈：
+  - 普通 Node 宽度太窄，内容溢出。
+  - 变量框尺寸不一定固定，可以由内容决定。
+  - 变量框之间连线不要横平竖直，改用贝塞尔连接。
+  - 连接的节点位置需要分开一点。
+- 实施：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`：
+    - `NODE_SIZE.width` 从 `320` 调整为 `420`，给端口配置和 IO 区域更多宽度。
+    - 新增变量框尺寸估算逻辑，根据 type/name/value 长度计算宽度，并设置 min/max 限制。
+    - Control 变量和外部 IO 变量行布局改为使用逐项宽度累加，而不是固定宽度等距。
+    - 连线路径从正交 polyline 改为三次贝塞尔曲线。
+    - 增大连接 slot margin，并给多条线加入 lane offset，减少端点和曲线重叠。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`：
+    - 变量框 DOM 样式绑定 `item.width` / `item.height`。
+    - 移除 CSS 中变量框固定 `width: 210px` / control 固定 `width: 154px`。
+    - 变量框 grid 改为 `auto minmax(0, 1fr) auto`，适配动态宽度。
+- 验证：
+  - `ReadLints` 检查 `GraphCanvas.vue`、`variableFlowLayout.ts` 无错误。
+  - `npm run build` 成功；仍有既有 Vite/Rollup warning。
+
+### [frontend/graph] 修复 Root 内容压线、变量框排版和内部变量过滤
+- 用户反馈：
+  - Root 自身内容仍然超出或被 ControlItem 压住。
+  - 变量框希望固定为两排布局：左侧显示类型，右侧第一排显示名字、第二排显示值。
+  - `__iteration` 不要显示出来；当前带节点前缀的 `Node-...__iteration` 仍显示了。
+- 实施：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`：
+    - `ROOT_SIZE.height` / `ROOT_BASE_HEIGHT` 从 `150` 增加到 `190`。
+    - 有 ControlItem 时 Root 高度再增加固定 `ROOT_CONTROL_AREA_HEIGHT`。
+    - 变量框宽度估算改为 `typeWidth + max(nameWidth, valueWidth)`，匹配两排布局。
+    - `filterVisibleVariables()` 改为 `isInternalVariableName()`，过滤：
+      - `__` 开头变量。
+      - 尾段 `__` 开头变量。
+      - 包含 `__` 隐藏标记的带节点前缀变量，如 `Node-...__iteration`。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`：
+    - 变量框 grid 显式改为两列两行。
+    - `.var-type` 固定在左列并跨两行。
+    - `.var-name` 固定在右列第一行。
+    - `.var-value` 固定在右列第二行并右对齐。
+- 验证：
+  - `ReadLints` 检查 `variableFlowLayout.ts`、`GraphCanvas.vue`、`RootNodeView.vue` 无错误。
+  - `npm run build` 成功；仍有既有 Vite/Rollup warning。
+
+### [frontend/graph] 固定 Root X=0 基准并修复 Root 逻辑保存覆盖
+- 用户反馈：
+  - Root 从 None 切换到有代码后会多出 ControlItem 变量，此时 Root 和视图都会移动。
+  - 希望 Root 占据的位置作为居中 `X=0` 的定位基准，变量/节点变化时视图尽量不变化。
+  - Root 编程后有较大概率没有成功写入 Project，需要检查是否被近期调试/同步代码影响。
+- 根因：
+  - 固定布局中 `centerX` 仍由 `contentWidth` 推导；变量行或节点行宽度变化会导致 Root 位置重新计算。
+  - `GraphCanvas.vue` 在加载和新增节点后调用 `fitView()`，会主动移动当前视图。
+  - Root 选择逻辑只调用 `/api/root/configure`；后端会写 `ProjectStore`，但前端 `projectStore.rootLogicName` 仍是旧值。之后变量顺序/节点顺序等前端保存会调用 `updateProject()`，可能用旧 `rootLogicName` 覆盖后端刚写入的配置。
+- 实施：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`：
+    - 新增 `ROOT_CENTER_X = 0`。
+    - `computeFixedGraphLayout()` 使用固定 `centerX = ROOT_CENTER_X`。
+    - 外部变量行取消左边界钳制，改为围绕 Root 中心展开。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`：
+    - 使用 `setViewport()` 替代 `fitView()`。
+    - 移除 `logFixedLayout()` 及加载/新增节点时的调试日志调用。
+    - 首次加载时只把视口对准 Root；后续新增节点和变量变化不再主动移动视图。
+  - `3rd/CoralinkerHost/ClientApp/src/stores/project.ts`：
+    - 新增 `setRootLogicName(logicName)`，用于同步前端 Project 状态。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/RootNodeView.vue`：
+    - Root 逻辑选择成功后调用 `projectStore.setRootLogicName(logicName)`。
+    - 随后调用 `projectStore.saveProject({ silent: true })`，确保 Project 状态和后端配置一致。
+- 验证：
+  - 第一次 `npm run build` 发现 `flowSizes` 已无用，已删除。
+  - `ReadLints` 检查 `variableFlowLayout.ts`、`GraphCanvas.vue`、`RootNodeView.vue`、`project.ts` 无错误。
+  - `npm run build` 成功；仍有既有 Vite/Rollup warning。
+
+### [frontend/graph] 收敛变量框样式、连线锚点并删除废弃连接点
+- 用户反馈：
+  - 变量框 name/value 都需要右对齐，宽度还偏宽。
+  - 变量框类型与 Table 不一致，Table 是 `f32/i32`，图上显示成 `float/int`。
+  - 变量框上下入线：单线应在框中心，多线才均匀分布。
+  - 变量流线条改成实线。
+  - Root/Node 上旧的 `in/out`、蓝色 VueFlow 连接点已不需要，需要删除相关代码。
+- 实施：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`：
+    - 缩小 control / flow 变量框 min/max 宽度。
+    - `formatType()` 改为与 Node Table 一致的短类型映射：`Int32 -> i32`、`Single -> f32` 等。
+    - 变量框宽度估算降低 name 字符宽度和最大宽度。
+    - 变量框 top/bottom 锚点改为按实际连线数量分布：单线居中，多线均匀分布。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`：
+    - 去掉 `.flow-line` 的 `stroke-dasharray`，变量流线条改为实线。
+    - 变量框 padding / column gap 调小。
+    - `.var-name`、`.var-value` 显式右对齐。
+    - 删除废弃的 `@connect` / `onConnect()` 和 `sourceHandle/targetHandle` 创建边逻辑。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/RootNodeView.vue`：
+    - 删除 Root 上的 VueFlow `Handle`、`out ●` 标签和对应 CSS。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/CoralNodeView.vue`：
+    - 删除普通 Node 左右 VueFlow `Handle`。
+    - 删除废弃的 harness / handle / 连接高亮 CSS。
+- 验证：
+  - `rg` 检查 `Handle`、`handle-in/out`、`node-handle`、`sourceHandle/targetHandle` 等无真实残留。
+  - `ReadLints` 检查 `variableFlowLayout.ts`、`GraphCanvas.vue`、`RootNodeView.vue`、`CoralNodeView.vue` 无错误。
+  - `npm run build` 成功；仍有既有 Vite/Rollup warning。
+
+### [frontend/sdk] 按实际变量读写关系绘制 VarFlow
+- 用户反馈：
+  - 箭头也不要半透明，需要直接实心/不透明。
+  - 当前变量流仍像是所有变量默认全连接到所有 Node 和 Root。
+  - 实际上有些 Node 不读写、不持有某些变量；Root 也不是所有变量都持有/读写。
+  - `sourceIds` 应按 className，而不是 UUID。
+- 根因：
+  - `variableFlowLayout.ts` 的 `routeVariableLines()` 使用 `Object.values(nodeRects)`，每个变量按方向连到所有 Node。
+  - SDK 现有 `CartFieldMeta` / `CartFieldValue` 只提供合并后的字段方向，没有暴露每个变量由哪些 class 声明、哪些 class 读、哪些 class 写。
+- 实施：
+  - `3rd/CoralinkerSDK/DIVERSession.cs`：
+    - `CartFieldMeta` / `CartFieldValue` 增加：
+      - `SourceIds`
+      - `ReaderIds`
+      - `WriterIds`
+    - 新增 `FieldFlowRelation` / `FieldFlowRelationBuilder`。
+    - 新增 `BuildFieldFlowRelationMap()`，按 className 聚合变量关系：
+      - MCU 节点使用 `entry.LogicName` 作为 sourceId，fallback 到 `NodeName`。
+      - Root 虚拟节点从 `Root:<className>` 中剥离 className。
+      - MCU `UpperIO` => reader。
+      - MCU `LowerIO` => writer。
+      - MCU `Mutual` => reader + writer。
+      - Root cart `upper` => writer。
+      - Root cart `lower` => reader。
+      - Root cart `mutual` => reader + writer。
+    - `/api/variables/meta` 和 `/api/variables` 通过原记录自动输出这些关系字段。
+  - `3rd/CoralinkerHost/Services/VariableInspectorPushService.cs`：
+    - SignalR 变量快照增加 `sourceIds`、`readerIds`、`writerIds`。
+  - `3rd/CoralinkerHost/ClientApp/src/types/index.ts`：
+    - `CartFieldMeta`、`CartFieldValue`、`VariableValue` 增加可选 `sourceIds`、`readerIds`、`writerIds`。
+  - `3rd/CoralinkerHost/ClientApp/src/stores/runtime.ts`：
+    - HTTP 刷新和 SignalR 更新变量时保存关系字段。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`：
+    - 变量流线条 `opacity` 改为 `1`。
+    - 节点传入 `sourceId = logicName`。
+    - Root 传入 `rootSourceIds = [projectStore.rootLogicName]`。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`：
+    - `FixedGraphNode` / `VariableFlowItem` 增加 source/read/write 关系字段。
+    - `routeVariableLines()` 改为按 reader/writer className 匹配 Root 和具体 Node。
+    - 保留旧快照兼容兜底：如果暂时没有 reader/writer，就使用 `sourceIds` 建立声明关系。
+- 验证：
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Debug` 成功，0 error，仍有既有 warning。
+  - `ReadLints` 检查相关前端文件无错误。
+  - `npm run build` 成功；仍有既有 Vite/Rollup warning。
+
+### [host/frontend] 修复开发模式 Build NuGet 源并增加错误弹窗
+- 用户反馈：
+  - 本地开发目录启动 Host 后调用 Build 报错：`Missing offline NuGet packages directory: ...\DiverCompilerPortable\bin\Debug\netstandard2.0\nuget-packages`。
+  - 前端遇到 Build 错误时只在 Console/短通知显示，用户容易看不到，需要弹窗。
+  - 验证时如果 Host 正在运行导致输出文件被锁，应停下来提示用户，不再绕临时输出目录。
+- 根因：
+  - 开发模式下 `HostRuntimePaths.CompilerResourcesDir` 指向 `DiverCompilerPortable\bin\Debug\netstandard2.0`，该目录有 weaver/source resources，但没有发布包才包含的 `nuget-packages`。
+  - `DiverBuildService` 原先强制使用 `compilerDir\nuget-packages` 作为唯一离线 NuGet 源。
+  - `HomeView.vue` 的 Build 失败处理只调用 `uiStore.error()`，缺少持久可见的错误对话框。
+- 实施：
+  - `3rd/CoralinkerHost/Services/DiverBuildService.cs`：
+    - 新增 `ResolveNuGetPackagesDir()`。
+    - 优先使用 `compilerDir\nuget-packages`。
+    - Published layout 缺少离线包目录时仍报错，提示重新 publish Host。
+    - Development layout fallback 到：
+      - `CORALINKER_NUGET_PACKAGES_DIR`
+      - `NUGET_PACKAGES`
+      - 用户目录 `.nuget\packages`
+    - Build 日志增加实际 NuGet package source 输出。
+    - 清理一个未使用异常变量 warning。
+  - `3rd/CoralinkerHost/ClientApp/src/views/HomeView.vue`：
+    - 新增 `showBuildErrorDialog` / `buildErrorMessage`。
+    - Build 返回失败或 catch 到 `/api/build` 异常时打开 `Build Failed` modal。
+    - modal 显示完整错误文本，并提供 `Open Build Log` 按钮。
+    - 保留 toast，并将错误追加到 Build 日志。
+- 验证：
+  - `ReadLints` 检查 `DiverBuildService.cs`、`HomeView.vue` 无错误。
+  - `npm run build` 成功；仍有既有 Vite/Rollup warning。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Debug` 在 Host 被用户停止后直接编译成功，0 error，仍有既有 nullable/field warning。
+
+### [frontend/graph] 修正 VarFlow 配色和无消费者连线
+- 用户反馈：
+  - Graph 中变量框/连线配色与最初规则不一致，应以 Variables 表格/图例为准。
+  - 只有 Root 时，`left_diff_speed` 应只有进入 Root 的线；如果没有消费者，不应画出去的线。
+- 根因：
+  - `GraphCanvas.vue` 中 VarFlow 使用了另一套颜色：`upper=蓝`、`lower=绿`、`mutual=黄`、`control=紫`，与 `VariablePanel.vue` 的 `UpperIO=绿`、`LowerIO=橙`、`MutualIO=紫`、`ControlItem=蓝` 不一致。
+  - `variableFlowLayout.ts` 的 `relationIds()` 在 `readerIds` / `writerIds` 为空时无条件 fallback 到 `sourceIds`，导致声明者被同时当成 reader/writer，Root-only 场景会产生多余反向线。
+- 实施：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`：
+    - `.flow-line.upper-io` 改为绿色。
+    - `.flow-line.lower-io` 改为橙色。
+    - `.flow-line.mutual-io` 改为紫色。
+    - `.variable-flow-item.upper/lower/mutual/control-io` 同步到表格/图例配色。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`：
+    - `relationIds()` 不再使用 `sourceIds` 兜底 reader/writer。
+    - 空 reader/writer 表示没有对应关系，路由时不会画多余生产者/消费者线。
+- 验证：
+  - `ReadLints` 检查 `GraphCanvas.vue`、`variableFlowLayout.ts` 无错误。
+  - `npm run build` 成功；仍有既有 Vite/Rollup warning。

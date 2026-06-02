@@ -79,6 +79,9 @@ public sealed class VariableInspectorPushService : BackgroundService
                 typeId = field.TypeId,
                 direction = field.Direction,
                 controllable = field.Controllable,
+                sourceIds = field.SourceIds ?? Array.Empty<string>(),
+                readerIds = field.ReaderIds ?? Array.Empty<string>(),
+                writerIds = field.WriterIds ?? Array.Empty<string>(),
                 value = FormatValue(field.Value)
             });
         }

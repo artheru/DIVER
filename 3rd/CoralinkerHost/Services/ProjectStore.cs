@@ -65,6 +65,9 @@ public sealed class ProjectStore
             ["selectedFile"] = snap.SelectedFile,
             ["lastBuildId"] = snap.LastBuildId,
             ["rootLogicName"] = snap.RootLogicName,
+            ["variableFlowOrder"] = snap.VariableFlowOrder != null
+                ? JsonSerializer.SerializeToNode(snap.VariableFlowOrder, ProjectJson.Options)
+                : null,
             ["nodes"] = JsonSerializer.SerializeToNode(nodes, ProjectJson.Options),
             ["controlLayout"] = snap.ControlLayout != null 
                 ? JsonSerializer.SerializeToNode(snap.ControlLayout, ProjectJson.Options) 
@@ -95,13 +98,20 @@ public sealed class ProjectStore
             {
                 controlLayout = JsonSerializer.Deserialize<ControlLayoutConfig>(cl.GetRawText(), ProjectJson.Options);
             }
+
+            List<string>? variableFlowOrder = null;
+            if (root.TryGetProperty("variableFlowOrder", out var vfo) && vfo.ValueKind == JsonValueKind.Array)
+            {
+                variableFlowOrder = JsonSerializer.Deserialize<List<string>>(vfo.GetRawText(), ProjectJson.Options);
+            }
             
             var state = new ProjectState(
                 root.TryGetProperty("selectedAsset", out var sa) && sa.ValueKind == JsonValueKind.String ? sa.GetString() : null,
                 root.TryGetProperty("selectedFile", out var sf) && sf.ValueKind == JsonValueKind.String ? sf.GetString() : null,
                 root.TryGetProperty("lastBuildId", out var lb) && lb.ValueKind == JsonValueKind.String ? lb.GetString() : null,
                 root.TryGetProperty("rootLogicName", out var rl) && rl.ValueKind == JsonValueKind.String ? rl.GetString() : null,
-                controlLayout
+                controlLayout,
+                variableFlowOrder
             );
             
             Set(state);
@@ -278,12 +288,13 @@ public sealed record ProjectState(
     string? SelectedFile,      // 当前在编辑器中打开的文件路径
     string? LastBuildId,       // 最后一次构建的 ID
     string? RootLogicName,     // Root 本机逻辑名称
-    ControlLayoutConfig? ControlLayout = null  // 遥控器布局配置
+    ControlLayoutConfig? ControlLayout = null,  // 遥控器布局配置
+    List<string>? VariableFlowOrder = null      // Variables Flow 中非 control 变量顺序
 )
 {
     public static ProjectState CreateDefault()
     {
-        return new ProjectState(null, null, null, null, null);
+        return new ProjectState(null, null, null, null, null, null);
     }
 }
 

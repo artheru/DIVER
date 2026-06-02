@@ -15,7 +15,7 @@
       v-model:nodes="nodes"
       v-model:edges="edges"
       :node-types="nodeTypes"
-      :default-viewport="{ x: 50, y: 50, zoom: 1 }"
+      :default-viewport="{ x: 0, y: 0, zoom: 1 }"
       :min-zoom="0.25"
       :max-zoom="2"
       :snap-to-grid="true"
@@ -23,12 +23,9 @@
       :connection-line-style="{ stroke: '#4f8cff', strokeWidth: 2 }"
       :default-edge-options="defaultEdgeOptions"
       :nodes-draggable="!isRunning"
-      :nodes-connectable="!isRunning"
+      :nodes-connectable="false"
       :elements-selectable="!isRunning"
-      fit-view-on-init
       @nodes-change="onNodesChange"
-      @edges-change="onEdgesChange"
-      @connect="onConnect"
       @node-drag-stop="onNodeDragStop"
     >
       <!-- 背景网格 -->
@@ -44,15 +41,6 @@
         :mask-color="'rgba(0, 0, 0, 0.6)'"
       />
     </VueFlow>
-
-    <button
-      class="variables-flow-toggle"
-      :class="{ active: showVariablesFlow }"
-      @click="toggleVariablesFlow"
-      title="Show Variables Flow"
-    >
-      Var Flow
-    </button>
 
     <div
       v-if="showVariablesFlow"
@@ -92,8 +80,16 @@
         v-for="item in variableFlowItems"
         :key="item.id"
         class="variable-flow-item"
-        :class="`${item.direction}-io`"
-        :style="{ left: `${item.x}px`, top: `${item.y}px` }"
+        :class="[
+          `${item.direction}-io`,
+          { dragging: draggedVariableName === item.name, reorderable: item.direction !== 'control' }
+        ]"
+        :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.width}px`, minHeight: `${item.height}px` }"
+        :draggable="item.direction !== 'control'"
+        @dragstart="handleVariableDragStart($event, item)"
+        @dragover.prevent
+        @drop.prevent="handleVariableDrop(item)"
+        @dragend="handleVariableDragEnd"
       >
         <span class="var-type">{{ item.type }}</span>
         <span class="var-name" :title="item.name">{{ item.name }}</span>
@@ -110,24 +106,21 @@ import {
   useVueFlow,
   type Node, 
   type Edge,
-  type Connection,
-  type NodeChange,
-  type EdgeChange
+  type NodeChange
 } from '@vue-flow/core'
 import { Background, BackgroundVariant } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
-import { useLogStore, useRuntimeStore } from '@/stores'
+import { useLogStore, useProjectStore, useRuntimeStore } from '@/stores'
 import { storeToRefs } from 'pinia'
 import * as deviceApi from '@/api/device'
 import CoralNodeView from './CoralNodeView.vue'
 import RootNodeView from './RootNodeView.vue'
 import {
-  computeVariableFlowLayout,
+  computeFixedGraphLayout,
   NODE_SIZE,
   ROOT_SIZE,
-  type FlowLine,
-  type NodeRect,
+  type FixedGraphLayoutResult,
   type VariableFlowItem
 } from './variableFlowLayout'
 
@@ -142,6 +135,7 @@ import '@vue-flow/minimap/dist/style.css'
 // ============================================
 
 const logStore = useLogStore()
+const projectStore = useProjectStore()
 const runtimeStore = useRuntimeStore()
 const { nodeStates, isRunning, variableList } = storeToRefs(runtimeStore)
 
@@ -149,7 +143,7 @@ const { nodeStates, isRunning, variableList } = storeToRefs(runtimeStore)
 // vue-flow 交互控制
 // ============================================
 
-const { setInteractive } = useVueFlow()
+const { setInteractive, setViewport } = useVueFlow()
 
 const graphWrapperRef = ref<HTMLDivElement | null>(null)
 
@@ -176,9 +170,11 @@ const defaultEdgeOptions = {
 
 const nodes = ref<Node[]>([])
 const edges = ref<Edge[]>([])
-const showVariablesFlow = ref(false)
+const showVariablesFlow = ref(true)
 const flowTransform = ref('translate(50px, 50px) scale(1)')
 let flowTransformFrame: number | null = null
+let isApplyingFixedLayout = false
+let hasCenteredInitialViewport = false
 
 // 是否正在从 store 加载（防止循环）
 let isLoadingFromStore = false
@@ -187,30 +183,33 @@ let isLoadingFromStore = false
 let nodeStatePollingTimer: ReturnType<typeof setInterval> | null = null
 const NODE_STATE_POLLING_INTERVAL = 3000 // 3秒轮询一次
 
-const measuredNodeRects = ref<Record<string, NodeRect>>({})
+const draggedVariableName = ref<string | null>(null)
 
-const rootNode = computed(() => nodes.value.find(node => node.type === 'root-node') ?? null)
 const coralNodes = computed(() => nodes.value.filter(node => node.type === 'coral-node'))
 const flowVariables = computed(() => variableList.value.filter(variable => variable.direction !== 'control'))
 const controlVariables = computed(() => variableList.value.filter(variable => variable.direction === 'control'))
 
-const variableFlowLayout = computed(() => {
-  const root = rootNode.value
-  if (!root) {
-    return { items: [] as VariableFlowItem[], lines: [] as FlowLine[] }
-  }
-
-  return computeVariableFlowLayout({
-    rootRect: getNodeRect(root),
-    nodeRects: coralNodes.value.map(getNodeRect),
+const variableFlowLayout = computed<FixedGraphLayoutResult>(() => {
+  return computeFixedGraphLayout({
+    nodes: coralNodes.value.map(node => ({
+      id: node.id,
+      name: node.data?.nodeName,
+      order: readNodeOrder(node),
+      sourceId: typeof node.data?.logicName === 'string' ? node.data.logicName : undefined
+    })),
     flowVariables: flowVariables.value,
-    controlVariables: controlVariables.value
+    controlVariables: controlVariables.value,
+    nodeOrder: currentNodeOrder(),
+    variableOrder: projectStore.variableFlowOrder,
+    rootSourceIds: projectStore.rootLogicName ? [projectStore.rootLogicName] : []
   })
 })
 
 const flowCanvasSize = computed(() => {
+  const layout = variableFlowLayout.value
   const points = [
-    ...nodes.value.map(node => node.position),
+    { x: layout.rootRect.x + layout.rootRect.width, y: layout.rootRect.y + layout.rootRect.height },
+    ...Object.values(layout.nodeRects).map(rect => ({ x: rect.x + rect.width, y: rect.y + rect.height })),
     ...variableFlowItems.value.map(item => ({ x: item.x + item.width, y: item.y + item.height }))
   ]
   const maxX = Math.ceil(Math.max(1200, ...points.map(point => point.x + 360)))
@@ -309,19 +308,6 @@ async function pollAllNodeStates() {
 // 方法
 // ============================================
 
-async function toggleVariablesFlow() {
-  showVariablesFlow.value = !showVariablesFlow.value
-  if (showVariablesFlow.value) {
-    await runtimeStore.refreshVariables()
-    await runtimeStore.refreshFieldMetas()
-    await nextTick()
-    measureNodeRects()
-    startFlowTransformSync()
-  } else {
-    stopFlowTransformSync()
-  }
-}
-
 function startFlowTransformSync() {
   if (flowTransformFrame != null) return
 
@@ -349,46 +335,95 @@ function syncFlowTransform() {
   if (transform && transform !== flowTransform.value) {
     flowTransform.value = transform
   }
-  measureNodeRects()
 }
 
-function measureNodeRects() {
-  const wrapper = graphWrapperRef.value
-  if (!wrapper) return
+function readNodeOrder(node: Node): number | undefined {
+  const order = asExtraInfo(node.data?.extraInfo).order
+  return typeof order === 'number' ? order : undefined
+}
 
-  const next: Record<string, NodeRect> = {}
-  for (const node of nodes.value) {
-    const el = wrapper.querySelector<HTMLElement>(`.vue-flow__node[data-id="${cssEscape(node.id)}"]`)
-    if (!el) continue
+function asExtraInfo(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? { ...(value as Record<string, unknown>) } : {}
+}
 
-    next[node.id] = {
-      x: node.position.x,
-      y: node.position.y,
-      width: el.offsetWidth || fallbackNodeSize(node).width,
-      height: el.offsetHeight || fallbackNodeSize(node).height
+function currentNodeOrder(): string[] {
+  return [...coralNodes.value]
+    .sort((a, b) => {
+      const aOrder = readNodeOrder(a)
+      const bOrder = readNodeOrder(b)
+      if (aOrder != null && bOrder != null && aOrder !== bOrder) return aOrder - bOrder
+      if (aOrder != null && bOrder == null) return -1
+      if (aOrder == null && bOrder != null) return 1
+      return nodes.value.indexOf(a) - nodes.value.indexOf(b)
+    })
+    .map(node => node.id)
+}
+
+function applyFixedLayout() {
+  if (isApplyingFixedLayout) return
+  isApplyingFixedLayout = true
+
+  const layout = variableFlowLayout.value
+  let changed = false
+
+  const nextNodes = nodes.value.map(node => {
+    if (node.type === 'root-node') {
+      const nextStyle = {
+        ...(node.style as Record<string, string> | undefined),
+        width: `${layout.rootRect.width}px`,
+        height: `${layout.rootRect.height}px`
+      }
+      const nextNode = {
+        ...node,
+        position: { x: layout.rootRect.x, y: layout.rootRect.y },
+        draggable: false,
+        style: nextStyle
+      }
+      changed = changed || !samePosition(node.position, nextNode.position) || node.draggable !== false || !sameStyle(node.style, nextStyle)
+      return nextNode
     }
+
+    if (node.type !== 'coral-node') return node
+    const rect = layout.nodeRects[node.id]
+    if (!rect) return node
+
+    const nextStyle = {
+      ...(node.style as Record<string, string> | undefined),
+      width: `${rect.width}px`
+    }
+    const nextNode = {
+      ...node,
+      position: { x: rect.x, y: rect.y },
+      draggable: !isRunning.value,
+      style: nextStyle
+    }
+    changed = changed || !samePosition(node.position, nextNode.position) || node.draggable !== !isRunning.value || !sameStyle(node.style, nextStyle)
+    return nextNode
+  })
+
+  if (changed) {
+    nodes.value = nextNodes
   }
 
-  measuredNodeRects.value = next
+  isApplyingFixedLayout = false
 }
 
-function cssEscape(value: string): string {
-  return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(value) : value.replace(/"/g, '\\"')
+function samePosition(left: { x: number; y: number }, right: { x: number; y: number }): boolean {
+  return left.x === right.x && left.y === right.y
 }
 
-function fallbackNodeSize(node: Node): { width: number; height: number } {
-  return node.type === 'root-node' ? ROOT_SIZE : NODE_SIZE
+function sameStyle(left: unknown, right: Record<string, string>): boolean {
+  const current = (left && typeof left === 'object' ? left : {}) as Record<string, unknown>
+  return current.width === right.width && current.height === right.height
 }
 
-function getNodeRect(node: Node): NodeRect {
-  const measured = measuredNodeRects.value[node.id]
-  const fallback = fallbackNodeSize(node)
-  return measured ?? {
-    x: node.position.x,
-    y: node.position.y,
-    width: fallback.width,
-    height: fallback.height
-  }
+function centerInitialViewportOnRoot() {
+  if (hasCenteredInitialViewport) return
+  hasCenteredInitialViewport = true
+  void nextTick().then(() => {
+    const width = graphWrapperRef.value?.clientWidth ?? 0
+    setViewport({ x: width > 0 ? width / 2 : 360, y: 20, zoom: 1 })
+  })
 }
 
 /**
@@ -431,8 +466,8 @@ function addNode(nodeData?: AddNodeData) {
     return
   }
   
-  // 计算新节点位置
-  const position = { x: 250 + Math.random() * 100, y: 100 + Math.random() * 100 }
+  const order = coralNodes.value.length
+  const position = { x: 0, y: 0 }
   
   const newNode: Node = {
     id: nodeData.uuid,  // 使用后端分配的 UUID
@@ -447,28 +482,35 @@ function addNode(nodeData?: AddNodeData) {
       isConfigured: false,
       isProgrammed: false,
       ports: nodeData.ports || [],
-      layout: nodeData.layout || null  // 传入完整的 LayoutInfo
+      layout: nodeData.layout || null,  // 传入完整的 LayoutInfo
+      extraInfo: { order }
     }
   }
   
   nodes.value = [...nodes.value, newNode]
+  applyFixedLayout()
   
-  // 保存位置到后端
-  saveNodePosition(nodeData.uuid, position.x, position.y)
+  void saveNodeOrder(currentNodeOrder())
   
   console.log('[Graph] Node added:', newNode.data.nodeName, 'UUID:', nodeData.uuid, 'MCU:', nodeData.version?.productionName || 'Unknown')
 }
 
 /**
- * 保存节点位置到后端
+ * 保存节点顺序到后端
  */
-async function saveNodePosition(uuid: string, x: number, y: number) {
+async function saveNodeOrder(order: string[]) {
   try {
-    await deviceApi.configureNode(uuid, {
-      extraInfo: { x, y }
-    })
+    await Promise.all(order.map((uuid, index) => {
+      const node = nodes.value.find(item => item.id === uuid)
+      const extraInfo = { ...asExtraInfo(node?.data?.extraInfo), order: index }
+      if (node) {
+        node.data = { ...node.data, extraInfo }
+      }
+      return deviceApi.configureNode(uuid, { extraInfo })
+    }))
+    await projectStore.saveProject({ silent: true })
   } catch (error) {
-    console.warn('[Graph] Failed to save node position:', error)
+    console.warn('[Graph] Failed to save node order:', error)
   }
 }
 
@@ -481,12 +523,15 @@ function ensureRootNode() {
     const rootNode: Node = {
       id: 'root',
       type: 'root-node',
-      position: { x: 50, y: 100 },
+      position: { x: 0, y: 0 },
       data: { name: 'PC' },
+      draggable: false,
+      style: { width: `${ROOT_SIZE.width}px`, height: `${ROOT_SIZE.height}px` },
       deletable: false
     }
     nodes.value = [rootNode, ...nodes.value]
   }
+  applyFixedLayout()
 }
 
 /**
@@ -525,49 +570,76 @@ function onNodesChange(changes: NodeChange[]) {
     return true
   })
   
-  if (filteredChanges.length > 0) {
+  const meaningfulChanges = filteredChanges.filter(change => change.type !== 'position')
+  if (meaningfulChanges.length > 0) {
     scheduleAutoSave()
   }
-}
-
-function onEdgesChange(changes: EdgeChange[]) {
-  if (changes.length > 0) {
-    scheduleAutoSave()
-  }
-}
-
-function onConnect(connection: Connection) {
-  // 创建新连接
-  const newEdge: Edge = {
-    id: `edge-${connection.source}-${connection.target}`,
-    source: connection.source!,
-    target: connection.target!,
-    sourceHandle: connection.sourceHandle!,
-    targetHandle: connection.targetHandle!,
-    type: 'smoothstep',
-    style: { stroke: '#4f8cff', strokeWidth: 2 }
-  }
-  
-  edges.value = [...edges.value, newEdge]
-  scheduleAutoSave()
 }
 
 function onNodeDragStop(event: { node: Node }) {
   const node = event.node
   
-  // 只保存 coral-node 的位置
-  if (node.type !== 'coral-node') return
-  
-  // 防抖保存位置
-  const existing = positionSaveTimers.get(node.id)
-  if (existing) {
-    clearTimeout(existing)
+  if (node.type !== 'coral-node') {
+    applyFixedLayout()
+    return
   }
-  
-  positionSaveTimers.set(node.id, setTimeout(() => {
-    positionSaveTimers.delete(node.id)
-    saveNodePosition(node.id, node.position.x, node.position.y)
-  }, 300))
+
+  const order = currentNodeOrder()
+  const sourceIndex = order.indexOf(node.id)
+  if (sourceIndex === -1) {
+    applyFixedLayout()
+    return
+  }
+
+  const targetIndex = targetNodeOrderIndex(node)
+  if (targetIndex !== sourceIndex && targetIndex >= 0) {
+    const nextOrder = [...order]
+    const [moved] = nextOrder.splice(sourceIndex, 1)
+    if (moved) {
+      nextOrder.splice(targetIndex, 0, moved)
+      applyNodeOrderLocally(nextOrder)
+      void saveNodeOrder(nextOrder)
+    }
+  }
+
+  applyFixedLayout()
+}
+
+function targetNodeOrderIndex(node: Node): number {
+  const layout = variableFlowLayout.value
+  const order = currentNodeOrder()
+  const nodeRect = layout.nodeRects[node.id]
+  const draggedCenterX = node.position.x + (nodeRect?.width ?? NODE_SIZE.width) / 2
+
+  let bestIndex = order.indexOf(node.id)
+  let bestDistance = Number.POSITIVE_INFINITY
+  order.forEach((id, index) => {
+    const rect = layout.nodeRects[id]
+    if (!rect) return
+    const centerX = rect.x + rect.width / 2
+    const distance = Math.abs(draggedCenterX - centerX)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      bestIndex = index
+    }
+  })
+  return bestIndex
+}
+
+function applyNodeOrderLocally(order: string[]) {
+  const orderIndex = new Map(order.map((id, index) => [id, index]))
+  nodes.value = nodes.value.map(node => {
+    if (node.type !== 'coral-node') return node
+    const index = orderIndex.get(node.id)
+    if (index == null) return node
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        extraInfo: { ...asExtraInfo(node.data?.extraInfo), order: index }
+      }
+    }
+  })
 }
 
 // ============================================
@@ -589,11 +661,8 @@ function scheduleAutoSave() {
   }, 500)
 }
 
-// 节点位置保存防抖定时器
-let positionSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
-
 /**
- * 保存图数据（节点数据由 DIVERSession 管理，这里只保存位置）
+ * 保存图数据（节点数据由 DIVERSession 管理，这里同步日志标签）
  */
 function saveToStore() {
   if (isLoadingFromStore) return
@@ -641,10 +710,7 @@ async function loadFromStore() {
       return {
         id: n.uuid,
         type: 'coral-node',
-        position: { 
-          x: typeof extraInfo.x === 'number' ? extraInfo.x : 200 + Math.random() * 100, 
-          y: typeof extraInfo.y === 'number' ? extraInfo.y : 100 + Math.random() * 100 
-        },
+        position: { x: 0, y: 0 },
         data: {
           nodeName: n.nodeName || 'Node',
           mcuUri: n.mcuUri || '',
@@ -656,7 +722,8 @@ async function loadFromStore() {
           isConnected: existingState?.isConnected || false,
           isConfigured: existingState?.isConfigured || false,
           isProgrammed: existingState?.isProgrammed || false,
-          layout: n.layout || existingState?.layout || null  // 使用完整的 LayoutInfo
+          layout: n.layout || existingState?.layout || null,  // 使用完整的 LayoutInfo
+          extraInfo
         },
         deletable: true
       }
@@ -668,6 +735,8 @@ async function loadFromStore() {
     // TODO: 连线信息也可以存储在 extraInfo 中
     
     ensureRootNode()
+    applyFixedLayout()
+    centerInitialViewportOnRoot()
     syncLogTabs()
     
     console.log('[Graph] Loaded from DIVERSession:', nodes.value.length, 'nodes')
@@ -695,6 +764,9 @@ async function removeNode(uuid: string) {
       nodes.value = nodes.value.filter(n => n.id !== uuid)
       // 移除相关连线
       edges.value = edges.value.filter(e => e.source !== uuid && e.target !== uuid)
+      applyNodeOrderLocally(currentNodeOrder())
+      applyFixedLayout()
+      void saveNodeOrder(currentNodeOrder())
       syncLogTabs()
       console.log('[Graph] Node removed:', uuid)
       return true
@@ -703,6 +775,50 @@ async function removeNode(uuid: string) {
     console.error('[Graph] Failed to remove node:', error)
   }
   return false
+}
+
+function handleVariableDragStart(event: DragEvent, item: VariableFlowItem) {
+  if (item.direction === 'control') return
+  draggedVariableName.value = item.name
+  event.dataTransfer?.setData('text/plain', item.name)
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+  }
+}
+
+function handleVariableDrop(target: VariableFlowItem) {
+  const sourceName = draggedVariableName.value
+  draggedVariableName.value = null
+  if (!sourceName || target.direction === 'control' || sourceName === target.name) return
+
+  const order = variableFlowLayout.value.variableOrder
+  const sourceIndex = order.indexOf(sourceName)
+  const targetIndex = order.indexOf(target.name)
+  if (sourceIndex === -1 || targetIndex === -1) return
+
+  const nextOrder = [...order]
+  const [moved] = nextOrder.splice(sourceIndex, 1)
+  if (!moved) return
+  nextOrder.splice(targetIndex, 0, moved)
+  void saveVariableFlowOrder(nextOrder)
+}
+
+function handleVariableDragEnd() {
+  draggedVariableName.value = null
+}
+
+async function saveVariableFlowOrder(order: string[]) {
+  if (sameStringArray(projectStore.variableFlowOrder, order)) return
+  try {
+    projectStore.setVariableFlowOrder(order)
+    await projectStore.saveProject({ silent: true })
+  } catch (error) {
+    console.warn('[Graph] Failed to save variable flow order:', error)
+  }
+}
+
+function sameStringArray(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
 }
 
 /**
@@ -787,6 +903,11 @@ watch(nodeStates, (newStates) => {
 
 onMounted(async () => {
   await loadFromStore()
+  await runtimeStore.refreshVariables()
+  await runtimeStore.refreshFieldMetas()
+  await nextTick()
+  applyFixedLayout()
+  startFlowTransformSync()
   
   // 启动节点状态轮询
   startNodeStatePolling()
@@ -797,12 +918,6 @@ onUnmounted(() => {
 
   // 停止节点状态轮询
   stopNodeStatePolling()
-  
-  // 清理位置保存定时器
-  for (const timer of positionSaveTimers.values()) {
-    clearTimeout(timer)
-  }
-  positionSaveTimers.clear()
 })
 
 // 监听运行状态变化，控制轮询和交互
@@ -818,7 +933,18 @@ watch(isRunning, (running) => {
     // 解锁图交互
     setInteractive(true)
   }
+  applyFixedLayout()
 }, { immediate: true })
+
+watch(variableFlowLayout, () => {
+  applyFixedLayout()
+}, { deep: true })
+
+watch(() => variableFlowLayout.value.variableOrder, (order) => {
+  if (flowVariables.value.length > 0 && !sameStringArray(projectStore.variableFlowOrder, order)) {
+    void saveVariableFlowOrder(order)
+  }
+}, { deep: true })
 
 // ============================================
 // 刷新节点
@@ -902,32 +1028,30 @@ defineExpose({
   stroke: currentColor;
   stroke-width: 1.3;
   stroke-linecap: round;
-  stroke-dasharray: 4 6;
   marker-end: url(#var-flow-arrow);
-  opacity: 0.72;
+  opacity: 1;
 }
 
 .flow-line.upper-io {
-  color: #60a5fa;
+  color: #22c55e;
 }
 
 .flow-line.lower-io {
-  color: #34d399;
+  color: #fb923c;
 }
 
 .flow-line.mutual-io {
-  color: #fbbf24;
+  color: #a855f7;
 }
 
 .variable-flow-item {
   position: absolute;
   display: grid;
-  grid-template-columns: 42px 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   grid-template-rows: 16px 16px;
-  column-gap: 6px;
-  width: 210px;
-  min-height: 38px;
-  padding: 4px 7px;
+  column-gap: 5px;
+  box-sizing: border-box;
+  padding: 4px 6px;
   border: 1px solid rgba(148, 163, 184, 0.45);
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.9);
@@ -938,31 +1062,41 @@ defineExpose({
 }
 
 .variable-flow-item.upper-io {
-  border-color: rgba(96, 165, 250, 0.7);
-  background: rgba(30, 64, 175, 0.52);
+  border-color: rgba(34, 197, 94, 0.7);
+  background: rgba(34, 197, 94, 0.28);
 }
 
 .variable-flow-item.lower-io {
-  border-color: rgba(52, 211, 153, 0.7);
-  background: rgba(6, 95, 70, 0.52);
+  border-color: rgba(251, 146, 60, 0.7);
+  background: rgba(251, 146, 60, 0.28);
 }
 
 .variable-flow-item.mutual-io {
-  border-color: rgba(251, 191, 36, 0.7);
-  background: rgba(120, 53, 15, 0.54);
+  border-color: rgba(168, 85, 247, 0.72);
+  background: rgba(168, 85, 247, 0.34);
 }
 
 .variable-flow-item.control-io {
-  width: 154px;
   min-height: 30px;
-  grid-template-columns: 34px 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   grid-template-rows: 13px 13px;
-  border-color: rgba(192, 132, 252, 0.72);
-  background: rgba(88, 28, 135, 0.62);
+  border-color: rgba(56, 189, 248, 0.72);
+  background: rgba(56, 189, 248, 0.28);
   font-size: 10px;
 }
 
+.variable-flow-item.reorderable {
+  cursor: grab;
+}
+
+.variable-flow-item.reorderable:active,
+.variable-flow-item.dragging {
+  cursor: grabbing;
+  opacity: 0.72;
+}
+
 .var-type {
+  grid-column: 1;
   grid-row: 1 / span 2;
   align-self: center;
   justify-self: center;
@@ -981,12 +1115,22 @@ defineExpose({
 }
 
 .var-name {
+  grid-column: 2;
+  grid-row: 1;
   font-weight: 700;
+  align-self: end;
+  justify-self: end;
+  text-align: right;
 }
 
 .var-value {
+  grid-column: 2;
+  grid-row: 2;
   color: #cbd5e1;
   font-family: var(--font-mono);
+  align-self: start;
+  justify-self: end;
+  text-align: right;
 }
 
 /* vue-flow 主题覆盖 */

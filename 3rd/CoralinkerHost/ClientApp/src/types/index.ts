@@ -24,6 +24,8 @@ export interface ProjectState {
   rootLogicName?: string | null
   /** 遥控器布局配置 */
   controlLayout?: ControlLayoutConfig
+  /** Variables Flow 中非 control 变量的显示顺序（按变量名保存） */
+  variableFlowOrder?: string[]
 }
 
 /** 遥控器布局配置 */
@@ -229,6 +231,9 @@ export interface CartFieldMeta {
   isRootCart?: boolean
   controllable: boolean
   direction: 'upper' | 'lower' | 'mutual' | 'control'
+  sourceIds?: string[]
+  readerIds?: string[]
+  writerIds?: string[]
 }
 
 /**
@@ -246,6 +251,9 @@ export interface CartFieldValue {
   isRootCart?: boolean
   controllable: boolean
   direction: 'upper' | 'lower' | 'mutual' | 'control'
+  sourceIds?: string[]
+  readerIds?: string[]
+  writerIds?: string[]
 }
 
 /**
@@ -270,6 +278,9 @@ export interface VariableValue {
   type: string
   typeId: number
   direction: 'upper' | 'lower' | 'mutual' | 'control'
+  sourceIds?: string[]
+  readerIds?: string[]
+  writerIds?: string[]
 }
 
 /**

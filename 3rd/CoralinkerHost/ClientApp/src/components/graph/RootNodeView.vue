@@ -2,14 +2,11 @@
   @file components/graph/RootNodeView.vue
   @description 根节点组件 (PC) - 使用 vue-flow
   
-  简单的根节点，只有一个 out 连接点
+  简单的根节点
 -->
 
 <template>
   <div class="root-node" :class="{ selected }">
-    <!-- Handle 固定在节点右边缘中央 -->
-    <Handle type="source" :position="Position.Right" id="out" class="handle-out" />
-    
     <div class="node-header">
       <span class="node-icon">🖥️</span>
       <span class="node-name">{{ data.name || 'PC' }}</span>
@@ -39,20 +36,16 @@
         <span class="config-label">Status</span>
         <span class="config-value status-text">{{ rootState?.statusText || '/' }}</span>
       </div>
-      <div class="harness-out">
-        <span class="handle-label">out ●</span>
-      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Handle, Position } from '@vue-flow/core'
 import { NSelect } from 'naive-ui'
 import * as rootApi from '@/api/root'
 import type { RootLogicMetadata, RootRuntimeState } from '@/types'
-import { useFilesStore, useRuntimeStore } from '@/stores'
+import { useFilesStore, useProjectStore, useRuntimeStore } from '@/stores'
 import { storeToRefs } from 'pinia'
 
 // Props from vue-flow
@@ -68,6 +61,7 @@ const rootLogics = ref<RootLogicMetadata[]>([])
 const rootState = ref<RootRuntimeState | null>(null)
 const selectedLogic = ref<string | null>(null)
 const runtimeStore = useRuntimeStore()
+const projectStore = useProjectStore()
 const filesStore = useFilesStore()
 const { buildVersion } = storeToRefs(filesStore)
 let rootRefreshId = 0
@@ -111,7 +105,10 @@ async function refreshRootNodeRuntime() {
 
 async function configureRootLogic(value?: string | null) {
   selectedLogic.value = value || '__none__'
-  await rootApi.configureRoot(selectedLogic.value === '__none__' ? null : selectedLogic.value)
+  const logicName = selectedLogic.value === '__none__' ? null : selectedLogic.value
+  await rootApi.configureRoot(logicName)
+  projectStore.setRootLogicName(logicName)
+  await projectStore.saveProject({ silent: true })
   await refreshRootNodeRuntime()
 }
 
@@ -126,6 +123,9 @@ watch(buildVersion, () => {
 
 <style scoped>
 .root-node {
+  height: 100%;
+  width: 100%;
+  box-sizing: border-box;
   background: linear-gradient(180deg, #1e3a5f, #0d1f33);
   border: 2px solid #2563eb;
   border-radius: 8px;
@@ -162,6 +162,7 @@ watch(buildVersion, () => {
 
 .node-content {
   padding: 12px;
+  padding-bottom: 58px;
 }
 
 .config-row {
@@ -200,26 +201,4 @@ watch(buildVersion, () => {
   color: #a5d6ff;
 }
 
-.harness-out {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.handle-label {
-  font-size: 11px;
-  color: #a0aec0;
-}
-
-/* vue-flow Handle 样式 - 固定在节点右边缘中央 */
-:deep(.handle-out) {
-  width: 12px !important;
-  height: 12px !important;
-  background: #3b82f6 !important;
-  border: 2px solid #1e3a5f !important;
-  right: -6px !important;
-  top: 50% !important;
-  transform: translateY(-50%) !important;
-}
 </style>

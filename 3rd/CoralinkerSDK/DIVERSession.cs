@@ -131,7 +131,10 @@ public record CartFieldMeta(
     bool IsControl = false,
     bool IsRootCart = false,
     bool Controllable = false,
-    string? Direction = null
+    string? Direction = null,
+    string[]? SourceIds = null,
+    string[]? ReaderIds = null,
+    string[]? WriterIds = null
 );
 
 /// <summary>Cart字段值</summary>
@@ -146,7 +149,10 @@ public record CartFieldValue(
     bool IsControl = false,
     bool IsRootCart = false,
     bool Controllable = false,
-    string? Direction = null
+    string? Direction = null,
+    string[]? SourceIds = null,
+    string[]? ReaderIds = null,
+    string[]? WriterIds = null
 );
 
 /// <summary>
@@ -237,6 +243,12 @@ internal sealed record DeclaredCartField(
     bool IsControl,
     bool IsRootCart,
     string SourceId
+);
+
+internal sealed record FieldFlowRelation(
+    string[] SourceIds,
+    string[] ReaderIds,
+    string[] WriterIds
 );
 
 /// <summary>节点日志缓冲区</summary>
@@ -1193,11 +1205,13 @@ public sealed class DIVERSession : IDisposable
     public List<CartFieldMeta> GetAllCartFieldMetas()
     {
         var result = new Dictionary<string, CartFieldMeta>(StringComparer.OrdinalIgnoreCase);
+        var relations = BuildFieldFlowRelationMap();
         
         // 添加每个节点的内置 __iteration 字段（LowerIO, int32）
         foreach (var entry in _nodes.Values)
         {
             var iterationName = $"{entry.NodeName}.__iteration";
+            var sourceId = SourceClassNameOf(entry);
             result[iterationName] = new CartFieldMeta(
                 Name: iterationName,
                 Type: "Int32",
@@ -1206,7 +1220,10 @@ public sealed class DIVERSession : IDisposable
                 IsUpperIO: false,
                 IsMutual: false,
                 Controllable: false,
-                Direction: "lower"
+                Direction: "lower",
+                SourceIds: new[] { sourceId },
+                ReaderIds: Array.Empty<string>(),
+                WriterIds: new[] { sourceId }
             );
         }
 
@@ -1214,7 +1231,8 @@ public sealed class DIVERSession : IDisposable
         {
             if (!result.ContainsKey(field.Name))
             {
-                result[field.Name] = BuildCartFieldMeta(field);
+                relations.TryGetValue(field.Name, out var relation);
+                result[field.Name] = BuildCartFieldMeta(field, relation);
             }
         }
         
@@ -1229,12 +1247,14 @@ public sealed class DIVERSession : IDisposable
         var result = new Dictionary<string, CartFieldValue>();
 
         var fieldInfoMap = BuildDeclaredFieldMap();
+        var relations = BuildFieldFlowRelationMap();
 
         // 添加每个节点的内置 __iteration 字段值
         foreach (var entry in _nodes.Values)
         {
             var iteration = HostRuntime.GetIteration(entry.UUID);
             var iterationName = $"{entry.NodeName}.__iteration";
+            var sourceId = SourceClassNameOf(entry);
             result[iterationName] = new CartFieldValue(
                 Name: iterationName,
                 Type: "Int32",
@@ -1244,7 +1264,10 @@ public sealed class DIVERSession : IDisposable
                 IsUpperIO: false,
                 IsMutual: false,
                 Controllable: false,
-                Direction: "lower"
+                Direction: "lower",
+                SourceIds: new[] { sourceId },
+                ReaderIds: Array.Empty<string>(),
+                WriterIds: new[] { sourceId }
             );
         }
 
@@ -1257,6 +1280,7 @@ public sealed class DIVERSession : IDisposable
                 continue;
             }
 
+            relations.TryGetValue(kv.Key, out var relation);
             result[kv.Key] = new CartFieldValue(
                 kv.Key,
                 HostRuntime.GetTypeName(fieldInfo.TypeId),
@@ -1268,7 +1292,10 @@ public sealed class DIVERSession : IDisposable
                 fieldInfo.IsControl,
                 fieldInfo.IsRootCart,
                 IsControllable(fieldInfo),
-                DirectionOf(fieldInfo)
+                DirectionOf(fieldInfo),
+                relation?.SourceIds ?? Array.Empty<string>(),
+                relation?.ReaderIds ?? Array.Empty<string>(),
+                relation?.WriterIds ?? Array.Empty<string>()
             );
         }
 
@@ -1392,7 +1419,7 @@ public sealed class DIVERSession : IDisposable
                     field.IsMutual,
                     IsControl: false,
                     IsRootCart: false,
-                    SourceId: entry.UUID));
+                    SourceId: SourceClassNameOf(entry)));
             }
         }
 
@@ -1408,7 +1435,7 @@ public sealed class DIVERSession : IDisposable
                     field.IsMutual,
                     field.IsControl,
                     field.IsRootCart,
-                    entry.SourceId),
+                    SourceClassNameOf(entry)),
                     overwrite: true);
             }
 
@@ -1422,7 +1449,7 @@ public sealed class DIVERSession : IDisposable
                     IsMutual: false,
                     IsControl: true,
                     IsRootCart: false,
-                    entry.SourceId),
+                    SourceClassNameOf(entry)),
                     overwrite: true);
             }
         }
@@ -1449,7 +1476,101 @@ public sealed class DIVERSession : IDisposable
         fields[next.Name] = next;
     }
 
-    private static CartFieldMeta BuildCartFieldMeta(DeclaredCartField field)
+    private Dictionary<string, FieldFlowRelation> BuildFieldFlowRelationMap()
+    {
+        var builders = new Dictionary<string, FieldFlowRelationBuilder>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in _nodes.Values)
+        {
+            var sourceId = SourceClassNameOf(entry);
+            foreach (var field in entry.CartFields)
+            {
+                AddFlowRelation(builders, field.Name, sourceId, field.IsLowerIO, field.IsUpperIO, field.IsMutual, isRootCart: false, isControl: false);
+            }
+        }
+
+        foreach (var entry in _virtualNodes.Values)
+        {
+            var sourceId = SourceClassNameOf(entry);
+            foreach (var field in entry.CartFields)
+            {
+                AddFlowRelation(builders, field.Name, sourceId, field.IsLowerIO, field.IsUpperIO, field.IsMutual, field.IsRootCart, field.IsControl);
+            }
+
+            foreach (var field in entry.ControlFields)
+            {
+                AddFlowRelation(builders, field.Name, sourceId, isLowerIO: false, isUpperIO: false, isMutual: false, isRootCart: false, isControl: true);
+            }
+        }
+
+        return builders.ToDictionary(kv => kv.Key, kv => kv.Value.Build(), StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void AddFlowRelation(
+        Dictionary<string, FieldFlowRelationBuilder> builders,
+        string fieldName,
+        string sourceId,
+        bool isLowerIO,
+        bool isUpperIO,
+        bool isMutual,
+        bool isRootCart,
+        bool isControl)
+    {
+        if (!builders.TryGetValue(fieldName, out var builder))
+        {
+            builder = new FieldFlowRelationBuilder();
+            builders[fieldName] = builder;
+        }
+
+        builder.SourceIds.Add(sourceId);
+        if (isControl) return;
+
+        if (isMutual)
+        {
+            builder.ReaderIds.Add(sourceId);
+            builder.WriterIds.Add(sourceId);
+            return;
+        }
+
+        if (isRootCart)
+        {
+            if (isUpperIO) builder.WriterIds.Add(sourceId);
+            if (isLowerIO) builder.ReaderIds.Add(sourceId);
+            return;
+        }
+
+        if (isUpperIO) builder.ReaderIds.Add(sourceId);
+        if (isLowerIO) builder.WriterIds.Add(sourceId);
+    }
+
+    private static string SourceClassNameOf(NodeEntry entry)
+    {
+        return !string.IsNullOrWhiteSpace(entry.LogicName) ? entry.LogicName! : entry.NodeName;
+    }
+
+    private static string SourceClassNameOf(VirtualNodeEntry entry)
+    {
+        if (!string.IsNullOrWhiteSpace(entry.DisplayName) && entry.DisplayName.StartsWith("Root:", StringComparison.Ordinal))
+        {
+            return entry.DisplayName["Root:".Length..];
+        }
+
+        return !string.IsNullOrWhiteSpace(entry.DisplayName) ? entry.DisplayName : entry.SourceId;
+    }
+
+    private sealed class FieldFlowRelationBuilder
+    {
+        public SortedSet<string> SourceIds { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public SortedSet<string> ReaderIds { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public SortedSet<string> WriterIds { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public FieldFlowRelation Build()
+        {
+            return new FieldFlowRelation(SourceIds.ToArray(), ReaderIds.ToArray(), WriterIds.ToArray());
+        }
+    }
+
+    private static CartFieldMeta BuildCartFieldMeta(DeclaredCartField field, FieldFlowRelation? relation)
     {
         return new CartFieldMeta(
             field.Name,
@@ -1461,7 +1582,10 @@ public sealed class DIVERSession : IDisposable
             field.IsControl,
             field.IsRootCart,
             IsControllable(field),
-            DirectionOf(field));
+            DirectionOf(field),
+            relation?.SourceIds ?? Array.Empty<string>(),
+            relation?.ReaderIds ?? Array.Empty<string>(),
+            relation?.WriterIds ?? Array.Empty<string>());
     }
 
     private static bool IsControllable(DeclaredCartField field)

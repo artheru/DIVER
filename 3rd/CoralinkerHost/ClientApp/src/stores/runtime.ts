@@ -349,7 +349,10 @@ export const useRuntimeStore = defineStore('runtime', () => {
             value: v.value,
             type: v.type,
             typeId: v.typeId,
-            direction: v.direction
+            direction: v.direction,
+            sourceIds: v.sourceIds ?? [],
+            readerIds: v.readerIds ?? [],
+            writerIds: v.writerIds ?? []
           })
           variableControllable.value.set(v.name, v.controllable)
         }
@@ -403,7 +406,17 @@ export const useRuntimeStore = defineStore('runtime', () => {
   function updateVariables(snapshot: unknown) {
     const data = snapshot as {
       targetType?: string
-      fields?: Array<{ name: string; type: string; typeId: number; value: unknown; direction: VariableValue['direction']; controllable: boolean }>
+      fields?: Array<{
+        name: string
+        type: string
+        typeId: number
+        value: unknown
+        direction: VariableValue['direction']
+        controllable: boolean
+        sourceIds?: string[]
+        readerIds?: string[]
+        writerIds?: string[]
+      }>
     }
     
     if (!data || !Array.isArray(data.fields)) {
@@ -429,13 +442,19 @@ export const useRuntimeStore = defineStore('runtime', () => {
         existing.type = type || existing.type
         existing.typeId = typeId
         existing.direction = direction ?? existing.direction
+        existing.sourceIds = field.sourceIds ?? existing.sourceIds
+        existing.readerIds = field.readerIds ?? existing.readerIds
+        existing.writerIds = field.writerIds ?? existing.writerIds
       } else {
         variables.value.set(name, {
           name,
           value: field.value,
           type,
           typeId,
-          direction
+          direction,
+          sourceIds: field.sourceIds ?? [],
+          readerIds: field.readerIds ?? [],
+          writerIds: field.writerIds ?? []
         })
       }
       variableControllable.value.set(name, field.controllable)

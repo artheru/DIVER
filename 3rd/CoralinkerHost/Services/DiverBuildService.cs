@@ -78,7 +78,7 @@ public sealed class DiverBuildService
                     await _terminal.BuildLineAsync($"Clean completed successfully", ct);
                     break;
                 }
-                catch (Exception ex) when (attempt < 3)
+                catch (Exception) when (attempt < 3)
                 {
                     await _terminal.BuildLineAsync($"Clean attempt {attempt} failed (file may be locked by antivirus), retrying in 2s...", ct);
                     await Task.Delay(2000, ct);
@@ -181,12 +181,8 @@ public sealed class DiverBuildService
         csproj = csproj.Replace("__WEAVER_FILE__", weaverFileName, StringComparison.Ordinal);
         await File.WriteAllTextAsync(Path.Combine(projDir, "LogicBuild.csproj"), csproj, Encoding.UTF8, ct);
 
-        var offlineNuGetPackagesDir = Path.Combine(compilerDir, "nuget-packages");
-        if (!Directory.Exists(offlineNuGetPackagesDir))
-        {
-            throw new DirectoryNotFoundException(
-                $"Missing offline NuGet packages directory: {offlineNuGetPackagesDir}. Re-publish Host so res/compiler/nuget-packages is included.");
-        }
+        var offlineNuGetPackagesDir = ResolveNuGetPackagesDir(compilerDir);
+        await _terminal.BuildLineAsync($"NuGet package source: {offlineNuGetPackagesDir}", ct);
 
         var nugetConfigPath = Path.Combine(projDir, "NuGet.Config");
         var nugetConfig = $$"""
@@ -413,6 +409,40 @@ public sealed class DiverBuildService
         var published = Path.Combine(compilerDir, publishedName);
         if (File.Exists(published)) return published;
         return Path.Combine(compilerDir, developmentRelative);
+    }
+
+    private string ResolveNuGetPackagesDir(string compilerDir)
+    {
+        var packaged = Path.Combine(compilerDir, "nuget-packages");
+        if (Directory.Exists(packaged)) return packaged;
+
+        if (_paths.RunLayout == HostRunLayout.Published)
+        {
+            throw new DirectoryNotFoundException(
+                $"Missing offline NuGet packages directory: {packaged}. Re-publish Host so res/compiler/nuget-packages is included.");
+        }
+
+        var candidates = new List<string>();
+
+        var fromEnv = Environment.GetEnvironmentVariable("CORALINKER_NUGET_PACKAGES_DIR");
+        if (!string.IsNullOrWhiteSpace(fromEnv)) candidates.Add(fromEnv);
+
+        var nugetPackages = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
+        if (!string.IsNullOrWhiteSpace(nugetPackages)) candidates.Add(nugetPackages);
+
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrWhiteSpace(userProfile))
+        {
+            candidates.Add(Path.Combine(userProfile, ".nuget", "packages"));
+        }
+
+        foreach (var candidate in candidates.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (Directory.Exists(candidate)) return candidate;
+        }
+
+        throw new DirectoryNotFoundException(
+            $"Missing NuGet package source for development build. Expected packaged source at {packaged}, or set CORALINKER_NUGET_PACKAGES_DIR / NUGET_PACKAGES to an existing NuGet packages directory.");
     }
 
     private static string ResolveWeaverPath(string compilerDir)

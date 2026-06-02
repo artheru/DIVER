@@ -4,7 +4,6 @@
   
   布局结构：
   - 标题栏：折叠按钮 + 节点名 + 状态指示器
-  - Harness: in/out 连接点
   - Base Config: URI + Logic
   - Port Config: 端口配置列表
   - LowerIO: 只读变量显示
@@ -19,20 +18,6 @@
       selected: selected
     }"
   >
-    <!-- Handle 连接点 - 始终存在，位置固定在节点边缘 -->
-    <Handle 
-      type="target" 
-      :position="Position.Left" 
-      id="in" 
-      class="node-handle handle-in handle-visible"
-    />
-    <Handle 
-      type="source" 
-      :position="Position.Right" 
-      id="out" 
-      class="node-handle handle-out handle-visible"
-    />
-
     <!-- 删除按钮 - 左上角 -->
     <button
       v-if="canEdit"
@@ -165,7 +150,6 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { Handle, Position } from '@vue-flow/core'
 import { NSelect, useDialog } from 'naive-ui'
 import { useRuntimeStore, useFilesStore, useProjectStore } from '@/stores'
 import { storeToRefs } from 'pinia'
@@ -601,6 +585,8 @@ watch(buildVersion, () => {
 <style scoped>
 .coral-node {
   position: relative;
+  width: 100%;
+  box-sizing: border-box;
   background: linear-gradient(180deg, #1e293b, #0f172a);
   border: 2px solid #334155;
   border-radius: 8px;
@@ -771,62 +757,6 @@ watch(buildVersion, () => {
 /* 内容区 */
 .node-content {
   padding: 8px 0;
-}
-
-/* Harness 区域 */
-.harness-section {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.2);
-  margin: 0 8px 8px 8px;
-  border-radius: 4px;
-}
-
-.harness-in, .harness-out {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.handle-label {
-  font-size: 11px;
-  color: #a0aec0;
-}
-
-/* vue-flow Handle 样式 - 固定位置在节点边缘 */
-.node-handle {
-  width: 12px !important;
-  height: 12px !important;
-  background: transparent !important;
-  border: 2px solid transparent !important;
-  transition: background 0.2s, border-color 0.2s;
-}
-
-/* 收缩状态时显示 Handle */
-.node-handle.handle-visible {
-  background: #4f8cff !important;
-  border-color: #1e293b !important;
-}
-
-:deep(.handle-in) {
-  left: -6px !important;
-  top: 50% !important;
-  transform: translateY(-50%) !important;
-}
-
-:deep(.handle-out) {
-  right: -6px !important;
-  top: 50% !important;
-  transform: translateY(-50%) !important;
-}
-
-/* 连接时高亮 */
-:deep(.vue-flow__handle.connecting),
-:deep(.vue-flow__handle.valid) {
-  background: #22c55e !important;
-  border-color: #1e293b !important;
 }
 
 /* Section 通用样式 */

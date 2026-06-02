@@ -54,6 +54,9 @@ export const useProjectStore = defineStore('project', () => {
     isLocked: false,
     widgets: []
   })
+
+  /** Variables Flow 中非 control 变量的显示顺序 */
+  const variableFlowOrder = ref<string[]>([])
   
   // ============================================
   // 计算属性
@@ -87,6 +90,8 @@ export const useProjectStore = defineStore('project', () => {
       if (state.controlLayout) {
         controlLayout.value = state.controlLayout
       }
+
+      variableFlowOrder.value = Array.isArray(state.variableFlowOrder) ? state.variableFlowOrder : []
       
       dirty.value = false
       syncState.value = 'synced'
@@ -115,7 +120,8 @@ export const useProjectStore = defineStore('project', () => {
         selectedFile: selectedFile.value,
         lastBuildId: lastBuildId.value,
         rootLogicName: rootLogicName.value,
-        controlLayout: controlLayout.value
+        controlLayout: controlLayout.value,
+        variableFlowOrder: variableFlowOrder.value
       }
       
       // 更新项目状态
@@ -152,6 +158,14 @@ export const useProjectStore = defineStore('project', () => {
     selectedFile.value = file
     dirty.value = true
   }
+
+  /**
+   * 设置当前 Root 逻辑
+   */
+  function setRootLogicName(logicName: string | null) {
+    rootLogicName.value = logicName
+    dirty.value = true
+  }
   
   /**
    * 更新遥控器布局配置
@@ -166,6 +180,14 @@ export const useProjectStore = defineStore('project', () => {
    */
   function setControlWidgets(widgets: ControlWidget[]) {
     controlLayout.value.widgets = widgets
+    dirty.value = true
+  }
+
+  /**
+   * 设置 Variables Flow 中非 control 变量的显示顺序
+   */
+  function setVariableFlowOrder(order: string[]) {
+    variableFlowOrder.value = [...order]
     dirty.value = true
   }
   
@@ -191,6 +213,7 @@ export const useProjectStore = defineStore('project', () => {
         isLocked: false,
         widgets: []
       }
+      variableFlowOrder.value = []
       
       dirty.value = false
       syncState.value = 'synced'
@@ -279,6 +302,7 @@ export const useProjectStore = defineStore('project', () => {
     syncState,
     lastBuildResult,
     controlLayout,
+    variableFlowOrder,
     
     // 计算属性
     hasSelectedAsset,
@@ -289,8 +313,10 @@ export const useProjectStore = defineStore('project', () => {
     saveProject,
     setSelectedAsset,
     setSelectedFile,
+    setRootLogicName,
     updateControlLayout,
     setControlWidgets,
+    setVariableFlowOrder,
     createNew,
     exportZip,
     build,

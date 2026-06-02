@@ -321,6 +321,27 @@
       </n-card>
     </n-modal>
 
+    <n-modal v-model:show="showBuildErrorDialog">
+      <n-card
+        title="Build Failed"
+        style="width: 640px"
+        :bordered="false"
+        closable
+        @close="showBuildErrorDialog = false"
+      >
+        <div class="build-error-dialog">
+          <p>The build request failed. Details:</p>
+          <pre>{{ buildErrorMessage }}</pre>
+        </div>
+        <template #footer>
+          <div class="dialog-footer">
+            <n-button @click="showBuildErrorDialog = false">Close</n-button>
+            <n-button type="primary" @click="openBuildLogFromError">Open Build Log</n-button>
+          </div>
+        </template>
+      </n-card>
+    </n-modal>
+
     <HistoryPanel
       :show="showHistoryPanel"
       :current-path="activeTab?.path"
@@ -393,6 +414,8 @@ const showAboutDialog = ref(false)
 const aboutLoading = ref(false)
 const aboutError = ref<string | null>(null)
 const aboutInfo = ref<HostAboutSnapshot | null>(null)
+const showBuildErrorDialog = ref(false)
+const buildErrorMessage = ref('')
 
 // 运行控制状态
 const isBuilding = ref(false)
@@ -941,13 +964,25 @@ async function handleBuild() {
       await runtimeStore.refreshFieldMetas()
       filesStore.notifyBuildComplete()
     } else {
-      uiStore.error('Build Failed', result.error || 'Unknown error')
+      showBuildError(result.error || 'Unknown error')
     }
   } catch (error) {
-    uiStore.error('Build Failed', String(error))
+    showBuildError(error instanceof Error ? error.message : String(error))
   } finally {
     isBuilding.value = false
   }
+}
+
+function showBuildError(message: string) {
+  buildErrorMessage.value = message || 'Unknown error'
+  showBuildErrorDialog.value = true
+  uiStore.error('Build Failed', buildErrorMessage.value)
+  logStore.logBuild(`[Build Failed] ${buildErrorMessage.value}`)
+}
+
+function openBuildLogFromError() {
+  logStore.switchTab('build')
+  showBuildErrorDialog.value = false
 }
 
 /**
@@ -1071,6 +1106,32 @@ async function handleStop() {
   gap: 8px;
   margin-top: 12px;
   color: var(--text-muted);
+  font-size: 12px;
+}
+
+.build-error-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.build-error-dialog p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.build-error-dialog pre {
+  max-height: 260px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 8px;
+  background: rgba(127, 29, 29, 0.18);
+  color: #fecaca;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
