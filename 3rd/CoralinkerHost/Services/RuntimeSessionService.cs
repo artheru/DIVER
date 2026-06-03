@@ -127,6 +127,18 @@ public sealed class RuntimeSessionService
     }
 
     /// <summary>
+    /// 添加独立进程隔离的模拟节点。
+    /// </summary>
+    public async Task<string> AddSimulatedNodeAsync(string? name, CancellationToken ct)
+    {
+        await _terminal.LineAsync("[session] Adding simulated node...", ct);
+        var uuid = _session.AddSimulatedNode(name);
+        var info = _session.GetNodeInfo(uuid);
+        await _terminal.LineAsync($"[session] ✓ Added simulated node {info?.NodeName ?? uuid}", ct);
+        return uuid;
+    }
+
+    /// <summary>
     /// 删除节点
     /// </summary>
     public async Task<bool> RemoveNodeAsync(string uuid, CancellationToken ct)

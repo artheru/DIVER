@@ -204,7 +204,7 @@ internal class NodeEntry : IDisposable
     public CartFieldInfo[] CartFields { get; set; } = Array.Empty<CartFieldInfo>();
 
     // === 运行时状态（Start后才有）===
-    public MCUNode? Handle { get; set; }
+    public IRuntimeNode? Handle { get; set; }
     public MCUState? State { get; set; }
     public RuntimeStats? Stats { get; set; }
     public bool HasFatalError { get; set; }
@@ -453,6 +453,14 @@ public sealed class DIVERSession : IDisposable
     /// <returns>基本信息或 null</returns>
     public NodeProbeResult? ProbeNode(string mcuUri)
     {
+        if (IsSimulatedUri(mcuUri))
+        {
+            return new NodeProbeResult(
+                SimulatedMcuNode.CreateVersionInfo(),
+                SimulatedMcuNode.CreateLayoutInfo()
+            );
+        }
+
         MCUSerialBridge? bridge = null;
         try
         {
@@ -557,6 +565,32 @@ public sealed class DIVERSession : IDisposable
     }
 
     /// <summary>
+    /// 添加模拟节点。每个模拟节点运行在独立子进程中，用于无硬件调试和演示。
+    /// </summary>
+    public string AddSimulatedNode(string? name = null)
+    {
+        EnsureIdle("AddSimulatedNode");
+
+        var uuid = Guid.NewGuid().ToString();
+        var displayName = string.IsNullOrWhiteSpace(name)
+            ? $"SimNode-{uuid[..8]}"
+            : name.Trim();
+        var entry = new NodeEntry
+        {
+            UUID = uuid,
+            McuUri = $"sim://{uuid}",
+            NodeName = displayName,
+            Version = SimulatedMcuNode.CreateVersionInfo(),
+            Layout = SimulatedMcuNode.CreateLayoutInfo(),
+            PortConfigs = SimulatedMcuNode.CreateDefaultPortConfigs()
+        };
+
+        _nodes[uuid] = entry;
+        Console.WriteLine($"[DIVERSession] Added simulated node: {uuid} ({displayName})");
+        return uuid;
+    }
+
+    /// <summary>
     /// 删除节点
     /// </summary>
     public bool RemoveNode(string uuid)
@@ -566,6 +600,7 @@ public sealed class DIVERSession : IDisposable
         if (_nodes.TryRemove(uuid, out var entry))
         {
             entry.Dispose();
+            PruneUndeclaredVariables();
             _wireTapConfigs.TryRemove(uuid, out _);  // 清理 WireTap 配置
             Console.WriteLine($"[DIVERSession] Removed node {entry.NodeName}");
             return true;
@@ -827,6 +862,7 @@ public sealed class DIVERSession : IDisposable
         // 解析 MetaJson
         entry.CartFields = HostRuntime.ParseMetaJson(metaJson);
         InitializeVariables(entry.CartFields);
+        PruneUndeclaredVariables();
 
         Console.WriteLine(
             $"[DIVERSession] Programmed node {entry.NodeName}: {programBytes.Length} bytes, {entry.CartFields.Length} fields, logic={logicName ?? "(none)"}"
@@ -1090,8 +1126,7 @@ public sealed class DIVERSession : IDisposable
     {
         try
         {
-            // 创建 MCUNode
-            var handle = new MCUNode(entry.UUID, entry.McuUri);
+            var handle = CreateRuntimeNode(entry);
             handle.ProgramBytes = entry.ProgramBytes;
             handle.PortConfigs = entry.PortConfigs;
             handle.CartFields = entry.CartFields;
@@ -1151,6 +1186,18 @@ public sealed class DIVERSession : IDisposable
         }
     }
 
+    private static IRuntimeNode CreateRuntimeNode(NodeEntry entry)
+    {
+        return IsSimulatedUri(entry.McuUri)
+            ? new SimulatedMcuNode(entry.UUID, entry.McuUri)
+            : new MCUNode(entry.UUID, entry.McuUri);
+    }
+
+    private static bool IsSimulatedUri(string mcuUri)
+    {
+        return mcuUri.StartsWith("sim://", StringComparison.OrdinalIgnoreCase);
+    }
+
     #endregion
 
     #region 数据管理接口
@@ -1195,6 +1242,7 @@ public sealed class DIVERSession : IDisposable
                 _variables.TryRemove(field.Name, out _);
             }
         }
+        PruneUndeclaredVariables();
 
         Console.WriteLine($"[DIVERSession] Unregistered virtual node {removed.DisplayName}");
     }
@@ -1211,7 +1259,7 @@ public sealed class DIVERSession : IDisposable
         foreach (var entry in _nodes.Values)
         {
             var iterationName = $"{entry.NodeName}.__iteration";
-            var sourceId = SourceClassNameOf(entry);
+            var sourceId = SourceIdOf(entry);
             result[iterationName] = new CartFieldMeta(
                 Name: iterationName,
                 Type: "Int32",
@@ -1254,7 +1302,7 @@ public sealed class DIVERSession : IDisposable
         {
             var iteration = HostRuntime.GetIteration(entry.UUID);
             var iterationName = $"{entry.NodeName}.__iteration";
-            var sourceId = SourceClassNameOf(entry);
+            var sourceId = SourceIdOf(entry);
             result[iterationName] = new CartFieldValue(
                 Name: iterationName,
                 Type: "Int32",
@@ -1397,6 +1445,18 @@ public sealed class DIVERSession : IDisposable
         }
     }
 
+    private void PruneUndeclaredVariables()
+    {
+        var declared = BuildDeclaredFieldMap();
+        foreach (var name in _variables.Keys.ToArray())
+        {
+            if (!declared.ContainsKey(name))
+            {
+                _variables.TryRemove(name, out _);
+            }
+        }
+    }
+
     private DeclaredCartField? ResolveDeclaredField(string fieldName)
     {
         var fields = BuildDeclaredFieldMap();
@@ -1419,7 +1479,7 @@ public sealed class DIVERSession : IDisposable
                     field.IsMutual,
                     IsControl: false,
                     IsRootCart: false,
-                    SourceId: SourceClassNameOf(entry)));
+                    SourceId: SourceIdOf(entry)));
             }
         }
 
@@ -1435,7 +1495,7 @@ public sealed class DIVERSession : IDisposable
                     field.IsMutual,
                     field.IsControl,
                     field.IsRootCart,
-                    SourceClassNameOf(entry)),
+                    SourceIdOf(entry)),
                     overwrite: true);
             }
 
@@ -1449,7 +1509,7 @@ public sealed class DIVERSession : IDisposable
                     IsMutual: false,
                     IsControl: true,
                     IsRootCart: false,
-                    SourceClassNameOf(entry)),
+                    SourceIdOf(entry)),
                     overwrite: true);
             }
         }
@@ -1482,7 +1542,7 @@ public sealed class DIVERSession : IDisposable
 
         foreach (var entry in _nodes.Values)
         {
-            var sourceId = SourceClassNameOf(entry);
+            var sourceId = SourceIdOf(entry);
             foreach (var field in entry.CartFields)
             {
                 AddFlowRelation(builders, field.Name, sourceId, field.IsLowerIO, field.IsUpperIO, field.IsMutual, isRootCart: false, isControl: false);
@@ -1491,7 +1551,7 @@ public sealed class DIVERSession : IDisposable
 
         foreach (var entry in _virtualNodes.Values)
         {
-            var sourceId = SourceClassNameOf(entry);
+            var sourceId = SourceIdOf(entry);
             foreach (var field in entry.CartFields)
             {
                 AddFlowRelation(builders, field.Name, sourceId, field.IsLowerIO, field.IsUpperIO, field.IsMutual, field.IsRootCart, field.IsControl);
@@ -1543,19 +1603,14 @@ public sealed class DIVERSession : IDisposable
         if (isLowerIO) builder.WriterIds.Add(sourceId);
     }
 
-    private static string SourceClassNameOf(NodeEntry entry)
+    private static string SourceIdOf(NodeEntry entry)
     {
-        return !string.IsNullOrWhiteSpace(entry.LogicName) ? entry.LogicName! : entry.NodeName;
+        return entry.UUID;
     }
 
-    private static string SourceClassNameOf(VirtualNodeEntry entry)
+    private static string SourceIdOf(VirtualNodeEntry entry)
     {
-        if (!string.IsNullOrWhiteSpace(entry.DisplayName) && entry.DisplayName.StartsWith("Root:", StringComparison.Ordinal))
-        {
-            return entry.DisplayName["Root:".Length..];
-        }
-
-        return !string.IsNullOrWhiteSpace(entry.DisplayName) ? entry.DisplayName : entry.SourceId;
+        return entry.SourceId;
     }
 
     private sealed class FieldFlowRelationBuilder
@@ -1927,7 +1982,7 @@ public sealed class DIVERSession : IDisposable
     /// <summary>
     /// 应用预配置的 WireTap 设置到 MCU
     /// </summary>
-    private void ApplyWireTapConfig(string uuid, MCUNode handle)
+    private void ApplyWireTapConfig(string uuid, IRuntimeNode handle)
     {
         if (!_wireTapConfigs.TryGetValue(uuid, out var config))
             return;
@@ -1981,7 +2036,7 @@ public sealed class DIVERSession : IDisposable
     /// <summary>
     /// 注册 WireTap 端口数据回调
     /// </summary>
-    private void RegisterWireTapCallbacks(NodeEntry entry, MCUNode handle)
+    private void RegisterWireTapCallbacks(NodeEntry entry, IRuntimeNode handle)
     {
         // 获取端口布局信息
         var validPorts = handle.Layout?.GetValidPorts() ?? Array.Empty<PortDescriptor>();
@@ -2394,6 +2449,12 @@ public sealed class DIVERSession : IDisposable
                     _ => "idle",
                 };
             }
+        }
+
+        if (entry.Handle?.IsConnected == true && entry.Handle.IsRunning)
+        {
+            entry.Handle.RefreshStats();
+            entry.Stats = entry.Handle.Stats;
         }
 
         RuntimeStatsSnapshot? statsSnapshot = null;

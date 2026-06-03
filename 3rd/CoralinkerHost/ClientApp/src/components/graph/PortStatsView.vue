@@ -25,8 +25,8 @@
           <span class="port-type" :class="port.type?.toLowerCase()">{{ port.type }}</span>
           <span class="port-name">{{ port.name || `Port${idx}` }}</span>
           <span class="port-baud">{{ port.baud }}</span>
-          <span class="port-stat tx">TX {{ port.txFrames ?? 0 }}</span>
-          <span class="port-stat rx">RX {{ port.rxFrames ?? 0 }}</span>
+          <span class="port-stat tx">TX {{ port.txFrames ?? 0 }}/{{ formatBytes(port.txBytes) }}</span>
+          <span class="port-stat rx">RX {{ port.rxFrames ?? 0 }}/{{ formatBytes(port.rxBytes) }}</span>
         </div>
       </div>
       <div v-else class="no-data">No statistics available</div>
@@ -99,6 +99,8 @@ interface MergedPort {
   baud: number
   txFrames: number
   rxFrames: number
+  txBytes: number
+  rxBytes: number
 }
 
 const mergedPorts = computed((): MergedPort[] => {
@@ -111,7 +113,9 @@ const mergedPorts = computed((): MergedPort[] => {
       name: config?.name || `Port${idx}`,
       baud: config?.baud || 0,
       txFrames: stat.txFrames,
-      rxFrames: stat.rxFrames
+      rxFrames: stat.rxFrames,
+      txBytes: stat.txBytes,
+      rxBytes: stat.rxBytes
     }
   })
 })
@@ -138,6 +142,10 @@ function formatUptime(ms: number): string {
   if (minutes < 60) return `${minutes}m ${seconds % 60}s`
   const hours = Math.floor(minutes / 60)
   return `${hours}h ${minutes % 60}m`
+}
+
+function formatBytes(bytes: number): string {
+  return `${bytes ?? 0}B`
 }
 </script>
 

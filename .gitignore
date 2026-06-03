@@ -386,6 +386,8 @@ tmp_ref/
 /DiverTest/native/code.json
 /DiverTest/native/code.lib
 /3rd/CoralinkerHost/data
+/3rd/CoralinkerSimNodeHost/build/
+/MCURuntime/build/
 
 
 /3rd/CoralinkerHost/wwwroot/

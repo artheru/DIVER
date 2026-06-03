@@ -16,11 +16,14 @@
 #endif
 
 // allow unsafe strings...
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #ifdef _MSC_VER
 #define _CRT_SECURE_NO_WARNINGS
 #define _CRT_NONSTDC_NO_DEPRECATE
 
-#include <windows.h>
 #include <dbghelp.h>
 #include <malloc.h>
 
@@ -89,7 +92,6 @@ static void parse_native_chunk(uchar* chunk_ptr, int chunk_size);
 
 // release mode functions.
 
-VAL_OUT(ptr);
 #define DBG(...) ;
 #define DBG(...) ;
 #define WARN(...) ;
@@ -1037,14 +1039,14 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
 	ladderlogic_this_refid = 0;
 	release_native_metadata();
 	uchar* ptr = mem0 = vm_memory;
-	auto interval = ReadInt;
+	int interval = ReadInt;
 	entry_method_id = ReadInt;
 	init_method_id = ReadInt;
-	auto program_desc_sz = ReadInt;
-	auto code_chunk_sz = ReadInt;
-	auto virt_chunk_sz = ReadInt;
-	auto static_desc_sz = ReadInt;
-	auto native_chunk_sz = ReadInt;
+	int program_desc_sz = ReadInt;
+	int code_chunk_sz = ReadInt;
+	int virt_chunk_sz = ReadInt;
+	int static_desc_sz = ReadInt;
+	int native_chunk_sz = ReadInt;
 	ladderlogic_this_clsid = ReadInt;
 
 	program_desc_ptr = ptr;
@@ -1063,7 +1065,7 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
 
 
 	DBG("interval=%d, nstatics=%d, this_clsid=%d\n", interval, statics_amount, ladderlogic_this_clsid);
-	heap_obj[0] = (struct heap_obj_slot){ .pointer = -1, .new_id = -0xF };
+	heap_obj[0] = (struct heap_obj_slot){ .pointer = (uchar*)-1, .new_id = -0xF };
 	ladderlogic_this_refid = newobj(ladderlogic_this_clsid);
 
 	// parse statics desc to get stack0 ptr.
@@ -4756,11 +4758,7 @@ void builtin_Int32_ToString(uchar** reptr) {
 	else value = *(int*)(*reptr + 1);
 
 	char str[16];
-#ifndef IS_MCU
-	itoa(value, str, 10);
-#else
 	snprintf(str, sizeof(str), "%d", value);
-#endif
 	int result_str_id = newstr(strlen(str), (uchar*)str);
 	PUSH_STACK_REFERENCEID(result_str_id);
 }
@@ -4779,11 +4777,7 @@ void builtin_Int16_ToString(uchar** reptr) {
 	else value = *(short*)(*reptr + 1);
 
 	char str[8];
-#ifndef IS_MCU
-	itoa(value, str, 10);
-#else
 	snprintf(str, sizeof(str), "%d", value);
-#endif
 	int result_str_id = newstr(strlen(str), (uchar*)str);
 	PUSH_STACK_REFERENCEID(result_str_id);
 }
@@ -6573,43 +6567,34 @@ void setup_builtin_methods() {
 ///                     
 /// ##########################################################################################
 ///
-///	WINDOWS DEBUG:
+///	PC HOST / WINDOWS DEBUG:
 ///
 ///
-#ifdef _DEBUG
+#if defined(_DEBUG) && !defined(IS_MCU) && !defined(SIM_NODE_HOST)
 
+#ifdef _WIN32
+#define MCU_DEBUG_EXPORT __declspec(dllexport)
+#else
+#define MCU_DEBUG_EXPORT
+#endif
 
 void write_snapshot(uchar* buffer, int size)
 {
 	printf("write snapshot...\n");
-	// int width = 128;
-	// int height = 64;
-	// for (int y = 0; y < 64; ++y)
-	// {
-	// 	for (int x = 0; x < 128; ++x)
-	// 	{
-	// 		char bit = (buffer[(y / 8) * width + x] & (1 << (y % 8))) != 0;
-	// 		if (bit) printf("\u2588");
-	// 		else printf(" ");
-	// 	}
-	// 	printf("\n");
-	// }
 } // size is equal to "vm_put_snapshot_buffer"
 
-#ifndef IS_MCU
-// Dummy functions on PC
 void write_stream(int streamID, uchar* buffer, int size) {} // called to write bytes into serial.
 void write_event(int portID, int eventID, uchar* buffer, int size) {} // called to write bytes into CAN/modbus similar ports.
 
-
 typedef void(*NotifyErr)(int il_offset, unsigned char* error_msg, int length, int line_no);
 NotifyErr err_cb = 0;
-__declspec(dllexport) void set_error_report_cb(NotifyErr cb)
+MCU_DEBUG_EXPORT void set_error_report_cb(NotifyErr cb)
 {
 	err_cb = cb;
 }
 
 void print_stacktrace(void) {
+#ifdef _MSC_VER
 	void* stack[64];
 	HANDLE proc = GetCurrentProcess();
 	SymSetOptions(SYMOPT_LOAD_LINES);       // enable line lookup
@@ -6633,12 +6618,16 @@ void print_stacktrace(void) {
 		}
 	}
 	free(sym);
+#else
+	printf("== STACKTRACE of MCU_RUNTIME unavailable on this platform ===\n");
+#endif
 }
 
 void flush_console() { fflush(stdout); } // PC version: flush stdout
-void report_error(int il_offset, uchar* error_str, int line_no) { 
+void report_error(int il_offset, uchar* error_str, int line_no) {
 	flush_console();  // Flush any buffered console output before reporting error
-	err_cb(il_offset, error_str, strlen(error_str), line_no);
+	if (err_cb != 0)
+		err_cb(il_offset, error_str, strlen((const char*)error_str), line_no);
 	print_stacktrace();
 	exit(2);
 }
@@ -6647,11 +6636,9 @@ void print_line(uchar* str, int length) { printf("%s\n", str); } // should uploa
 inline void enter_critical() {};
 inline void leave_critical() {};
 
-inline int get_cyclic_millis() {}
-inline int get_cyclic_micros() {}
-inline int get_cyclic_seconds() {}
-
-#endif
+inline int get_cyclic_millis() { return 0; }
+inline int get_cyclic_micros() { return 0; }
+inline int get_cyclic_seconds() { return 0; }
 
 void print_hex(const unsigned char* buffer, size_t size) {
 	for (size_t i = 0; i < size; ++i) {
@@ -6663,15 +6650,15 @@ void print_hex(const unsigned char* buffer, size_t size) {
 typedef void(*NotifyLower)(unsigned char* changedStates, int length);
 NotifyLower stateCallback = 0;
 
-__declspec(dllexport) void set_lowerio_cb(NotifyLower cb)
+MCU_DEBUG_EXPORT void set_lowerio_cb(NotifyLower cb)
 {
 	stateCallback = cb;
 }
-__declspec(dllexport) void put_upper(uchar* buf, int len)
+MCU_DEBUG_EXPORT void put_upper(uchar* buf, int len)
 {
 	vm_put_upper_memory(buf, len);
 }
-__declspec(dllexport) void test(uchar* bin, int len)
+MCU_DEBUG_EXPORT void test(uchar* bin, int len)
 {
 	printf("====START TEST===:\r\n");
 	vm_set_program(bin, len);

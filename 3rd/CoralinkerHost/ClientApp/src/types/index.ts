@@ -604,6 +604,7 @@ export interface AddNodeResult {
   ok: boolean
   error?: string
   uuid?: string
+  mcuUri?: string
   nodeName?: string
   version?: VersionInfo
   layout?: LayoutInfo

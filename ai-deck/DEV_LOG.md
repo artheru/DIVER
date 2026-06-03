@@ -2424,3 +2424,525 @@
 - 验证：
   - `ReadLints` 检查 `GraphCanvas.vue`、`variableFlowLayout.ts` 无错误。
   - `npm run build` 成功；仍有既有 Vite/Rollup warning。
+
+### [architecture] 调查模拟节点 / 虚拟 MCU 节点方案
+- 用户需求：
+  - Host 目前只能添加真实节点，没有实体节点时无法调试和演示代码执行。
+  - 需要支持虚拟节点：
+    - 32 个 Input 和 32 个 Output，内部一一连接。
+    - 2 个虚拟 RS485 接口互相连接。
+    - 1 个虚拟 RS232 接口 TX/RX 自环。
+    - 1 个虚拟 CAN 接口，发出的消息会被收回来。
+    - 节点代码虚拟机使用 `MCURuntime` 执行。
+- 调查：
+  - `3rd/CoralinkerHost/Web/ApiRoutes.cs`：
+    - `/api/node/probe`、`/api/node/add` 都以 `mcuUri` 为入口，调用 `RuntimeSessionService`。
+  - `3rd/CoralinkerHost/Services/RuntimeSessionService.cs`：
+    - 只是包装 `DIVERSession`，负责 terminal 日志广播。
+  - `3rd/CoralinkerSDK/DIVERSession.cs`：
+    - `AddNode()` 当前固定 `ProbeNode(mcuUri)`，真实探测成功后创建 `NodeEntry`。
+    - `StartNode()` 当前硬编码 `new MCUNode(entry.UUID, entry.McuUri)`。
+    - 后台循环通过 `entry.Handle.RefreshState()`、`RefreshStats()`、`SendUpperIO()` 和 LowerIO 回调驱动运行。
+  - `3rd/CoralinkerSDK/MCUNode.cs`：
+    - 封装 `MCUSerialBridge`，公共面集中，适合抽象成运行时节点接口。
+    - 关键能力：`Connect/Configure/Program/Start/Stop/SendUpperIO/SetWireTap/RegisterSerialPortCallback/RegisterCANPortCallback/RefreshState/RefreshStats`。
+  - `MCURuntime/mcu_runtime.h` / `MCURuntime/mcu_runtime.c`：
+    - 已提供 Host-side VM API：`vm_set_program`、`vm_run`、`vm_put_upper_memory`、`vm_get_lower_memory`、`vm_put_snapshot_buffer`、`vm_put_stream_buffer`、`vm_put_event_buffer`。
+    - PC 版通过 host callbacks 输出硬件 IO、串口/CAN、错误和 console。
+    - 当前 runtime 大量使用全局变量，需特别关注多模拟节点实例隔离。
+  - `MCUSerialBridge/wrapper/MCUSerialBridgeCLR.cs`：
+    - `LayoutInfo` 可表达 32 DI/32 DO 和最多 16 个端口，模拟节点布局可直接复用。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/AddNodeDialog.vue`：
+    - UI 当前只有 COM Port / VIDPID 真实节点添加路径，需要新增模拟节点分支。
+- 倾向方案：
+  - 不在串口协议层伪造虚拟 COM 或虚拟 `MCUSerialBridge`。
+  - 在 SDK 层新增节点运行时抽象，例如 `IRuntimeNode` / `INodeRuntimeHandle`。
+  - 真实节点由现有 `MCUNode` 实现接口；模拟节点新增 `SimulatedMcuNode` 实现同一接口。
+  - `DIVERSession.NodeEntry` 记录节点类型或 `McuUri` scheme（如 `sim://default`），`StartNode()` 根据类型创建对应 handle。
+  - `SimulatedMcuNode` 内部通过 `MCURuntimeNative` P/Invoke wrapper 运行 `MCURuntime`：
+    - `Program()` 调 `vm_set_program`。
+    - `Start()` 启动循环任务，周期性 `vm_put_snapshot_buffer`、`vm_put_upper_memory`、`vm_run`、读取 `vm_get_lower_memory` 并触发 LowerIO 回调。
+    - `write_stream` / `write_event` callback 中做 RS485/RS232/CAN loopback，并触发 WireTap callbacks。
+  - 前端新增 “Add Simulated Node” 或 Add Node Dialog 中的 `Simulation` 模式，调用专用 API 添加，不走真实 probe。
+- 风险/约束：
+  - `MCURuntime` 当前 VS 工程只有 x64 Debug 配置是 DynamicLibrary；若要进入 Host portable package，需要新增 Windows/Linux x64/Linux ARM64 native runtime 构建和打包。
+  - `mcu_runtime.c` 当前 PC 版全局状态不适合多模拟节点并发；需要重构为 per-instance runtime context，或短期只支持单模拟节点/运行时进程隔离。
+  - IO loopback 语义要与真实硬件/MCU runtime 的 `write_snapshot/write_stream/write_event` 时序一致，否则 demo 行为可能和真实节点偏差。
+
+### [architecture] 修订模拟节点快速方案：多进程隔离和发布打包
+- 用户确认：
+  - 快速方案要支持多个模拟节点。
+  - 每个模拟节点使用不同进程隔离，避免 `MCURuntime` 全局状态互相污染。
+  - 需要随 Host 发布，补动态库构建。
+  - Wrapper 由实现方案处理。
+- 补充调查：
+  - `MCURuntime/mcu_runtime.c` 当前 PC 版导出主要是旧 Debug harness：
+    - `set_lowerio_cb`
+    - `set_error_report_cb`
+    - `put_upper`
+    - `test`
+  - `test()` 固定执行测试循环，不能作为 Host 模拟节点的长期运行 API。
+  - `write_stream` / `write_event` / `print_line` 当前 PC 版没有可供 Host 捕获的完整 callback 导出。
+  - `MCUSerialBridge/build-native.ps1` 已经具备三平台 native 构建模式：
+    - Windows 通过 `scons`。
+    - Linux x64 / ARM64 通过 `zig cc -target ...` 交叉编译。
+  - `CoralinkerHost.csproj` 和 `CoralinkerSDK.csproj` 当前只收集 `mcu_serial_bridge` native assets，需要加入 `mcu_runtime`。
+- 最新倾向方案：
+  - 新增 simulator 子进程程序，例如 `Coralinker.SimNodeHost`。
+  - 每个模拟节点启动一个独立 `Coralinker.SimNodeHost` 进程。
+  - `Coralinker.SimNodeHost` 独占加载 `mcu_runtime` 动态库，因此可以继续容忍 `mcu_runtime.c` 的全局状态。
+  - SDK 侧新增 `SimulatedMcuNode`，实现和真实 `MCUNode` 相同的运行时接口。
+  - `SimulatedMcuNode` 不直接调用 native VM，而是管理子进程 + IPC。
+  - IPC 推荐 NDJSON over stdin/stdout，简单、跨平台、便于日志定位；如后续性能不足再换 named pipe。
+  - IPC 命令：
+    - `configure`
+    - `program`
+    - `start`
+    - `stop`
+    - `upperIO`
+    - `setWireTap`
+    - `state`
+    - `stats`
+  - IPC 事件：
+    - `lowerIO`
+    - `console`
+    - `fatal`
+    - `wiretapSerial`
+    - `wiretapCan`
+  - `MCURuntime` native API 需要补通用导出，不再使用 `test()`：
+    - `sim_load_program` / `vm_set_program` 包装
+    - `sim_step` / `vm_run` 包装
+    - `sim_put_upper`
+    - `sim_put_snapshot`
+    - `sim_put_stream`
+    - `sim_put_event`
+    - `sim_get_lower`
+    - callback 注册：lower、console、error、stream、event、snapshot
+  - 发布打包：
+    - 新增 `MCURuntime/build-native.ps1`，或将 MCURuntime 纳入统一 native build。
+    - 产物放入：
+      - `runtimes/win-x64/native/mcu_runtime.dll`
+      - `runtimes/linux-x64/native/libmcu_runtime.so`
+      - `runtimes/linux-arm64/native/libmcu_runtime.so`
+    - `publish-host.ps1` manifest、startup integrity check、csproj native asset item 都要同步增加。
+
+### [docs] 记录 MCURuntime 原始 VM 调试链路
+- 用户在模拟节点实现中途指出需要先明确 `MCURuntime` 原本如何实现、同事如何调试，并要求不能破坏原来的调试体验。
+- 调查确认：
+  - `MCURuntime/mcu_runtime.c` 是 VM 内核，核心执行入口为 `vm_set_program(...)` 和 `vm_run(iteration)`。
+  - 原始 PC 调试路径主要通过 `DiverTest`：
+    - `DiverTest/DiverTest.csproj` PreBuild 重建 `DiverCompiler`。
+    - 执行 `DiverCompiler.exe -g` 生成 VM 相关文件。
+    - 执行 `DiverTest/build_cpp.bat`，使用 VS `vcvars64.bat` + MSVC `cl /LD /MDd /Zi /DEBUG` 编译 `MCURuntime.dll`。
+    - `DiverTest/DIVER/DIVERInterface.cs` 通过 P/Invoke 调 `set_lowerio_cb`、`set_error_report_cb`、`put_upper`、`test`。
+  - `test()` 是 legacy debug harness：加载 program，循环执行若干次 `vm_run(i)`，注入 snapshot/event，并把 lower IO callback 回传给 C#。
+- 新增 `MCURuntime/DEBUGGING.md`：
+  - 说明 VM 本体 API、`DiverTest` 调试流程、Visual Studio/PDB native 断点路径。
+  - 明确 Host 模拟节点新增的 `sim_*` 导出仅服务运行时模拟，不替代原来的 `test()` 调试入口。
+  - 明确必须继续保留 `test`、`put_upper`、`set_lowerio_cb`、`set_error_report_cb`，以及 `DiverTest/build_cpp.bat` 的 MSVC Debug DLL 路径。
+- 更新 `MCURuntime/MCURuntime.vcxproj`，将 `DEBUGGING.md` 加入 VS 项目文件列表，方便后续开发者在 VS 中直接查看。
+
+### [feature] 完成模拟节点快速方案骨架和打包
+- 继续实现用户确认的快速方案：多个模拟节点，每个节点独立子进程隔离，随 Host 发布。
+- SDK 层：
+  - 新增 `3rd/CoralinkerSDK/IRuntimeNode.cs`。
+  - `MCUNode` 显式实现 `IRuntimeNode`，保留原 public API，不破坏真实节点调用方式。
+  - `DIVERSession.NodeEntry.Handle` 从 `MCUNode?` 改为 `IRuntimeNode?`。
+  - `DIVERSession` 新增 `CreateRuntimeNode()`，根据 `sim://` scheme 创建 `SimulatedMcuNode`，否则创建真实 `MCUNode`。
+  - 新增 `DIVERSession.AddSimulatedNode()`，生成唯一 `sim://{uuid}`，默认 layout 为 32 DI / 32 DO / RS485-A / RS485-B / RS232 / CAN。
+  - 新增 `3rd/CoralinkerSDK/SimulatedMcuNode.cs`：
+    - 负责启动 `CoralinkerSimNodeHost` 子进程。
+    - 使用 stdin/stdout NDJSON 发送 `hello/configure/program/start/stop/upper/wiretap/shutdown`。
+    - 处理 `lower/console/error/wire` 事件，转发到 DIVERSession 现有 LowerIO、Console、WireTap 流程。
+- SimNodeHost：
+  - 新增 `3rd/CoralinkerSimNodeHost/CoralinkerSimNodeHost.csproj`、`Program.cs`、`McuRuntimeNative.cs`、`NativeMcuRuntimeResolver.cs`。
+  - 子进程内部通过 P/Invoke 加载 `mcu_runtime`。
+  - native 加载延后到 `program` / runtime 调用阶段，便于 add/probe 时给出明确错误。
+  - 实现端口回环：
+    - port 0/1：RS485-A 与 RS485-B 互连。
+    - port 2：RS232 TX/RX 自环。
+    - port 3：CAN 自环。
+  - wire 事件统一输出到父进程，父进程再调用已有 Serial/CAN callback。
+- MCURuntime：
+  - `mcu_runtime.c` 新增 `SIM_EXPORT`，支持 Windows `__declspec(dllexport)` 和 Linux visibility。
+  - 新增模拟节点运行 API：
+    - `sim_set_callbacks`
+    - `sim_load_program`
+    - `sim_put_upper`
+    - `sim_put_port_input`
+    - `sim_step`
+    - `sim_destroy`
+  - 保留 legacy debug exports：
+    - `test`
+    - `put_upper`
+    - `set_lowerio_cb`
+    - `set_error_report_cb`
+  - PC host/debug 函数从仅 `_DEBUG` 改为所有非 MCU 构建可用，确保 Release native 包也导出 `sim_*`。
+  - `write_snapshot` 更新虚拟 snapshot，`sim_step` 在 `vm_run` 前喂回 snapshot，用于 DO→DI 回环并避免 VM snapshot 断言。
+  - 修复 Zig/clang 交叉编译不兼容项：
+    - 删除 release 分支误留的 `VAL_OUT(ptr);`。
+    - 将 `auto` 改成显式 `int`。
+    - 将非标准 `itoa` 改为 `snprintf`。
+    - 将 `heap_obj[0].pointer = -1` 改为显式指针转换。
+- Host/API/UI：
+  - `RuntimeSessionService` 新增 `AddSimulatedNodeAsync()`。
+  - `ApiRoutes` 新增 `/api/node/add-simulated`，并让 add 返回 `mcuUri`。
+  - 前端 `device.ts` 新增 `addSimulatedNode()`。
+  - `AddNodeDialog.vue` 新增 `Simulated` connection mode，支持可选 node name，不显示固件 Upgrade。
+  - `types/index.ts` 的 `AddNodeResult` 增加 `mcuUri`。
+- 构建/发布：
+  - 新增 `MCURuntime/build-native.ps1`，输出三平台 native runtime assets。
+  - `CoralinkerHost.csproj`：
+    - 收集 `MCURuntime/build/runtimes/*/native` 下的 `mcu_runtime`。
+    - 构建并拷贝 `CoralinkerSimNodeHost` 到 Host 输出的 `simnode/`。
+    - 发布时把 `simnode/` 带入 publish output。
+  - `publish-host.ps1` 同时执行 `MCUSerialBridge/build-native.ps1` 与 `MCURuntime/build-native.ps1`。
+  - `DIVER.sln` 加入 `CoralinkerSimNodeHost` 项目。
+- 验证：
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Debug` 成功。
+  - `npm run build` 成功。
+  - `powershell -File MCURuntime\build-native.ps1 -Target windows -Configuration Debug` 成功。
+  - `powershell -File MCURuntime\build-native.ps1 -Target linux-x64 -Configuration Release` 成功。
+  - `powershell -File MCURuntime\build-native.ps1 -Target linux-arm64 -Configuration Release` 成功。
+  - 确认 Host Debug 输出包含 `simnode/CoralinkerSimNodeHost.dll` 和 `runtimes/win-x64/native/mcu_runtime.dll`。
+  - `ReadLints` 无新增错误。
+  - `git diff --check` 无 whitespace 错误，仅输出 Windows 换行提示。
+- 待后续手动联调：
+  - 在 UI 中 Add Node -> Simulated，选择 Logic，Build/Program/Start。
+  - 检查 console 输出、LowerIO 更新、32 路 DO→DI 回环、RS485/RS232/CAN wiretap 回环。
+  - 在 Linux x64/ARM64 目标机实际启动发布包，验证 native resolver 和子进程路径。
+
+### [publish] 生成包含模拟节点的 CoralinkerHost 发布包
+- 按用户要求直接编译一个发布包用于查看。
+- 执行：
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File "publish-host.ps1" -Configuration Release`
+  - 工作目录：`3rd/CoralinkerHost`
+- 发布脚本成功完成：
+  - 构建 `MCUSerialBridge` native runtime assets：
+    - `win-x64`
+    - `linux-x64`
+    - `linux-arm64`
+  - 构建 `MCURuntime` native runtime assets：
+    - `win-x64`
+    - `linux-x64`
+    - `linux-arm64`
+  - 构建前端 `ClientApp`。
+  - 执行 `dotnet publish`。
+  - 收集离线 NuGet 包。
+  - 生成 `package-manifest.sha256`。
+- 输出目录：
+  - `3rd/CoralinkerHost/Publish/CoralinkerHost_4eeb413_20260603-101633`
+- 已确认关键文件存在：
+  - `simnode/CoralinkerSimNodeHost.dll`
+  - `runtimes/win-x64/native/mcu_runtime.dll`
+  - `runtimes/linux-x64/native/libmcu_runtime.so`
+  - `runtimes/linux-arm64/native/libmcu_runtime.so`
+  - `package-manifest.sha256`
+  - `publish-info.json`
+- 过程说明：
+  - 发布输出仍有既有 C# nullable / Windows-only API warning。
+  - 前端仍有既有 Vite/Rollup dynamic import/chunk size warning。
+  - 发布命令退出码为 0。
+  - 一次用于确认文件的 PowerShell 命令因变量被外层 shell 展开而失败并挂起，已用 `Stop-Process` 结束；随后使用字面量路径确认关键文件均存在。
+
+### [ui] 调整模拟节点添加和显示样式
+- 用户反馈：
+  - Add Simulated Node 时 `URI Preview` 不需要显示。
+  - 添加后的虚拟节点希望有明显不同颜色，使用橙色底色。
+  - 前端判断直接基于 URL 是否以 `sim://` 开头，不需要额外 sim 字段。
+  - 询问多个 sim 节点 URL 是否一样，是否会导致通讯错位。
+- 实现：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/AddNodeDialog.vue`
+    - `URI Preview` 仅在非 `simulated` 模式显示。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/CoralNodeView.vue`
+    - 新增 `isSimulatedNode` computed：`mcuUri.toLowerCase().startsWith('sim://')`。
+    - 根节点 class 增加 `simulated`。
+    - 模拟节点使用橙色渐变背景、橙色边框和橙色 selected box-shadow。
+    - 模拟节点隐藏固件升级按钮。
+    - URI 区域中模拟节点显示 `Virtual`，不再显示 `Not Set`。
+- 设计确认：
+  - 后端 `DIVERSession.AddSimulatedNode()` 每次生成 `sim://{uuid}`，所以多个模拟节点 URL 不一样。
+  - 每个 `SimulatedMcuNode` 都启动独立 `CoralinkerSimNodeHost` 子进程，IPC 由该节点 wrapper 管理，不会因为 URL 相同而通讯错位。
+- 验证：
+  - `ReadLints` 检查 `AddNodeDialog.vue`、`CoralNodeView.vue` 无错误。
+  - `npm run build` 成功。
+  - `git diff --check` 无 whitespace 错误，仅有 Windows 换行提示。
+
+### [sim-node] 修复模拟节点节拍、IO/WireTap 统计并迁移 native shim
+- 用户反馈：
+  - 模拟节点执行过快，`scanInterval=100ms` 就应 100ms 执行一次，其余时间睡眠。
+  - 串口收发、写 IO 网页上看不到状态/日志。
+  - `mcu_runtime.c` 不应承载大量模拟节点 `sim_*` 函数和状态；模拟逻辑应移到 SimNode 工程。
+  - `MCURuntime/build-native.ps1` 不合适，因为编译产物属于 sim node runtime，应放在 SimNode 工程。
+- 节拍修复：
+  - `3rd/CoralinkerSimNodeHost/Program.cs`
+    - `ProgramRuntime()` 保存 `sim_load_program()` 返回的 `interval` 到 `_scanIntervalMs`。
+    - `StartLoop()` 改为 `Stopwatch` + `Task.Delay` 调度。
+    - 每次 loop 调 `McuRuntimeNative.Step(timestampMs)`，不再固定每 10ms 跑一次。
+  - `3rd/CoralinkerSimNodeHost/McuRuntimeNative.cs`
+    - `Step` 签名从 `int iterations` 改为 `uint timestampMs`。
+- IO / WireTap 统计修复：
+  - `3rd/CoralinkerSimNodeHost/Program.cs`
+    - snapshot callback 改为发送 `snapshot` 事件。
+    - 串口/CAN 回环仍发送 `wire` 事件并写回 native input queue。
+  - `3rd/CoralinkerSDK/SimulatedMcuNode.cs`
+    - 新增 `HandleSnapshotEvent()`：
+      - 读取 snapshot 前 4 字节为 bit mask。
+      - 同步更新 `_stats.DigitalOutputs` 与 `_stats.DigitalInputs`，实现虚拟 DO→DI 网页显示。
+    - 新增 `UpdatePortStats()`：
+      - 每个 wire 事件更新对应端口的 `TxFrames/RxFrames/TxBytes/RxBytes`。
+    - 新增 `ShouldEmitWireTap()`：
+      - 只有端口开启相应 TX/RX WireTap 时才向 Host 日志聚合发事件。
+    - `SetWireTap(0xFF, flags)` 会写入 0..15 端口，避免“全端口启用”对模拟节点无效。
+- native shim 迁移：
+  - 新增 `3rd/CoralinkerSimNodeHost/native/sim_node_runtime.c`：
+    - 承载 `sim_set_callbacks`、`sim_load_program`、`sim_put_upper`、`sim_put_port_input`、`sim_step`、`sim_destroy`。
+    - 承载模拟节点专用状态：VM memory、snapshot input、callback、模拟时间。
+    - 实现 PC host-side hooks：`write_snapshot`、`write_stream`、`write_event`、`print_line`、`report_error`、`get_cyclic_*`。
+  - `MCURuntime/mcu_runtime.c`：
+    - 删除 `sim_*` 和模拟状态。
+    - 仅保留 `_DEBUG && !IS_MCU && !SIM_NODE_HOST` 的 legacy debug harness：
+      - `test`
+      - `put_upper`
+      - `set_lowerio_cb`
+      - `set_error_report_cb`
+    - 保留此前少量非行为性 C 兼容修正。
+  - 删除 `MCURuntime/build-native.ps1`。
+  - 新增 `3rd/CoralinkerSimNodeHost/build-native.ps1`：
+    - 编译 `MCURuntime/mcu_runtime.c` + `SimNodeHost/native/sim_node_runtime.c`。
+    - 输出到 `3rd/CoralinkerSimNodeHost/build/runtimes/.../native`。
+  - `McuRuntimeNative.cs` / `NativeMcuRuntimeResolver.cs` 改为解析 `sim_node_runtime`：
+    - Windows: `sim_node_runtime.dll`
+    - Linux: `libsim_node_runtime.so`
+  - `CoralinkerHost.csproj`：
+    - native 资产改为从 `CoralinkerSimNodeHost/build/runtimes` 收集。
+    - 发布路径改为 `simnode/runtimes/{rid}/native/...`。
+  - `publish-host.ps1`：
+    - native build 列表改为 `MCUSerialBridge` + `CoralinkerSimNodeHost`。
+    - 发布元数据字段改为 `nativeSimNodeRuntimes`。
+- 验证：
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Debug` 成功。
+  - `powershell -File 3rd\CoralinkerSimNodeHost\build-native.ps1 -Target windows -Configuration Debug` 成功。
+  - `powershell -File 3rd\CoralinkerSimNodeHost\build-native.ps1 -Target linux-x64 -Configuration Release` 成功。
+  - `powershell -File 3rd\CoralinkerSimNodeHost\build-native.ps1 -Target linux-arm64 -Configuration Release` 成功。
+  - `powershell -File 3rd\CoralinkerHost\publish-host.ps1 -Configuration Release` 成功。
+  - 新 publish 输出：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_4eeb413_20260603-105422`
+  - 已确认 publish 包包含：
+    - `simnode/CoralinkerSimNodeHost.dll`
+    - `simnode/runtimes/win-x64/native/sim_node_runtime.dll`
+    - `simnode/runtimes/linux-x64/native/libsim_node_runtime.so`
+    - `simnode/runtimes/linux-arm64/native/libsim_node_runtime.so`
+    - `package-manifest.sha256`
+  - 已确认 publish 包不再包含旧的根目录 `runtimes/win-x64/native/mcu_runtime.dll`。
+  - `git diff --check` 无 whitespace 错误，仅有 Windows 换行提示。
+- 待用户实测确认：
+  - UI 中模拟节点的 `scanInterval` 是否按 100ms / 配置值稳定执行。
+  - Digital IO 灯是否跟 `RunOnMCU.WriteSnapshot` 同步。
+  - WireTap 日志和端口 TX/RX frame/byte 统计是否按 TX/RX 方向递增。
+
+### [varflow-sim-stats] 完成相邻节点 gap 布局与模拟节点 TX/RX 统计显示
+- 用户反馈：
+  - VarFlow 仍需处理“有消费者但无生产者”的变量，应放到消费节点左侧并撑开左侧空隙。
+  - 左节点只发布变量、右节点只接收变量时，应共用同一个节点间空隙。
+  - 相邻节点间通信变量，只要 Root 不参与，无论左发右收还是右发左收，都应放入两节点中间。
+  - 需要继续修复模拟节点 TX/RX 统计数量显示。
+- VarFlow 实现：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`
+    - 用 `gapVariableGroups` 替代未完成的 `sideVariableGroups`。
+    - gap `-1` 表示第一个节点左侧；gap `i` 表示节点 `i` 与节点 `i+1` 中间；gap `last` 表示最后一个节点右侧。
+    - 分类规则：
+      - 无消费者、单生产者：放到生产节点右侧 gap。
+      - 无生产者、单消费者：放到消费节点左侧 gap。
+      - 单生产者 + 单消费者且二者相邻、Root 不参与：放到二者中间 gap。
+      - Root 参与读写的变量继续放 Root 下方横排。
+    - gap 中变量纵向排列，间距按该 gap 最大变量框宽度动态撑开，同一 gap 只撑一次。
+    - 节点宽度保持 `380`。
+- TX/RX 统计修复：
+  - `3rd/CoralinkerSDK/DIVERSession.cs`
+    - `BuildNodeStateSnapshot()` 在生成节点状态快照前对运行中节点调用 `RefreshStats()` 并更新 `entry.Stats`，避免 SignalR 状态推送拿到旧统计。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/PortStatsView.vue`
+    - 端口统计 UI 显示 `TX frames/bytes`、`RX frames/bytes`，不再只显示 frame 数。
+- 验证：
+  - `ReadLints` 检查：
+    - `DIVERSession.cs`
+    - `PortStatsView.vue`
+    - `variableFlowLayout.ts`
+    - 无 linter error。
+  - `npm run build` 成功。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj` 成功。
+  - 剩余 warning 为既有 Vite chunk/annotation warning 与既有 C# nullable / Windows-only API / unused event warning。
+
+### [varflow-instance-routing] Root 右侧变量、实例级关系与侧边连线
+- 用户反馈：
+  - Root 的只发布变量也要从 Root 下方横排移到 Root 右侧。
+  - 同一个 Logic/Class 可以被不同节点复用，不能只靠 Class 判断变量属于哪个节点，需要按节点实例判断。
+  - 放在节点左/右侧的变量，连线应从节点左右侧走。
+  - 如果侧边变量堆叠总高度不超过节点高度，侧边连线用直线；如果超过节点高度，在节点侧边按等距 slot 走原有弧线风格。
+- 后端关系 ID 修复：
+  - `3rd/CoralinkerSDK/DIVERSession.cs`
+    - VarFlow 关系的 `SourceIds/ReaderIds/WriterIds` 不再使用 `LogicName` / ClassName。
+    - 普通节点 source id 改为 `entry.UUID`。
+    - 虚拟节点 source id 改为 `entry.SourceId`，Root runtime 对应 `root-runtime`。
+    - 这样多个节点使用同一个 Logic 时，关系仍按节点实例分开。
+- 前端匹配修复：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`
+    - `FixedGraphNode.sourceId` 改为节点 `id`。
+    - `rootSourceIds` 改为固定 `root-runtime`，不再使用 `rootLogicName`。
+- VarFlow 布局/连线：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`
+    - 新增 Root 右侧特殊 gap，用于 Root 只发布、无消费者变量。
+    - 侧边 item 增加 placement/slot 元数据。
+    - Root 右侧、节点左侧、节点右侧变量都从左右侧 anchor 连线。
+    - 侧边堆叠高度不超过目标节点/Root 高度时使用直线。
+    - 超过高度时按 `sideSlotIndex/sideSlotCount` 在侧边分配等距 slot，使用横向贝塞尔弧线。
+- 验证：
+  - `ReadLints` 检查 `variableFlowLayout.ts`、`GraphCanvas.vue`、`DIVERSession.cs` 无错误。
+  - `npm run build` 成功。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj` 成功。
+  - 剩余 warning 为既有构建 warning，无新增 error。
+
+### [varflow-long-label-gap] 修复长变量名重叠并放宽 gap 自适应
+- 用户反馈：
+  - 超长变量名时变量控件内部发生重叠，类型标记和变量名挤在一起。
+  - 这种情况下应先把变量控件布局修正确。
+  - 放在节点侧边/节点间的长变量应让节点间空隙自适应变大。
+  - 要检查之前 `DEV_LOG.md` 是否写入成功。
+- 修复：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`
+    - `FLOW_ITEM_MAX_WIDTH` 从 `260` 放宽到 `420`。
+    - 变量名估算从 `name.length * 6.8` 放宽到 `name.length * 7.2`。
+    - 变量名估算上限从 `150` 放宽到 `300`。
+    - 节点间 gap 继续通过 `maxVariableWidth()` 推导，因此长变量会自动撑大 gap。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`
+    - `.var-name/.var-value` 增加 `display: block`、`width: 100%`、`min-width: 0`、`max-width: 100%`。
+    - 保留 `overflow: hidden`、`text-overflow: ellipsis`、`white-space: nowrap`，使长文本在可用列内正确省略，不再压到类型列。
+- 日志检查：
+  - 已确认此前 `varflow-sim-stats` 与 `varflow-instance-routing` 记录存在于 `DEV_LOG.md` 末尾。
+  - 本条按增量方式追加。
+- 验证：
+  - `ReadLints` 检查 `variableFlowLayout.ts`、`GraphCanvas.vue` 无错误。
+  - `npm run build` 成功。
+  - 剩余 warning 为既有 Vite/Rollup chunk 与 SignalR annotation warning。
+
+### [varflow-side-spacing] 收紧变量宽度估算并调整 Root 侧边排列
+- 用户反馈：
+  - 自动计算的变量占据长度偏大，类型和名字之间有无效空隙，应按实际控件宽度计算。
+  - PC/Root 出来或进去的变量不能从 Root 侧面的上方开始排列，容易超过下方范围，应从 Root 下方开始排列。
+  - 侧边弧线仍可能重叠，需要把节点和变量表之间的间隙调大。
+- 修复：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`
+    - `FLOW_ITEM_MAX_WIDTH` 从 `420` 收紧到 `320`。
+    - 变量名宽度估算从 `name.length * 7.2` 调整为 `name.length * 6.2`。
+    - 变量名估算上限从 `300` 调整为 `240`。
+    - 变量框额外宽度从 `38` 调整为 `24`，减少类型列和名字列之间的空白。
+    - Root 右侧变量起始 Y 改为 `rootRect.y + rootRect.height + SIDE_VARIABLE_STACK_GAP`，从 Root 下方开始排列。
+    - `SIDE_VARIABLE_GAP` 从 `24` 增加到 `40`，拉开节点/Root 与侧边变量列之间距离，降低弧线重叠概率。
+- 验证：
+  - `ReadLints` 检查 `variableFlowLayout.ts` 无错误。
+  - `npm run build` 成功。
+  - 剩余 warning 为既有 Vite/Rollup chunk 与 SignalR annotation warning。
+
+### [review-prune-stale-vars] 提交前 review 并改为清理 SDK 变量残留
+- 用户反馈：
+  - `DiverCompiler/Processor.cs` 中 `cart_io_list` 改动风险过高，可能影响 MCU runtime 对 program descriptor 的解析和执行。
+  - C/D 残留更可能是新 `MetaJson` 已不含字段，但 `DIVERSession._variables` 全局存储仍保留旧值。
+- 修复：
+  - `DiverCompiler/Processor.cs`
+    - 撤回 `cart_io_list` 过滤改动，恢复原有基于 CartDefinition 字段输出 IO 列表的行为。
+  - `3rd/CoralinkerSDK/DIVERSession.cs`
+    - 新增 `PruneUndeclaredVariables()`。
+    - `ProgramNode()` 在新 `MetaJson` 解析并初始化变量后，清理不再被任何当前节点/虚拟节点声明的变量。
+    - `RemoveNode()` 和 `UnregisterVirtualNode()` 后也调用清理，避免删除节点/Root 后残留。
+- Review 注意事项：
+  - `CORAL-NODE-V2.1` LaTeX 文件按用户要求忽略。
+  - `3rd/CoralinkerSimNodeHost/` 为新工程，提交时应只加入源码、项目、build 脚本和 native shim；不要把 `build/runtimes/*` native 产物一起提交。
+  - `MCURuntime/build/` 是未跟踪生成目录，不应提交；当前未发现实际文件。
+  - `3rd/CoralinkerHost/CoralinkerHost - Backup.csproj` 被删除，提交前需确认这是有意清理备份文件。
+- 验证：
+  - `ReadLints` 检查 `DiverCompiler/Processor.cs`、`DIVERSession.cs` 无错误。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj` 成功。
+  - `npm run build` 成功。
+  - `git diff --check -- . ":(exclude)CORAL-NODE-V2.1/**"` 通过，仅有换行提示。
+
+### [gitignore-simnode-build] 忽略 SimNode native build 输出
+- 用户反馈：
+  - `3rd/CoralinkerSimNodeHost/build/runtimes/*` 没有被 `.gitignore` 忽略。
+- 根因：
+  - 当前 `.gitignore` 有 `[Bb]uild[Ll]og.*` 和 `bld/`，但没有通用 `build/` 目录规则。
+  - 新的 SimNode native 构建输出放在 `3rd/CoralinkerSimNodeHost/build/runtimes/...`，因此被 Git 视为未跟踪。
+- 修复：
+  - `.gitignore`
+    - 新增 `/3rd/CoralinkerSimNodeHost/build/`。
+    - 新增 `/MCURuntime/build/`。
+    - 不影响 `build-native.ps1` 脚本提交。
+- 验证：
+  - `git check-ignore -v "3rd/CoralinkerSimNodeHost/build/runtimes/linux-arm64/native/libsim_node_runtime.so" "MCURuntime/build"` 命中新增规则。
+  - `git status --short -- "3rd/CoralinkerSimNodeHost" "MCURuntime/build" ".gitignore"` 只显示 `.gitignore` 修改和 SimNode 源码目录未跟踪，native build 输出不再单独暴露。
+
+### [compiler-cart-used-fields] 仅导出实际使用的 Cart IO 字段
+- 用户反馈：
+  - 第一轮代码使用 Cart 字段 A/B/C/D。
+  - 后续 CartDefinition 仍声明 C/D，但 Operation 代码不再使用 C/D。
+  - 重新编译后 C/D 仍出现在变量表和 VarFlow 中，并且还连到节点。
+  - 未被任何代码使用的 Cart 字段不应存在。
+- 根因：
+  - `DiverCompiler/Processor.cs` 中 `SI.cart_io_list` 由 `SI.sfield_offset.field_offset` 的所有 CartDefinition 字段生成。
+  - 这会把 CartDefinition 中仍声明但当前编译逻辑未引用的字段也写入 `.bin.json`。
+  - Host 解析 `.bin.json` 后会把这些字段加入 `entry.CartFields`，再进入变量表与 VarFlow 关系。
+- 修复：
+  - `DiverCompiler/Processor.cs`
+    - `SI.cart_io_list` 改为从 `SI.referenced_typefield` 中实际引用到的 Cart 字段生成。
+    - 仍然从 `SI.sfield_offset.field_offset` 取 offset/type/flags，并按 offset 排序。
+    - 使用显式 `new HashSet<string>(..., StringComparer.Ordinal)`，兼容当前目标框架。
+- 验证：
+  - 首次构建发现 `Enumerable.ToHashSet()` 在当前目标框架不可用，已改为显式 `HashSet`。
+  - `ReadLints` 检查 `DiverCompiler/Processor.cs` 无错误。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj` 成功。
+  - 剩余 warning 为既有 `Processor.cs` unreachable code warning。
+- 注意：
+  - 该修复影响后续 Build 产物。
+  - 已经使用旧 `.bin.json` 编程过的节点需要重新 Build 并 Program，未使用字段才会从变量表/VarFlow 消失。
+
+### [varflow-node-edge-slots] 节点边缘出线按边均分
+- 用户反馈：
+  - 节点出线位置需要在对应边上均分，不能集中在一个位置。
+- 修复：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`
+    - `routeVariableLines()` 先扫描 center flow 变量线，统计 Root bottom 和每个节点 top 的实际出线 slot。
+    - 新增 `rootSlotKey()`、`nodeSlotKey()`、`slotIndex()`，保证同一个节点/边按自己的线数量分配 anchor。
+    - Root bottom 使用 Root 自己的 slotCount。
+    - 普通节点 top 使用该节点自己的 slotCount。
+    - 移除节点边缘锚点对全局 `itemIndex/items.length` 的依赖，避免局部线条集中。
+- 验证：
+  - `ReadLints` 检查 `variableFlowLayout.ts` 无错误。
+  - `npm run build` 成功。
+  - 剩余 warning 为既有 Vite/Rollup chunk 与 SignalR annotation warning。
+
+### [varflow-side-bezier] 修复侧边贝塞尔曲线回折
+- 用户反馈：
+  - 侧边贝塞尔控制点不合理，短距离连接时曲线出现回折。
+- 修复：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`
+    - `sideBezierPath()` 不再使用固定最小 `54px` 控制点距离。
+    - 控制点距离改为 `dx * 0.45`，并通过 `clamp()` 限制在端点水平距离内。
+    - lane 偏移从 `lane * 8` 收敛为 `lane * 4`，并限制为 `dx * 0.12` 范围内，避免控制点越过端点造成折返。
+- 验证：
+  - `ReadLints` 检查 `variableFlowLayout.ts` 无错误。
+  - `npm run build` 成功。
+  - 剩余 warning 为既有 Vite/Rollup chunk 与 SignalR annotation warning。
+
+### [varflow-root-side-upward] 修正 Root 右侧变量向上排列
+- 用户反馈：
+  - Root 右侧变量不应从 Root 下方继续向下排列。
+  - 应贴 Root 右侧并向上排列。
+  - 例如 5 个变量，第 5 个在最下面，然后向上依次为 4、3、2、1。
+- 修复：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`
+    - `layoutGapVariables()` 计算 Root 右侧变量栈高度 `stackHeight`，并传入 `gapVariableY()`。
+    - `ROOT_RIGHT_GAP` 的 Y 起点改为 `rootRect.y + rootRect.height - stackHeight`。
+    - 保持变量数组原有顺序从上到下绘制，因此视觉上底部是最后一个变量，向上依次递减。
+- 验证：
+  - `ReadLints` 检查 `variableFlowLayout.ts` 无错误。
+  - `npm run build` 成功。
+  - 剩余 warning 为既有 Vite/Rollup chunk 与 SignalR annotation warning。

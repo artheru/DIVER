@@ -5,7 +5,7 @@ namespace CoralinkerSDK;
 /// <summary>
 /// 单个 MCU 节点，封装 MCUSerialBridge
 /// </summary>
-public class MCUNode : IDisposable
+public class MCUNode : IRuntimeNode
 {
     private const uint DefaultBaudRate = 2000000;
     private const uint DefaultTimeout = 500;
@@ -714,4 +714,32 @@ public class MCUNode : IDisposable
         _disposed = true;
         Disconnect();
     }
+
+    event Action<byte[]>? IRuntimeNode.OnLowerIOReceived
+    {
+        add => OnLowerIOReceived += value;
+        remove => OnLowerIOReceived -= value;
+    }
+
+    event Action<string, uint>? IRuntimeNode.OnConsoleOutput
+    {
+        add => OnConsoleOutput += value;
+        remove => OnConsoleOutput -= value;
+    }
+
+    event Action<ErrorPayload>? IRuntimeNode.OnFatalError
+    {
+        add => OnFatalError += value;
+        remove => OnFatalError -= value;
+    }
+
+    event Action<string>? IRuntimeNode.OnError
+    {
+        add => OnError += value;
+        remove => OnError -= value;
+    }
+
+    bool IRuntimeNode.SendUpperIO(byte[] data, uint timeoutMs) => SendUpperIO(data, timeoutMs);
+
+    void IRuntimeNode.RefreshStats() => RefreshStats();
 }

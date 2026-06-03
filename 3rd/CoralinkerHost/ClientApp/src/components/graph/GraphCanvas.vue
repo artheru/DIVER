@@ -182,6 +182,7 @@ let isLoadingFromStore = false
 // 节点状态轮询定时器
 let nodeStatePollingTimer: ReturnType<typeof setInterval> | null = null
 const NODE_STATE_POLLING_INTERVAL = 3000 // 3秒轮询一次
+const ROOT_RUNTIME_SOURCE_ID = 'root-runtime'
 
 const draggedVariableName = ref<string | null>(null)
 
@@ -195,13 +196,13 @@ const variableFlowLayout = computed<FixedGraphLayoutResult>(() => {
       id: node.id,
       name: node.data?.nodeName,
       order: readNodeOrder(node),
-      sourceId: typeof node.data?.logicName === 'string' ? node.data.logicName : undefined
+      sourceId: node.id
     })),
     flowVariables: flowVariables.value,
     controlVariables: controlVariables.value,
     nodeOrder: currentNodeOrder(),
     variableOrder: projectStore.variableFlowOrder,
-    rootSourceIds: projectStore.rootLogicName ? [projectStore.rootLogicName] : []
+    rootSourceIds: projectStore.rootLogicName ? [ROOT_RUNTIME_SOURCE_ID] : []
   })
 })
 
@@ -1109,6 +1110,10 @@ defineExpose({
 
 .var-name,
 .var-value {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

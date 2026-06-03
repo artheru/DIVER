@@ -47,20 +47,26 @@ function Write-LfUtf8NoBom {
 }
 
 if (-not $SkipNativeBuild) {
-    $nativeBuildScript = Join-Path $repoRoot "MCUSerialBridge\build-native.ps1"
-    if (-not (Test-Path -LiteralPath $nativeBuildScript -PathType Leaf)) {
-        throw "Missing native build script: $nativeBuildScript"
-    }
+    $nativeBuildScripts = @(
+        @{ Name = "MCUSerialBridge"; Path = Join-Path $repoRoot "MCUSerialBridge\build-native.ps1" },
+        @{ Name = "CoralinkerSimNodeHost"; Path = Join-Path $repoRoot "3rd\CoralinkerSimNodeHost\build-native.ps1" }
+    )
 
-    $nativeBuildArgs = @("-ExecutionPolicy", "Bypass", "-File", $nativeBuildScript, "-Target", "all", "-Configuration", $Configuration)
-    if (-not [string]::IsNullOrWhiteSpace($ZigPath)) {
-        $nativeBuildArgs += @("-ZigPath", $ZigPath)
-    }
+    foreach ($nativeBuild in $nativeBuildScripts) {
+        if (-not (Test-Path -LiteralPath $nativeBuild.Path -PathType Leaf)) {
+            throw "Missing native build script: $($nativeBuild.Path)"
+        }
 
-    Write-Host "Building MCUSerialBridge native runtime assets..."
-    & powershell -NoProfile @nativeBuildArgs
-    if ($LASTEXITCODE -ne 0) {
-        exit $LASTEXITCODE
+        $nativeBuildArgs = @("-ExecutionPolicy", "Bypass", "-File", $nativeBuild.Path, "-Target", "all", "-Configuration", $Configuration)
+        if (-not [string]::IsNullOrWhiteSpace($ZigPath)) {
+            $nativeBuildArgs += @("-ZigPath", $ZigPath)
+        }
+
+        Write-Host "Building $($nativeBuild.Name) native runtime assets..."
+        & powershell -NoProfile @nativeBuildArgs
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
     }
 }
 
@@ -209,6 +215,7 @@ $manifest = [ordered]@{
     startScripts = @("start-host.ps1", "start-host.bat", "start-host.sh")
     setupScripts = @("install-dotnet-sdk-ubuntu.sh", "refresh-package-manifest.sh")
     nativeBridgeRuntimes = @("win-x64", "linux-x64", "linux-arm64")
+    nativeSimNodeRuntimes = @("win-x64", "linux-x64", "linux-arm64")
     buildPackages = $defaultBuildPackages
     offlineNuGetPackages = $offlinePackageSpecs | ForEach-Object { "$($_.Id)/$($_.Version)" }
     integrityManifest = "package-manifest.sha256"

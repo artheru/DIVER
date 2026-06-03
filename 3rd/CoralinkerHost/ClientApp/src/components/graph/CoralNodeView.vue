@@ -15,7 +15,8 @@
     :class="{ 
       collapsed: isCollapsed, 
       readonly: !canEdit,
-      selected: selected
+      selected: selected,
+      simulated: isSimulatedNode
     }"
   >
     <!-- 删除按钮 - 左上角 -->
@@ -40,7 +41,7 @@
       <span v-else class="node-name">{{ data.nodeName }}</span>
       <!-- 升级按钮 -->
       <button
-        v-if="canEdit"
+        v-if="canEdit && !isSimulatedNode"
         class="upgrade-btn"
         @click.stop="openUpgradeDialog"
         :disabled="isProbing"
@@ -70,6 +71,9 @@
               <span class="uri-vid">V{{ parsedUri.vid }}</span>
               <span class="uri-pid">P{{ parsedUri.pid }}</span>
               <span v-if="parsedUri.serial" class="uri-serial">S{{ parsedUri.serial }}</span>
+            </template>
+            <template v-else-if="parsedUri.mode === 'simulated'">
+              <span class="uri-simulated">Virtual</span>
             </template>
             <span v-else class="uri-unknown">Not Set</span>
           </div>
@@ -208,6 +212,7 @@ const isCollapsed = ref(false)
 const localNodeName = ref(props.data.nodeName)
 const localLogicName = ref(props.data.logicName)
 const localPortConfigs = ref<PortConfig[]>(props.data.ports || [])
+const isSimulatedNode = computed(() => props.data.mcuUri?.toLowerCase().startsWith('sim://') ?? false)
 
 const buildVersionText = computed(() => {
   const info = props.data.buildInfo
@@ -260,6 +265,10 @@ const runStateText = computed(() => {
 // 解析 URI 显示
 const parsedUri = computed(() => {
   const uri = props.data.mcuUri || ''
+
+  if (isSimulatedNode.value) {
+    return { mode: 'simulated' }
+  }
   
   // serial://name=COM18&baudrate=1000000
   const nameMatch = uri.match(/name=([^&]+)/)
@@ -603,6 +612,16 @@ watch(buildVersion, () => {
   box-shadow: 0 0 0 2px rgba(79, 140, 255, 0.3), 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
+.coral-node.simulated {
+  background: linear-gradient(180deg, rgba(124, 74, 18, 0.82), rgba(67, 40, 13, 0.94));
+  border-color: #f59e0b;
+}
+
+.coral-node.simulated.selected {
+  border-color: #fbbf24;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.35), 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
 .coral-node.readonly {
   opacity: 0.85;
 }
@@ -838,6 +857,11 @@ watch(buildVersion, () => {
 .uri-baud, .uri-pid, .uri-serial {
   font-size: 10px;
   color: #94a3b8;
+}
+
+.uri-simulated {
+  font-weight: 700;
+  color: #fbbf24;
 }
 
 .uri-unknown {

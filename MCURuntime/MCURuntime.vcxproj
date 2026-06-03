@@ -133,6 +133,7 @@
     <ClInclude Include="mcu_runtime.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="DEBUGGING.md" />
     <None Include="todo.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

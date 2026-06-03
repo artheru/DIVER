@@ -356,6 +356,23 @@ public static class ApiRoutes
             {
                 ok = true,
                 uuid,
+                mcuUri = info?.McuUri,
+                nodeName = info?.NodeName,
+                version = info?.Version,
+                layout = info?.Layout
+            });
+        });
+
+        app.MapPost("/api/node/add-simulated", async (HttpRequest req, RuntimeSessionService runtime, CancellationToken ct) =>
+        {
+            var payload = await req.ReadFromJsonAsync<SimulatedNodeRequest>(cancellationToken: ct);
+            var uuid = await runtime.AddSimulatedNodeAsync(payload?.Name, ct);
+            var info = DIVERSession.Instance.GetNodeInfo(uuid);
+            return JsonHelper.Json(new
+            {
+                ok = true,
+                uuid,
+                mcuUri = info?.McuUri,
                 nodeName = info?.NodeName,
                 version = info?.Version,
                 layout = info?.Layout
@@ -1349,6 +1366,7 @@ public sealed record HistoryCheckoutRequest(string Commit, string? Path);
 public sealed record RootConfigureRequest(string? LogicName);
 public sealed record RootControlSetRequest(string Name, object? Value);
 public sealed record NodeProbeRequest(string McuUri);
+public sealed record SimulatedNodeRequest(string? Name);
 public sealed record NodeConfigureRequest(string? NodeName, PortConfigItem[]? PortConfigs, JsonObject? ExtraInfo);
 public sealed record NodeProgramRequest(string LogicName);
 public sealed record PortConfigItem(string Type, string? Name, uint Baud, uint? ReceiveFrameMs, uint? RetryTimeMs);

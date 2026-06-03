@@ -51,6 +51,24 @@
     <UpToDateCheckInput
       Include="$(MSBuildThisFileDirectory)..\..\MCUSerialBridge\build\runtimes\linux-arm64\native\libmcu_serial_bridge.so"
       Condition="Exists('$(MSBuildThisFileDirectory)..\..\MCUSerialBridge\build\runtimes\linux-arm64\native\libmcu_serial_bridge.so')" />
+    <None
+      Include="$(MSBuildThisFileDirectory)..\CoralinkerSimNodeHost\build\runtimes\win-x64\native\sim_node_runtime.dll"
+      Link="simnode\runtimes\win-x64\native\sim_node_runtime.dll"
+      CopyToOutputDirectory="PreserveNewest"
+      CopyToPublishDirectory="PreserveNewest"
+      Condition="Exists('$(MSBuildThisFileDirectory)..\CoralinkerSimNodeHost\build\runtimes\win-x64\native\sim_node_runtime.dll')" />
+    <None
+      Include="$(MSBuildThisFileDirectory)..\CoralinkerSimNodeHost\build\runtimes\linux-x64\native\libsim_node_runtime.so"
+      Link="simnode\runtimes\linux-x64\native\libsim_node_runtime.so"
+      CopyToOutputDirectory="PreserveNewest"
+      CopyToPublishDirectory="PreserveNewest"
+      Condition="Exists('$(MSBuildThisFileDirectory)..\CoralinkerSimNodeHost\build\runtimes\linux-x64\native\libsim_node_runtime.so')" />
+    <None
+      Include="$(MSBuildThisFileDirectory)..\CoralinkerSimNodeHost\build\runtimes\linux-arm64\native\libsim_node_runtime.so"
+      Link="simnode\runtimes\linux-arm64\native\libsim_node_runtime.so"
+      CopyToOutputDirectory="PreserveNewest"
+      CopyToPublishDirectory="PreserveNewest"
+      Condition="Exists('$(MSBuildThisFileDirectory)..\CoralinkerSimNodeHost\build\runtimes\linux-arm64\native\libsim_node_runtime.so')" />
   </ItemGroup>
 
   <!-- Do not treat runtime workspace state as source code -->
@@ -77,11 +95,39 @@
       RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier;RuntimeIdentifiers;SelfContained;PublishSingleFile;PublishTrimmed" />
   </Target>
 
+  <Target Name="BuildCoralinkerSimNodeHost" BeforeTargets="BeforeBuild">
+    <MSBuild
+      Projects="$(MSBuildThisFileDirectory)..\CoralinkerSimNodeHost\CoralinkerSimNodeHost.csproj"
+      Targets="Restore;Build"
+      Properties="Configuration=$(Configuration)"
+      RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier;RuntimeIdentifiers;SelfContained;PublishSingleFile;PublishTrimmed" />
+  </Target>
+
+  <Target Name="CopyCoralinkerSimNodeHostToOutput" AfterTargets="Build">
+    <ItemGroup>
+      <SimNodeHostOutput Include="$(MSBuildThisFileDirectory)..\CoralinkerSimNodeHost\bin\$(Configuration)\net8.0\**\*" />
+    </ItemGroup>
+    <Copy
+      SourceFiles="@(SimNodeHostOutput)"
+      DestinationFiles="@(SimNodeHostOutput->'$(OutputPath)simnode\%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true" />
+  </Target>
+
   <Target Name="CollectDiverCompilerPortablePublishResources" BeforeTargets="ComputeFilesToPublish">
     <ItemGroup>
       <DiverCompilerPortablePublishFile Include="$(MSBuildThisFileDirectory)..\..\DiverCompilerPortable\bin\$(Configuration)\netstandard2.0\**\*" />
       <ResolvedFileToPublish Include="@(DiverCompilerPortablePublishFile)">
         <RelativePath>res\compiler\%(DiverCompilerPortablePublishFile.RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
+  <Target Name="CollectCoralinkerSimNodeHostPublishResources" BeforeTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <SimNodeHostPublishFile Include="$(MSBuildThisFileDirectory)..\CoralinkerSimNodeHost\bin\$(Configuration)\net8.0\**\*" />
+      <ResolvedFileToPublish Include="@(SimNodeHostPublishFile)">
+        <RelativePath>simnode\%(SimNodeHostPublishFile.RecursiveDir)%(Filename)%(Extension)</RelativePath>
         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       </ResolvedFileToPublish>
     </ItemGroup>

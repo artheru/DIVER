@@ -17,11 +17,18 @@
           <n-radio-group v-model:value="uriMode" :disabled="isProbing || isAdding">
             <n-radio-button value="name">COM Port</n-radio-button>
             <n-radio-button value="vidpid">VID/PID</n-radio-button>
+            <n-radio-button value="simulated">Simulated</n-radio-button>
           </n-radio-group>
         </n-form-item>
 
+        <template v-if="uriMode === 'simulated'">
+          <n-form-item label="Node Name">
+            <n-input v-model:value="simulatedName" placeholder="Optional simulated node name" :disabled="isProbing || isAdding" />
+          </n-form-item>
+        </template>
+
         <!-- COM 端口模式 -->
-        <template v-if="uriMode === 'name'">
+        <template v-else-if="uriMode === 'name'">
           <n-form-item label="COM Port">
             <n-select
               v-model:value="selectedPort"
@@ -56,7 +63,7 @@
         </template>
 
         <!-- 波特率 -->
-        <n-form-item label="Baud Rate">
+        <n-form-item v-if="uriMode !== 'simulated'" label="Baud Rate">
           <n-select
             v-model:value="baudrate"
             :options="baudOptions"
@@ -65,14 +72,14 @@
         </n-form-item>
 
         <!-- 生成的 URI 预览 -->
-        <n-form-item label="URI Preview">
+        <n-form-item v-if="uriMode !== 'simulated'" label="URI Preview">
           <code class="uri-preview">{{ generatedUri }}</code>
         </n-form-item>
 
         <!-- 探测结果 -->
         <div v-if="probeResult" class="probe-result" :class="{ success: probeResult.ok, error: !probeResult.ok }">
           <template v-if="probeResult.ok">
-            <div class="result-header">✓ MCU Detected</div>
+            <div class="result-header">✓ {{ uriMode === 'simulated' ? 'Simulated Node Ready' : 'MCU Detected' }}</div>
             <div class="result-info">
               <span class="label">Product:</span>
               <span class="value">{{ probeResult.version?.productionName || 'Unknown' }}</span>
@@ -125,7 +132,7 @@
             Probe
           </n-button>
           <n-button 
-            v-if="probeResult"
+            v-if="probeResult && uriMode !== 'simulated'"
             type="warning"
             @click="showUpgradeDialog = true"
             :disabled="isProbing || isAdding"
@@ -157,7 +164,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { NModal, NCard, NButton, NFormItem, NSelect, NRadioGroup, NRadioButton, NInput, NSpin } from 'naive-ui'
-import { getAvailablePorts, probeNode, addNode as apiAddNode } from '@/api/device'
+import { getAvailablePorts, probeNode, addNode as apiAddNode, addSimulatedNode } from '@/api/device'
 import UpgradeDialog from './UpgradeDialog.vue'
 import type { LayoutInfo, VersionInfo } from '@/types'
 
@@ -209,11 +216,12 @@ const showModal = computed({
   set: (v) => emit('update:show', v)
 })
 
-const uriMode = ref<'name' | 'vidpid'>('name')
+const uriMode = ref<'name' | 'vidpid' | 'simulated'>('name')
 const selectedPort = ref<string | null>(null)
 const vid = ref('')
 const pid = ref('')
 const serial = ref('')
+const simulatedName = ref('')
 const baudrate = ref(1000000)
 
 const loadingPorts = ref(false)
@@ -240,6 +248,10 @@ const portOptions = computed(() =>
 
 // 生成的 URI
 const generatedUri = computed(() => {
+  if (uriMode.value === 'simulated') {
+    return 'sim://new'
+  }
+
   if (uriMode.value === 'name') {
     if (!selectedPort.value) return 'serial://name=???&baudrate=' + baudrate.value
     return `serial://name=${selectedPort.value}&baudrate=${baudrate.value}`
@@ -254,6 +266,10 @@ const generatedUri = computed(() => {
 
 // 是否可以探测
 const canProbe = computed(() => {
+  if (uriMode.value === 'simulated') {
+    return true
+  }
+
   if (uriMode.value === 'name') {
     return !!selectedPort.value
   } else {
@@ -310,8 +326,10 @@ async function handleConfirm() {
   isAdding.value = true
   
   try {
-    // 调用 addNode API - 真正添加节点
-    const addResult = await apiAddNode(generatedUri.value)
+    // 调用 API - 真正添加节点
+    const addResult = uriMode.value === 'simulated'
+      ? await addSimulatedNode(simulatedName.value || undefined)
+      : await apiAddNode(generatedUri.value)
     
     if (!addResult.ok || !addResult.uuid) {
       probeResult.value = {
@@ -335,7 +353,7 @@ async function handleConfirm() {
     
     emit('confirm', {
       uuid: addResult.uuid,
-      mcuUri: generatedUri.value,
+      mcuUri: addResult.mcuUri || generatedUri.value,
       nodeName: addResult.nodeName || `Node-${addResult.uuid.slice(0, 8)}`,
       version: {
         productionName: addResult.version?.productionName || 'Unknown',
@@ -364,6 +382,7 @@ function resetForm() {
   vid.value = ''
   pid.value = ''
   serial.value = ''
+  simulatedName.value = ''
 }
 
 // 处理升级完成

@@ -62,6 +62,13 @@ export async function addNode(mcuUri: string): Promise<AddNodeResult> {
 }
 
 /**
+ * 添加模拟节点（独立进程隔离，不依赖物理 MCU）
+ */
+export async function addSimulatedNode(name?: string): Promise<AddNodeResult> {
+  return post('/api/node/add-simulated', { name })
+}
+
+/**
  * 删除节点
  * @param uuid 节点 UUID
  */
