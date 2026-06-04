@@ -11,13 +11,15 @@ public sealed class RuntimeSessionService
     private readonly TerminalBroadcaster _terminal;
     private readonly WireTapAggregatorService _aggregator;
     private readonly RootRuntimeService _rootRuntime;
+    private readonly FatalErrorStore _fatalErrors;
     private readonly DIVERSession _session = DIVERSession.Instance;
 
-    public RuntimeSessionService(TerminalBroadcaster terminal, WireTapAggregatorService aggregator, RootRuntimeService rootRuntime)
+    public RuntimeSessionService(TerminalBroadcaster terminal, WireTapAggregatorService aggregator, RootRuntimeService rootRuntime, FatalErrorStore fatalErrors)
     {
         _terminal = terminal;
         _aggregator = aggregator;
         _rootRuntime = rootRuntime;
+        _fatalErrors = fatalErrors;
         
         // 节点日志事件现在由 WireTapAggregatorService 批量推送（nodeLogBatch）
         // 减少高频 Console.WriteLine 导致的 SignalR 推送风暴
@@ -27,6 +29,7 @@ public sealed class RuntimeSessionService
         {
             try
             {
+                _fatalErrors.Record(uuid, errorJson);
                 await _terminal.FatalErrorJsonAsync(errorJson);
             }
             catch (Exception ex)

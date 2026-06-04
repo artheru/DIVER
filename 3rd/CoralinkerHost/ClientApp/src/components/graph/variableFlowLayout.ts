@@ -38,6 +38,20 @@ export interface VariableFlowItem {
   sideStackHeight?: number
   sideSlotIndex?: number
   sideSlotCount?: number
+  groupId?: string
+}
+
+export interface VariableFlowGroup {
+  id: string
+  direction: VariableValue['direction']
+  sourceIds: string[]
+  readerIds: string[]
+  writerIds: string[]
+  x: number
+  y: number
+  width: number
+  height: number
+  itemIds: string[]
 }
 
 export interface FlowLine {
@@ -56,7 +70,7 @@ export interface FixedGraphLayoutInput {
   flowVariables: VariableValue[]
   controlVariables: VariableValue[]
   nodeOrder: string[]
-  variableOrder: string[]
+  variableOrder?: string[]
   rootSourceIds: string[]
 }
 
@@ -64,6 +78,7 @@ export interface FixedGraphLayoutResult {
   rootRect: NodeRect
   nodeRects: Record<string, NodeRect>
   items: VariableFlowItem[]
+  groups: VariableFlowGroup[]
   lines: FlowLine[]
   variableOrder: string[]
 }
@@ -79,11 +94,12 @@ export interface VariableFlowLayoutInput {
 
 export interface VariableFlowLayoutResult {
   items: VariableFlowItem[]
+  groups: VariableFlowGroup[]
   lines: FlowLine[]
   variableOrder: string[]
 }
 
-export const FLOW_ITEM_WIDTH = 210
+export const FLOW_ITEM_WIDTH = 220
 export const FLOW_ITEM_HEIGHT = 38
 export const FLOW_ITEM_GAP = 18
 export const ROOT_SIZE = { width: 320, height: 190 }
@@ -96,9 +112,9 @@ const ROOT_BASE_HEIGHT = 190
 const ROOT_CONTROL_PADDING_X = 28
 const ROOT_CONTROL_PADDING_BOTTOM = 20
 const ROOT_CONTROL_AREA_HEIGHT = 54
-const CONTROL_ITEM_MIN_WIDTH = 124
-const CONTROL_ITEM_MAX_WIDTH = 220
-const FLOW_ITEM_MIN_WIDTH = 132
+const CONTROL_ITEM_MIN_WIDTH = 168
+const CONTROL_ITEM_MAX_WIDTH = 260
+const FLOW_ITEM_MIN_WIDTH = 168
 const FLOW_ITEM_MAX_WIDTH = 320
 const CONTROL_ITEM_GAP = 12
 const IO_LAYER_GAP = 86
@@ -109,14 +125,18 @@ const SIDE_VARIABLE_STACK_GAP = 12
 const SIDE_VARIABLE_TOP_OFFSET = 92
 const LINE_SLOT_MARGIN = 28
 const ROOT_RIGHT_GAP = -100000
+const FLOW_GROUP_PADDING = 10
+const FLOW_GROUP_ITEM_GAP = 8
+const FLOW_GROUP_GAP = 22
+const FLOW_GROUP_MAX_ITEMS = 6
 
 export function computeFixedGraphLayout(input: FixedGraphLayoutInput): FixedGraphLayoutResult {
   const orderedNodes = orderNodes(input.nodes, input.nodeOrder)
   const visibleFlowVariables = filterVisibleVariables(input.flowVariables)
   const visibleControlVariables = filterVisibleVariables(input.controlVariables)
-  const variableOrder = mergeVariableOrder(input.variableOrder, visibleFlowVariables)
-  const orderedFlowVariables = orderVariables(visibleFlowVariables, variableOrder)
   const rootIds = normalizeIds(input.rootSourceIds)
+  const orderedFlowVariables = autoOrderVariables(visibleFlowVariables, orderedNodes, rootIds)
+  const variableOrder = orderedFlowVariables.map(variable => variable.name)
   const gapVariableGroups = groupGapVariables(orderedFlowVariables, orderedNodes, rootIds)
   const gapVariableNames = new Set(
     Array.from(gapVariableGroups.values()).flat().map(variable => variable.name)
@@ -148,22 +168,23 @@ export function computeFixedGraphLayout(input: FixedGraphLayoutInput): FixedGrap
     ? Math.max(...controlItems.map(item => item.y + item.height))
     : rootRect.y + rootRect.height
   const ioY = controlBottom + IO_LAYER_GAP
-  const flowItems = layoutExternalVariables(centerFlowVariables, centerX, ioY)
-  const nodesY = (flowItems.length > 0 ? ioY + FLOW_ITEM_HEIGHT : controlBottom) + NODE_LAYER_GAP
+  const externalLayout = layoutExternalVariables(centerFlowVariables, centerX, ioY)
+  const nodesY = (externalLayout.items.length > 0 ? ioY + externalLayout.height : controlBottom) + NODE_LAYER_GAP
   const shiftedNodeRects = shiftNodeRects(nodeRects, centerX - nodeRowWidth / 2, nodesY)
   const gapItems = layoutGapVariables(gapVariableGroups, orderedNodes, shiftedNodeRects, rootRect)
-  const allFlowItems = [...flowItems, ...gapItems]
+  const allFlowItems = [...externalLayout.items, ...gapItems]
   const nodeTargets: FlowTarget[] = []
   for (const node of orderedNodes) {
     const rect = shiftedNodeRects[node.id]
     if (rect) nodeTargets.push({ rect, sourceId: node.sourceId })
   }
-  const lines = routeVariableLines(rootRect, nodeTargets, allFlowItems, input.rootSourceIds)
+  const lines = routeVariableLines(rootRect, nodeTargets, allFlowItems, input.rootSourceIds, externalLayout.groups)
 
   return {
     rootRect,
     nodeRects: shiftedNodeRects,
     items: [...allFlowItems, ...controlItems],
+    groups: externalLayout.groups,
     lines,
     variableOrder
   }
@@ -172,18 +193,19 @@ export function computeFixedGraphLayout(input: FixedGraphLayoutInput): FixedGrap
 export function computeVariableFlowLayout(input: VariableFlowLayoutInput): VariableFlowLayoutResult {
   const visibleFlowVariables = filterVisibleVariables(input.flowVariables)
   const visibleControlVariables = filterVisibleVariables(input.controlVariables)
-  const variableOrder = mergeVariableOrder(input.variableOrder ?? [], visibleFlowVariables)
-  const orderedFlowVariables = orderVariables(visibleFlowVariables, variableOrder)
-  const externalItems = layoutExternalVariables(
+  const orderedFlowVariables = autoOrderVariables(visibleFlowVariables, [], normalizeIds(input.rootSourceIds))
+  const variableOrder = orderedFlowVariables.map(variable => variable.name)
+  const externalLayout = layoutExternalVariables(
     orderedFlowVariables,
     input.rootRect.x + input.rootRect.width / 2,
     input.rootRect.y + input.rootRect.height + IO_LAYER_GAP
   )
   const controlItems = layoutControlVariables(visibleControlVariables, input.rootRect)
   const nodeTargets = input.nodeRects.map(rect => ({ rect, sourceId: undefined }))
-  const lines = routeVariableLines(input.rootRect, nodeTargets, externalItems, input.rootSourceIds ?? [])
+  const lines = routeVariableLines(input.rootRect, nodeTargets, externalLayout.items, input.rootSourceIds ?? [], externalLayout.groups)
   return {
-    items: [...externalItems, ...controlItems],
+    items: [...externalLayout.items, ...controlItems],
+    groups: externalLayout.groups,
     lines,
     variableOrder
   }
@@ -278,11 +300,6 @@ function variableByName(variables: VariableValue[], name: string): VariableValue
   return variables.find(variable => variable.name === name)
 }
 
-function orderVariables(variables: VariableValue[], order: string[]): VariableValue[] {
-  const byName = new Map(variables.map(variable => [variable.name, variable]))
-  return order.map(name => byName.get(name)).filter((variable): variable is VariableValue => !!variable)
-}
-
 function defaultVariableKey(variables: VariableValue[], name: string): number {
   const variable = variableByName(variables, name)
   if (!variable) return Number.MAX_SAFE_INTEGER
@@ -291,6 +308,56 @@ function defaultVariableKey(variables: VariableValue[], name: string): number {
 
 function variableGroup(variable: VariableValue): number {
   return variable.direction === 'upper' ? 0 : variable.direction === 'mutual' ? 1 : 2
+}
+
+function autoOrderVariables(variables: VariableValue[], nodes: FixedGraphNode[], rootIds: string[]): VariableValue[] {
+  const nodeIndexBySource = new Map<string, number>()
+  nodes.forEach((node, index) => {
+    if (node.sourceId) nodeIndexBySource.set(node.sourceId.toLowerCase(), index)
+  })
+
+  return [...variables].sort((a, b) => {
+    const aKey = relationSortKey(a, nodeIndexBySource, rootIds)
+    const bKey = relationSortKey(b, nodeIndexBySource, rootIds)
+    return compareNumberArray(aKey, bKey) || a.name.localeCompare(b.name)
+  })
+}
+
+function relationSortKey(variable: VariableValue, nodeIndexBySource: Map<string, number>, rootIds: string[]): number[] {
+  const readers = relationIds(normalizeIds(variable.readerIds))
+  const writers = relationIds(normalizeIds(variable.writerIds))
+  const rootReads = hasAnyId(rootIds, readers)
+  const rootWrites = hasAnyId(rootIds, writers)
+  const readerIndexes = relationNodeIndexes(readers, nodeIndexBySource)
+  const writerIndexes = relationNodeIndexes(writers, nodeIndexBySource)
+  const relatedIndexes = [...readerIndexes, ...writerIndexes]
+  const nearestNode = relatedIndexes.length > 0 ? Math.min(...relatedIndexes) : Number.MAX_SAFE_INTEGER
+  const rootNodeRole = rootWrites && !rootReads ? 0 : rootReads && !rootWrites ? 1 : 2
+  const adjacentGap = adjacentGapIndex(readerIndexes, writerIndexes)
+
+  return [
+    adjacentGap == null ? 0 : 1,
+    adjacentGap ?? nearestNode,
+    nearestNode,
+    rootNodeRole,
+    variableGroup(variable)
+  ]
+}
+
+function adjacentGapIndex(readerIndexes: number[], writerIndexes: number[]): number | null {
+  if (readerIndexes.length !== 1 || writerIndexes.length !== 1) return null
+  const readerIndex = readerIndexes[0] ?? 0
+  const writerIndex = writerIndexes[0] ?? 0
+  return Math.abs(readerIndex - writerIndex) === 1 ? Math.min(readerIndex, writerIndex) : null
+}
+
+function compareNumberArray(left: number[], right: number[]): number {
+  const length = Math.max(left.length, right.length)
+  for (let index = 0; index < length; index++) {
+    const delta = (left[index] ?? 0) - (right[index] ?? 0)
+    if (delta !== 0) return delta
+  }
+  return 0
 }
 
 function layoutControlVariables(variables: VariableValue[], rootRect: NodeRect): VariableFlowItem[] {
@@ -315,18 +382,124 @@ function layoutControlVariables(variables: VariableValue[], rootRect: NodeRect):
   })
 }
 
-function layoutExternalVariables(variables: VariableValue[], centerX: number, y: number): VariableFlowItem[] {
-  if (variables.length === 0) return []
+function layoutExternalVariables(
+  variables: VariableValue[],
+  centerX: number,
+  y: number
+): { items: VariableFlowItem[], groups: VariableFlowGroup[], height: number } {
+  if (variables.length === 0) return { items: [], groups: [], height: 0 }
 
-  const sizes = variables.map(variable => estimateVariableItemSize(variable, false))
-  const startX = centerX - rowWidth(sizes, FLOW_ITEM_GAP) / 2
-  let x = startX
-  return variables.map((variable, index) => {
-    const size = sizes[index] ?? { width: FLOW_ITEM_WIDTH, height: FLOW_ITEM_HEIGHT }
-    const item = createVariableItem(variable, `flow-${variable.direction}-${variable.name}`, x, y, size)
-    x += size.width + FLOW_ITEM_GAP
-    return item
+  const columns = buildExternalColumns(variables)
+  const widths = columns.map(column => column.width)
+  const heights = columns.map(column => column.height)
+  const totalWidth = widths.reduce((sum, width) => sum + width, 0) + (columns.length - 1) * FLOW_GROUP_GAP
+  const items: VariableFlowItem[] = []
+  const groups: VariableFlowGroup[] = []
+  let x = centerX - totalWidth / 2
+
+  columns.forEach(column => {
+    if (column.variables.length === 1) {
+      const variable = column.variables[0]
+      if (!variable) return
+      const size = column.sizes[0] ?? { width: FLOW_ITEM_WIDTH, height: FLOW_ITEM_HEIGHT }
+      items.push(createVariableItem(variable, `flow-${variable.direction}-${variable.name}`, x, y, size))
+      x += column.width + FLOW_GROUP_GAP
+      return
+    }
+
+    const groupId = `flow-group-${column.key}-${groups.length}`
+    const group: VariableFlowGroup = {
+      id: groupId,
+      direction: column.direction,
+      sourceIds: normalizeIds(column.variables.flatMap(variable => normalizeIds(variable.sourceIds))),
+      readerIds: normalizeIds(column.variables.flatMap(variable => normalizeIds(variable.readerIds))),
+      writerIds: normalizeIds(column.variables.flatMap(variable => normalizeIds(variable.writerIds))),
+      x,
+      y,
+      width: column.width,
+      height: column.height,
+      itemIds: []
+    }
+    groups.push(group)
+
+    let itemY = y + FLOW_GROUP_PADDING
+    column.variables.forEach((variable, index) => {
+      const size = column.sizes[index] ?? { width: FLOW_ITEM_WIDTH, height: FLOW_ITEM_HEIGHT }
+      const item = createVariableItem(
+        variable,
+        `flow-${variable.direction}-${variable.name}`,
+        x + FLOW_GROUP_PADDING + (column.innerWidth - size.width) / 2,
+        itemY,
+        size,
+        { groupId }
+      )
+      group.itemIds.push(item.id)
+      items.push(item)
+      itemY += size.height + FLOW_GROUP_ITEM_GAP
+    })
+
+    x += column.width + FLOW_GROUP_GAP
   })
+
+  return { items, groups, height: Math.max(...heights) }
+}
+
+interface ExternalColumn {
+  key: string
+  direction: VariableValue['direction']
+  variables: VariableValue[]
+  sizes: Array<{ width: number, height: number }>
+  width: number
+  innerWidth: number
+  height: number
+}
+
+function buildExternalColumns(variables: VariableValue[]): ExternalColumn[] {
+  const columns: ExternalColumn[] = []
+  let pendingKey = ''
+  let pending: VariableValue[] = []
+
+  const flush = () => {
+    if (pending.length === 0) return
+    for (let index = 0; index < pending.length; index += FLOW_GROUP_MAX_ITEMS) {
+      columns.push(createExternalColumn(pendingKey, pending.slice(index, index + FLOW_GROUP_MAX_ITEMS)))
+    }
+    pending = []
+  }
+
+  for (const variable of variables) {
+    const key = relationGroupKey(variable)
+    if (key !== pendingKey) {
+      flush()
+      pendingKey = key
+    }
+    pending.push(variable)
+  }
+  flush()
+  return columns
+}
+
+function createExternalColumn(key: string, variables: VariableValue[]): ExternalColumn {
+  const sizes = variables.map(variable => estimateVariableItemSize(variable, false))
+  const innerWidth = Math.max(...sizes.map(size => size.width))
+  const grouped = variables.length > 1
+  return {
+    key: key.replace(/[^a-zA-Z0-9_-]/g, '_'),
+    direction: variables[0]?.direction ?? 'upper',
+    variables,
+    sizes,
+    width: grouped ? innerWidth + FLOW_GROUP_PADDING * 2 : innerWidth,
+    innerWidth,
+    height: grouped ? rowHeight(sizes, FLOW_GROUP_ITEM_GAP) + FLOW_GROUP_PADDING * 2 : FLOW_ITEM_HEIGHT
+  }
+}
+
+function relationGroupKey(variable: VariableValue): string {
+  return [
+    variable.direction,
+    normalizeIds(variable.writerIds).map(id => id.toLowerCase()).sort().join(','),
+    normalizeIds(variable.readerIds).map(id => id.toLowerCase()).sort().join(',')
+  ].join('|')
 }
 
 function layoutGapVariables(
@@ -530,7 +703,7 @@ function createVariableItem(
   x: number,
   y: number,
   size: { width: number; height: number },
-  placement?: Pick<VariableFlowItem, 'placement' | 'gapIndex' | 'sideStackHeight' | 'sideSlotIndex' | 'sideSlotCount'>
+  placement?: Pick<VariableFlowItem, 'placement' | 'gapIndex' | 'sideStackHeight' | 'sideSlotIndex' | 'sideSlotCount' | 'groupId'>
 ): VariableFlowItem {
   return {
     id,
@@ -571,10 +744,17 @@ function estimateVariableItemSize(variable: VariableValue, compact: boolean): { 
   return { width, height: FLOW_ITEM_HEIGHT }
 }
 
-function routeVariableLines(rootRect: NodeRect, nodeTargets: FlowTarget[], items: VariableFlowItem[], rootSourceIds: string[]): FlowLine[] {
-  if (items.length === 0) return []
+function routeVariableLines(
+  rootRect: NodeRect,
+  nodeTargets: FlowTarget[],
+  items: VariableFlowItem[],
+  rootSourceIds: string[],
+  groups: VariableFlowGroup[] = []
+): FlowLine[] {
+  if (items.length === 0 && groups.length === 0) return []
 
   const lines: FlowLine[] = []
+  const routeItems = [...groups, ...items.filter(item => !item.groupId)].sort(compareRouteItemPosition)
   const rootIds = normalizeIds(rootSourceIds)
   const rootBottomSlots: string[] = []
   const nodeTopSlots = new Map<string, string[]>()
@@ -583,8 +763,8 @@ function routeVariableLines(rootRect: NodeRect, nodeTargets: FlowTarget[], items
     if (!slots.includes(key)) slots.push(key)
   }
 
-  items.forEach(item => {
-    if (item.placement === 'root-side' || item.placement === 'node-side') return
+  routeItems.forEach(item => {
+    if (isSidePlacedItem(item)) return
 
     const readers = relationIds(item.readerIds)
     const writers = relationIds(item.writerIds)
@@ -611,7 +791,7 @@ function routeVariableLines(rootRect: NodeRect, nodeTargets: FlowTarget[], items
     })
   })
 
-  items.forEach((item, itemIndex) => {
+  routeItems.forEach((item, itemIndex) => {
     const variableRect = itemToRect(item)
     const readers = relationIds(item.readerIds)
     const writers = relationIds(item.writerIds)
@@ -629,7 +809,7 @@ function routeVariableLines(rootRect: NodeRect, nodeTargets: FlowTarget[], items
     let topSlot = 0
     let bottomSlot = 0
 
-    if (item.placement === 'root-side') {
+    if (isVariableFlowItem(item) && item.placement === 'root-side') {
       if (rootWrites) {
         pushSideLine(
           `${item.id}-root-side-writer`,
@@ -653,7 +833,7 @@ function routeVariableLines(rootRect: NodeRect, nodeTargets: FlowTarget[], items
       return
     }
 
-    if (item.placement === 'node-side') {
+    if (isVariableFlowItem(item) && item.placement === 'node-side') {
       writerTargets.forEach((target, targetIndex) => {
         const variableSide = variableRect.x < target.rect.x + target.rect.width / 2 ? 'right' : 'left'
         const nodeSide = variableSide === 'right' ? 'left' : 'right'
@@ -738,11 +918,31 @@ function routeVariableLines(rootRect: NodeRect, nodeTargets: FlowTarget[], items
   return lines
 }
 
-function rootSlotKey(item: VariableFlowItem, role: 'reader' | 'writer'): string {
+function isVariableFlowItem(item: VariableFlowItem | VariableFlowGroup): item is VariableFlowItem {
+  return 'name' in item
+}
+
+function isSidePlacedItem(item: VariableFlowItem | VariableFlowGroup): boolean {
+  return isVariableFlowItem(item) && (item.placement === 'root-side' || item.placement === 'node-side')
+}
+
+function compareRouteItemPosition(left: VariableFlowItem | VariableFlowGroup, right: VariableFlowItem | VariableFlowGroup): number {
+  const leftCenter = left.x + left.width / 2
+  const rightCenter = right.x + right.width / 2
+  if (leftCenter !== rightCenter) return leftCenter - rightCenter
+  return left.y - right.y
+}
+
+function rootSlotKey(item: Pick<VariableFlowItem | VariableFlowGroup, 'id'>, role: 'reader' | 'writer'): string {
   return `${item.id}:root:${role}`
 }
 
-function nodeSlotKey(item: VariableFlowItem, role: 'reader' | 'writer', target: FlowTarget, targetIndex: number): string {
+function nodeSlotKey(
+  item: Pick<VariableFlowItem | VariableFlowGroup, 'id'>,
+  role: 'reader' | 'writer',
+  target: FlowTarget,
+  targetIndex: number
+): string {
   return `${item.id}:node:${role}:${target.sourceId ?? targetIndex}`
 }
 
@@ -809,7 +1009,7 @@ function slotY(rect: NodeRect, slotIndex: number, slotCount: number, margin = LI
   return margin + usable * ((slotIndex + 1) / (slotCount + 1))
 }
 
-function itemToRect(item: VariableFlowItem): NodeRect {
+function itemToRect(item: VariableFlowItem | VariableFlowGroup): NodeRect {
   return { x: item.x, y: item.y, width: item.width, height: item.height }
 }
 

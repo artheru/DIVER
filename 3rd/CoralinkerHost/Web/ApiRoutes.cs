@@ -18,6 +18,79 @@ public static class ApiRoutes
         });
 
         // ============================================
+        // Kit 文档 API / HTML
+        // ============================================
+
+        app.MapGet("/api/docs/kit", (KitDocsService docs, HttpContext ctx) =>
+        {
+            ctx.Response.Headers.CacheControl = "no-cache";
+            return JsonHelper.Json(new { ok = true, docs = docs.GetIndex() });
+        });
+
+        app.MapGet("/api/docs/kit/resources", (KitDocsService docs, HttpContext ctx) =>
+        {
+            ctx.Response.Headers.CacheControl = "no-cache";
+            return JsonHelper.Json(new { ok = true, resources = docs.GetResources() });
+        });
+
+        app.MapGet("/api/docs/kit/bundle.zip", (KitDocsService docs, HttpContext ctx) =>
+        {
+            var bundle = docs.BuildBundle();
+            if (ctx.Request.Headers.IfNoneMatch == bundle.ETag)
+            {
+                return Results.StatusCode(StatusCodes.Status304NotModified);
+            }
+
+            ctx.Response.Headers.ETag = bundle.ETag;
+            ctx.Response.Headers.LastModified = bundle.LastModifiedUtc.ToString("R");
+            ctx.Response.Headers.CacheControl = "public, max-age=300";
+            return Results.File(bundle.Bytes, bundle.ContentType, bundle.FileName, lastModified: bundle.LastModifiedUtc);
+        });
+
+        app.MapGet("/api/docs/kit/md", (KitDocsService docs, HttpContext ctx) =>
+        {
+            var content = docs.ReadMarkdown("README.md");
+            return content == null ? Results.NotFound(new { ok = false, error = "Document not found" }) : ServeDoc(ctx, content, forAgent: true);
+        });
+
+        app.MapGet("/api/docs/kit/md/{**path}", (KitDocsService docs, HttpContext ctx, string path) =>
+        {
+            var content = docs.ReadMarkdown(path);
+            return content == null ? Results.NotFound(new { ok = false, error = "Document not found" }) : ServeDoc(ctx, content, forAgent: true);
+        });
+
+        app.MapGet("/docs/kit", (KitDocsService docs, HttpContext ctx) =>
+        {
+            var content = docs.ReadHtml("README.html");
+            return content == null ? Results.NotFound("Document not found") : ServeDoc(ctx, content, forAgent: false);
+        });
+
+        app.MapGet("/docs/kit/{**path}", (KitDocsService docs, HttpContext ctx, string path) =>
+        {
+            var content = docs.ReadHtml(string.IsNullOrWhiteSpace(path) ? "README.html" : path);
+            return content == null ? Results.NotFound("Document not found") : ServeDoc(ctx, content, forAgent: false);
+        });
+
+        // ============================================
+        // Agent 聚合 API
+        // ============================================
+
+        app.MapGet("/api/agent/capabilities", (AgentStateService agent) =>
+        {
+            return JsonHelper.Json(agent.GetCapabilities());
+        });
+
+        app.MapGet("/api/agent/state", (AgentStateService agent) =>
+        {
+            return JsonHelper.Json(agent.GetState());
+        });
+
+        app.MapPost("/api/agent/refresh", (AgentStateService agent) =>
+        {
+            return JsonHelper.Json(agent.GetState());
+        });
+
+        // ============================================
         // 项目管理 API
         // ============================================
 
@@ -88,6 +161,11 @@ public static class ApiRoutes
                 logger.LogError(ex, "/api/files/tree failed");
                 return Results.Problem(detail: ex.Message, statusCode: 500);
             }
+        });
+
+        app.MapGet("/api/files/snapshot", (FileSyncService sync) =>
+        {
+            return JsonHelper.Json(new { ok = true, snapshot = sync.GetSnapshot() });
         });
 
         app.MapGet("/api/files/read", async (ProjectStore store, string path, CancellationToken ct) =>
@@ -181,6 +259,43 @@ public static class ApiRoutes
                 headAfter = commit.HeadAfter,
                 committed = commit.Committed
             });
+        });
+
+        app.MapPost("/api/files/sync", async (FileSyncService sync, HttpRequest req, CancellationToken ct) =>
+        {
+            try
+            {
+                var json = await req.ReadFromJsonAsync<JsonObject>(cancellationToken: ct);
+                if (json == null)
+                {
+                    return Results.BadRequest(new { ok = false, error = "Invalid JSON body." });
+                }
+                if (json.ContainsKey("files") && !json.ContainsKey("changes"))
+                {
+                    return Results.BadRequest(new
+                    {
+                        ok = false,
+                        error = "Unsupported sync format. Use changes[] with action/kind/text/baseHash instead of legacy files[]."
+                    });
+                }
+
+                var request = json.Deserialize<FileSyncRequest>(ProjectJson.Options);
+                if (request == null)
+                {
+                    return Results.BadRequest(new { ok = false, error = "Invalid sync request." });
+                }
+
+                var result = await sync.SyncAsync(request, ct);
+                return JsonHelper.Json(result);
+            }
+            catch (FileSyncConflictException ex)
+            {
+                return Results.Conflict(new { ok = false, conflict = true, error = ex.Message, conflicts = ex.Conflicts });
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { ok = false, error = ex.Message });
+            }
         });
 
         app.MapPost("/api/files/delete", (ProjectStore store, GitHistoryService history, DiverBuildService builder, FileDeleteRequest req) =>
@@ -312,7 +427,13 @@ public static class ApiRoutes
             var result = await runtime.ProbeNodeAsync(payload.McuUri, ct);
             if (result == null)
             {
-                return JsonHelper.Json(new { ok = false, error = "Probe failed" });
+                return JsonHelper.Json(new
+                {
+                    ok = false,
+                    error = "Probe failed",
+                    mcuUri = payload.McuUri,
+                    hint = "Check mcuUri format, serial/CAN adapter availability, power, wiring, and whether another process owns the device."
+                });
             }
 
             return JsonHelper.Json(new
@@ -330,8 +451,9 @@ public static class ApiRoutes
                     digitalInputCount = (int)result.Layout.DigitalInputCount,
                     digitalOutputCount = (int)result.Layout.DigitalOutputCount,
                     portCount = (int)result.Layout.PortCount,
-                    ports = result.Layout.GetValidPorts().Select(p => new
+                    ports = result.Layout.GetValidPorts().Select((p, index) => new
                     {
+                        index,
                         type = p.Type.ToString(),
                         name = p.Name
                     }).ToArray()
@@ -348,7 +470,13 @@ public static class ApiRoutes
             var uuid = await runtime.AddNodeAsync(payload.McuUri, ct);
             if (uuid == null)
             {
-                return JsonHelper.Json(new { ok = false, error = "Add node failed" });
+                return JsonHelper.Json(new
+                {
+                    ok = false,
+                    error = "Add node failed",
+                    mcuUri = payload.McuUri,
+                    hint = "Call /api/node/probe first and verify the exact mcuUri. Use /api/node/add-simulated for simulated nodes."
+                });
             }
 
             var info = DIVERSession.Instance.GetNodeInfo(uuid);
@@ -391,15 +519,30 @@ public static class ApiRoutes
             if (payload == null)
                 return Results.BadRequest(new { ok = false, error = "Invalid request" });
 
+            MCUSerialBridgeCLR.PortConfig[]? portConfigs = null;
+            if (payload.PortConfigs != null)
+            {
+                var info = DIVERSession.Instance.GetNodeInfo(uuid);
+                var existing = info?.PortConfigs ?? Array.Empty<PortConfigSnapshot>();
+                try
+                {
+                    portConfigs = MergePortConfigs(existing, payload.PortConfigs);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return Results.BadRequest(new { ok = false, error = ex.Message });
+                }
+            }
+
             var settings = new NodeSettings
             {
                 NodeName = payload.NodeName,
-                PortConfigs = payload.PortConfigs?.Select(p => ParsePortConfig(p)).ToArray(),
+                PortConfigs = portConfigs,
                 ExtraInfo = payload.ExtraInfo
             };
 
             var result = DIVERSession.Instance.ConfigureNode(uuid, settings);
-            return JsonHelper.Json(new { ok = result });
+            return JsonHelper.Json(new { ok = result, portConfigsMerged = payload.PortConfigs != null });
         });
 
         app.MapPost("/api/node/{uuid}/program", async (string uuid, HttpRequest req, ProjectStore store, RuntimeSessionService runtime, CancellationToken ct) =>
@@ -419,6 +562,31 @@ public static class ApiRoutes
             {
                 Console.WriteLine($"[API /program] ERROR: Missing logicName");
                 return Results.BadRequest(new { ok = false, error = "Missing logicName" });
+            }
+
+            foreach (var existing in DIVERSession.Instance.ExportNodes())
+            {
+                if (string.Equals(existing.Key, uuid, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (string.Equals(existing.Value.LogicName, payload.LogicName, StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine($"[API /program] ERROR: LogicName already bound to another node. logic={payload.LogicName}, existingUuid={existing.Key}");
+                    return Results.BadRequest(new
+                    {
+                        ok = false,
+                        error = $"Logic '{payload.LogicName}' is already programmed to another node. One Logic class can only be programmed to one MCU node because its LowerIO fields would conflict.",
+                        conflict = new
+                        {
+                            uuid = existing.Key,
+                            nodeName = existing.Value.NodeName,
+                            logicName = existing.Value.LogicName
+                        },
+                        hint = "Create a separate Logic class for each MCU node, with role-specific LowerIO field names."
+                    });
+                }
             }
 
             // 从 generated 目录读取编译产物
@@ -492,6 +660,12 @@ public static class ApiRoutes
                 if (payload?.Nodes == null)
                     return Results.BadRequest(new { ok = false, error = "Missing nodes" });
 
+                var duplicateLogic = FindDuplicateLogicBinding(payload.Nodes);
+                if (duplicateLogic != null)
+                {
+                    return Results.BadRequest(BuildDuplicateLogicBindingError(duplicateLogic));
+                }
+
                 DIVERSession.Instance.ImportNodes(payload.Nodes);
                 return JsonHelper.Json(new { ok = true, count = payload.Nodes.Count });
             }
@@ -515,12 +689,26 @@ public static class ApiRoutes
         {
             try
             {
+                var duplicateLogic = FindDuplicateLogicBinding(DIVERSession.Instance.ExportNodes());
+                if (duplicateLogic != null)
+                {
+                    return Results.BadRequest(BuildDuplicateLogicBindingError(duplicateLogic));
+                }
+
                 var runStartedAt = DateTimeOffset.Now;
                 var head = history.GetHead();
                 var result = await runtime.StartAsync(ct);
+                var allStarted = result.TotalNodes > 0 && result.SuccessNodes == result.TotalNodes;
+                var status = allStarted
+                    ? "Started"
+                    : result.SuccessNodes > 0
+                        ? "PartialFailure"
+                        : "Failed";
                 return JsonHelper.Json(new
                 {
-                    ok = result.Success,
+                    ok = allStarted,
+                    status,
+                    sessionRunning = result.Success,
                     totalNodes = result.TotalNodes,
                     successNodes = result.SuccessNodes,
                     errors = result.Errors.Select(e => new { uuid = e.UUID, nodeName = e.NodeName, error = e.Error }),
@@ -563,9 +751,16 @@ public static class ApiRoutes
             return JsonHelper.Json(new { ok = true, logics = root.ListRootLogics() });
         });
 
-        app.MapPost("/api/root/configure", (RootRuntimeService root, RootConfigureRequest req) =>
+        app.MapPost("/api/root/configure", async (RootRuntimeService root, HttpRequest req, CancellationToken ct) =>
         {
-            root.Configure(req.LogicName);
+            var payload = await req.ReadFromJsonAsync<JsonObject>(cancellationToken: ct);
+            if (payload == null || !payload.ContainsKey("logicName"))
+            {
+                return Results.BadRequest(new { ok = false, error = "Missing logicName. Use { \"logicName\": \"RootLogicName\" } or { \"logicName\": null } to clear." });
+            }
+
+            var logicName = payload["logicName"]?.GetValue<string>();
+            root.Configure(logicName);
             return JsonHelper.Json(new { ok = true });
         });
 
@@ -784,6 +979,11 @@ public static class ApiRoutes
             return JsonHelper.Json(new { ok = true, variables = fields.Values });
         });
 
+        app.MapGet("/api/variables/flow", (AgentStateService agent) =>
+        {
+            return JsonHelper.Json(new { ok = true, flow = agent.BuildVariablesFlow() });
+        });
+
         app.MapPost("/api/variable/set", async (HttpRequest req, RootRuntimeService root, TerminalBroadcaster term, CancellationToken ct) =>
         {
             try
@@ -851,6 +1051,12 @@ public static class ApiRoutes
             return JsonHelper.Json(new { ok = true });
         });
 
+        app.MapGet("/api/logs/build", (TerminalBroadcaster terminal) =>
+        {
+            var history = terminal.GetBuildHistory();
+            return JsonHelper.Json(new { ok = true, lines = history });
+        });
+
         app.MapGet("/api/logs/root", (TerminalBroadcaster terminal) =>
         {
             var history = terminal.GetRootHistory();
@@ -900,6 +1106,21 @@ public static class ApiRoutes
         app.MapPost("/api/logs/clear", () =>
         {
             DIVERSession.Instance.ClearAllLogs();
+            return JsonHelper.Json(new { ok = true });
+        });
+
+        // ============================================
+        // 错误监控 API
+        // ============================================
+
+        app.MapGet("/api/errors/fatal", (FatalErrorStore errors) =>
+        {
+            return JsonHelper.Json(new { ok = true, fatalError = errors.GetLatest() });
+        });
+
+        app.MapPost("/api/errors/fatal/clear", (FatalErrorStore errors) =>
+        {
+            errors.Clear();
             return JsonHelper.Json(new { ok = true });
         });
 
@@ -1194,6 +1415,22 @@ public static class ApiRoutes
         });
     }
 
+    private static IResult ServeDoc(HttpContext ctx, KitDocContent content, bool forAgent)
+    {
+        ctx.Response.Headers.ETag = content.ETag;
+        ctx.Response.Headers.LastModified = content.LastModifiedUtc.ToString("R");
+        ctx.Response.Headers.CacheControl = forAgent
+            ? "no-cache"
+            : "public, max-age=31536000, immutable";
+
+        if (ctx.Request.Headers.IfNoneMatch.Any(value => string.Equals(value, content.ETag, StringComparison.Ordinal)))
+        {
+            return Results.StatusCode(StatusCodes.Status304NotModified);
+        }
+
+        return Results.Text(content.Text, content.ContentType, Encoding.UTF8);
+    }
+
     private static void DeleteDirectoryIfExists(string path)
     {
         if (!Directory.Exists(path))
@@ -1227,6 +1464,57 @@ public static class ApiRoutes
     }
 
     private static MCUSerialBridgeCLR.PortConfig ParsePortConfig(PortConfigItem p)
+    {
+        if (string.Equals(p.Type, "CAN", StringComparison.OrdinalIgnoreCase))
+        {
+            return new MCUSerialBridgeCLR.CANPortConfig(p.Baud, p.RetryTimeMs ?? 10);
+        }
+        return new MCUSerialBridgeCLR.SerialPortConfig(p.Baud, p.ReceiveFrameMs ?? 0);
+    }
+
+    private static MCUSerialBridgeCLR.PortConfig[] MergePortConfigs(
+        PortConfigSnapshot[] existing,
+        PortConfigItem[] updates)
+    {
+        var merged = existing.Select(ParsePortConfigSnapshot).ToArray();
+        if (merged.Length == 0 || updates.Length >= merged.Length && updates.All(p => p.Index == null))
+        {
+            return updates.Select(ParsePortConfig).ToArray();
+        }
+
+        for (var updateIndex = 0; updateIndex < updates.Length; updateIndex++)
+        {
+            var update = updates[updateIndex];
+            var targetIndex = ResolvePortIndex(existing, update, updateIndex);
+            if (targetIndex < 0 || targetIndex >= merged.Length)
+            {
+                throw new InvalidOperationException($"portConfigs[{updateIndex}] does not match any existing port by index/name.");
+            }
+            merged[targetIndex] = ParsePortConfig(update);
+        }
+        return merged;
+    }
+
+    private static int ResolvePortIndex(PortConfigSnapshot[] existing, PortConfigItem update, int updateIndex)
+    {
+        if (update.Index is int explicitIndex)
+        {
+            return explicitIndex;
+        }
+        if (!string.IsNullOrWhiteSpace(update.Name))
+        {
+            for (var i = 0; i < existing.Length; i++)
+            {
+                if (string.Equals(existing[i].Name, update.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return i;
+                }
+            }
+        }
+        return updateIndex;
+    }
+
+    private static MCUSerialBridgeCLR.PortConfig ParsePortConfigSnapshot(PortConfigSnapshot p)
     {
         if (string.Equals(p.Type, "CAN", StringComparison.OrdinalIgnoreCase))
         {
@@ -1355,6 +1643,45 @@ public static class ApiRoutes
             }
             """;
     }
+
+    private static DuplicateLogicBinding? FindDuplicateLogicBinding(IReadOnlyDictionary<string, NodeExportData> nodes)
+    {
+        var seen = new Dictionary<string, (string Uuid, string? NodeName)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var node in nodes)
+        {
+            var logicName = node.Value.LogicName;
+            if (string.IsNullOrWhiteSpace(logicName))
+            {
+                continue;
+            }
+
+            if (seen.TryGetValue(logicName, out var first)
+                && !string.Equals(first.Uuid, node.Key, StringComparison.OrdinalIgnoreCase))
+            {
+                return new DuplicateLogicBinding(logicName, first.Uuid, first.NodeName, node.Key, node.Value.NodeName);
+            }
+
+            seen[logicName] = (node.Key, node.Value.NodeName);
+        }
+
+        return null;
+    }
+
+    private static object BuildDuplicateLogicBindingError(DuplicateLogicBinding conflict)
+    {
+        return new
+        {
+            ok = false,
+            error = $"Logic '{conflict.LogicName}' is bound to multiple nodes. One Logic class can only be programmed to one MCU node because its LowerIO fields would conflict.",
+            conflict = new
+            {
+                logicName = conflict.LogicName,
+                first = new { uuid = conflict.FirstUuid, nodeName = conflict.FirstNodeName },
+                second = new { uuid = conflict.SecondUuid, nodeName = conflict.SecondNodeName }
+            },
+            hint = "Create a separate Logic class for each MCU node, with role-specific LowerIO field names."
+        };
+    }
 }
 
 // Request DTOs
@@ -1369,10 +1696,11 @@ public sealed record NodeProbeRequest(string McuUri);
 public sealed record SimulatedNodeRequest(string? Name);
 public sealed record NodeConfigureRequest(string? NodeName, PortConfigItem[]? PortConfigs, JsonObject? ExtraInfo);
 public sealed record NodeProgramRequest(string LogicName);
-public sealed record PortConfigItem(string Type, string? Name, uint Baud, uint? ReceiveFrameMs, uint? RetryTimeMs);
+public sealed record PortConfigItem(string Type, string? Name, int? Index, uint Baud, uint? ReceiveFrameMs, uint? RetryTimeMs);
 public sealed record SetVariableRequest(string Name, object? Value, string? TypeHint);
 public sealed record NodesImportRequest(Dictionary<string, NodeExportData> Nodes);
 public sealed record WireTapSetRequest(byte PortIndex, int Flags);
+public sealed record DuplicateLogicBinding(string LogicName, string FirstUuid, string? FirstNodeName, string SecondUuid, string? SecondNodeName);
 
 internal static class ValueParser
 {

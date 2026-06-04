@@ -51,11 +51,15 @@ internal static class Program
         builder.Services.AddSingleton<HostRuntimePaths>();
         builder.Services.AddSingleton<ProjectStore>();
         builder.Services.AddSingleton<FileTreeService>();
+        builder.Services.AddSingleton<FileSyncService>();
         builder.Services.AddSingleton<TerminalBroadcaster>();
         builder.Services.AddSingleton<GitHistoryService>();
         builder.Services.AddSingleton<HostAboutService>();
+        builder.Services.AddSingleton<KitDocsService>();
         builder.Services.AddSingleton<DiverBuildService>();
         builder.Services.AddSingleton<RootRuntimeService>();
+        builder.Services.AddSingleton<FatalErrorStore>();
+        builder.Services.AddSingleton<AgentStateService>();
         builder.Services.AddSingleton<RuntimeSessionService>();
         builder.Services.AddSingleton<FirmwareUpgradeService>();
         builder.Services.AddHostedService<VariableInspectorPushService>();

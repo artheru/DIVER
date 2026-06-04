@@ -83,7 +83,7 @@ public record LayoutInfoSnapshot(
 public record PortDescriptorSnapshot(string Type, string Name);
 
 /// <summary>端口配置快照</summary>
-public record PortConfigSnapshot(string Type, string? Name, uint Baud, uint? ReceiveFrameMs, uint? RetryTimeMs);
+public record PortConfigSnapshot(int Index, string Type, string? Name, uint Baud, uint? ReceiveFrameMs, uint? RetryTimeMs);
 
 /// <summary>Cart字段快照</summary>
 public record CartFieldSnapshot(
@@ -924,7 +924,7 @@ public sealed class DIVERSession : IDisposable
                 McuUri = entry.McuUri,
                 NodeName = entry.NodeName,
                 Layout = BuildLayoutSnapshot(entry.Layout),
-                PortConfigs = entry.PortConfigs.Select((p, i) => BuildPortConfigSnapshot(p, i < portNames.Length ? portNames[i] : null)).ToArray(),
+                PortConfigs = entry.PortConfigs.Select((p, i) => BuildPortConfigSnapshot(p, i, i < portNames.Length ? portNames[i] : null)).ToArray(),
                 ProgramBase64 =
                     entry.ProgramBytes.Length > 0
                         ? Convert.ToBase64String(entry.ProgramBytes)
@@ -1800,24 +1800,34 @@ public sealed class DIVERSession : IDisposable
 
     private void StopBackgroundWorkers()
     {
-        _workerCts?.Cancel();
+        var cts = _workerCts;
+        var stateWorker = _stateWorker;
+        var upperIOWorker = _upperIOWorker;
+        _workerCts = null;
+        _stateWorker = null;
+        _upperIOWorker = null;
+
+        cts?.Cancel();
         _upperIOSignal.Set();
 
         try
         {
-            _stateWorker?.Join(1000);
+            stateWorker?.Join(1000);
         }
         catch { }
         try
         {
-            _upperIOWorker?.Join(1000);
+            upperIOWorker?.Join(1000);
         }
         catch { }
 
-        _workerCts?.Dispose();
-        _workerCts = null;
-        _stateWorker = null;
-        _upperIOWorker = null;
+        if (stateWorker?.IsAlive == true || upperIOWorker?.IsAlive == true)
+        {
+            Console.WriteLine("[DIVERSession] Background worker did not stop before timeout; CTS disposal deferred.");
+            return;
+        }
+
+        cts?.Dispose();
     }
 
     private void StatePollingLoop(CancellationToken token)
@@ -1864,7 +1874,14 @@ public sealed class DIVERSession : IDisposable
                 Console.WriteLine($"[DIVERSession] State polling loop error: {ex.Message}");
             }
 
-            token.WaitHandle.WaitOne(500);
+            try
+            {
+                token.WaitHandle.WaitOne(500);
+            }
+            catch (ObjectDisposedException)
+            {
+                break;
+            }
         }
     }
 
@@ -2515,7 +2532,7 @@ public sealed class DIVERSession : IDisposable
             entry.NodeName,
             versionSnapshot,
             layoutSnapshot,
-            entry.PortConfigs.Select((p, i) => BuildPortConfigSnapshot(p, i < portNames.Length ? portNames[i] : null)).ToArray(),
+            entry.PortConfigs.Select((p, i) => BuildPortConfigSnapshot(p, i, i < portNames.Length ? portNames[i] : null)).ToArray(),
             entry.ProgramBytes.Length > 0,
             entry.ProgramBytes.Length,
             entry.LogicName,
@@ -2534,13 +2551,13 @@ public sealed class DIVERSession : IDisposable
         );
     }
 
-    private static PortConfigSnapshot BuildPortConfigSnapshot(PortConfig p, string? name)
+    private static PortConfigSnapshot BuildPortConfigSnapshot(PortConfig p, int index, string? name)
     {
         return p switch
         {
-            SerialPortConfig s => new PortConfigSnapshot("Serial", name, s.Baud, s.ReceiveFrameMs, null),
-            CANPortConfig c => new PortConfigSnapshot("CAN", name, c.Baud, null, c.RetryTimeMs),
-            _ => new PortConfigSnapshot("Unknown", name, 0, null, null),
+            SerialPortConfig s => new PortConfigSnapshot(index, "Serial", name, s.Baud, s.ReceiveFrameMs, null),
+            CANPortConfig c => new PortConfigSnapshot(index, "CAN", name, c.Baud, null, c.RetryTimeMs),
+            _ => new PortConfigSnapshot(index, "Unknown", name, 0, null, null),
         };
     }
 

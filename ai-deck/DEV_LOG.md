@@ -2946,3 +2946,1357 @@
   - `ReadLints` 检查 `variableFlowLayout.ts` 无错误。
   - `npm run build` 成功。
   - 剩余 warning 为既有 Vite/Rollup chunk 与 SignalR annotation warning。
+
+### [planning-kit-host-agent-docs] 补强 Kit 文档内嵌 Host 与 Agent API 计划
+- 用户反馈：
+  - 客户侧 Agent 可能不够聪明，不能只提供 API 列表，需要写清系统理解和操作细节。
+  - 需要考虑多节点编程、添加/删除节点、修改节点参数是否开放给 Agent。
+  - 网页编译/编程/启动后会同步刷新状态，Agent 也需要明确刷新顺序。
+  - Cursor/Agent 文件操作需要考虑全量同步、批量保存、带提交日志提交、冲突处理。
+  - 最新工作记录已经完成模拟节点相关能力，需要纳入文档和 API 方案。
+- 调查：
+  - 重新读取 `DEV_LOG.md` 中模拟节点记录，确认当前事实：
+    - 模拟节点通过 `sim://{uuid}` 添加。
+    - 每个模拟节点由独立 `CoralinkerSimNodeHost` 子进程隔离运行。
+    - 默认 layout 为 32 DI / 32 DO / RS485-A / RS485-B / RS232 / CAN。
+    - Host 发布包已经纳入 `simnode/CoralinkerSimNodeHost.dll` 和 `simnode/runtimes/{rid}/native/sim_node_runtime`。
+    - VarFlow 关系已经改为按节点实例 UUID / `root-runtime` 处理，避免同一 Logic 多节点复用时混淆。
+- 计划更新：
+  - 更新 Cursor plan `kit_host_docs_a545dcbd.plan.md`。
+  - 增加“面向低能力 Agent 的写法”：
+    - 系统地图。
+    - 固定操作流程。
+    - 成功字段、失败日志、禁止事项。
+    - 可照抄 HTTP 请求示例和 JSON 字段说明。
+  - 增加文件同步协议：
+    - `GET /api/files/snapshot`。
+    - `POST /api/files/sync`。
+    - 多文件批量写入、全量校验、`baseHead`/hash 冲突判断、`commitMessage`。
+    - 保留现有单文件接口供网页使用。
+  - 增加真实节点和模拟节点统一生命周期：
+    - Probe/Add 或 Add Simulated -> Configure -> Build -> Program -> Start -> Observe -> Stop -> Remove。
+    - Agent 应可增删节点、修改节点参数、创建模拟节点，以复现网页能搭建的实验环境。
+  - 增加多节点编程规则：
+    - Build 返回多个 artifacts 时，按 `logicName` 明确选择。
+    - 同一 Logic 可编程到多个节点，但 VarFlow/变量关系按节点实例 UUID 区分。
+    - 编程前检查 layout/port configs 与代码端口使用是否匹配。
+    - 编程、删除节点或更换程序后必须刷新 variables/meta/flow。
+  - 增加编译/编程/启动后状态同步顺序，并建议新增 `/api/agent/state` 聚合接口，降低低能力 Agent 漏调用概率。
+- 验证：
+  - 本轮处于计划模式，仅更新计划和 Markdown 工作记录，未修改代码。
+
+### [feature-kit-host-agent-docs] 实现 Kit 文档内嵌 Host 与 Agent API
+- 用户要求：
+  - 按已确认计划实现，不再修改 plan 文件。
+  - 所有 todo 从第一项开始推进，直到全部完成。
+- Host 文档服务：
+  - 新增 `3rd/CoralinkerHost/Services/KitDocsService.cs`。
+  - 新增路由：
+    - `GET /api/docs/kit`
+    - `GET /api/docs/kit/md`
+    - `GET /api/docs/kit/md/{**path}`
+    - `GET /docs/kit`
+    - `GET /docs/kit/`
+    - `GET /docs/kit/{**path}`
+  - 开发态从 `3rd/CoralinkerKitDocs` 读取 Markdown。
+  - 发布态支持从 `res/docs/kit/md` 和 `wwwroot/docs/kit` 读取。
+  - Markdown 响应使用 `no-cache`，HTML 响应使用长期缓存并依赖版本 URL。
+  - 响应包含 ETag 和 Last-Modified。
+  - HTML 渲染时将站内 `.md` href 转为 `.html` href。
+- Agent API：
+  - 新增 `3rd/CoralinkerHost/Services/FileSyncService.cs`：
+    - `GET /api/files/snapshot`
+    - `POST /api/files/sync`
+    - 支持 `baseHead`、逐文件 `baseHash`、批量 changes、`commitMessage`、`force`。
+    - Agent 写入范围限制为 `assets/inputs/*.cs`，不允许写 generated。
+  - 新增 `3rd/CoralinkerHost/Services/AgentStateService.cs`：
+    - `GET /api/agent/capabilities`
+    - `GET /api/agent/state`
+    - `POST /api/agent/refresh`
+    - 聚合 project/git/build/session/nodes/root/variables/logs/fatal error。
+  - 新增 `3rd/CoralinkerHost/Services/FatalErrorStore.cs`：
+    - `GET /api/errors/fatal`
+    - `POST /api/errors/fatal/clear`
+    - `RuntimeSessionService` 收到 `OnFatalError` 时记录最近错误快照。
+  - 新增：
+    - `GET /api/logs/build`
+    - `GET /api/variables/flow`
+- 发布脚本：
+  - 更新 `3rd/CoralinkerHost/publish-host.ps1`。
+  - 新增 Markdown -> HTML 生成逻辑。
+  - 发布 Markdown 源文件到 `res/docs/kit/md`。
+  - 发布 HTML 到 `wwwroot/docs/kit`。
+  - 跳过 `_write_request`。
+  - `publish-info.json` 增加 `kitDocs` 元数据。
+  - 修复 PowerShell 反引号字符串导致的脚本解析错误：
+    - 行内代码正则使用单引号模式。
+    - 代码块 fence 检测使用单引号字面量。
+- Kit 文档：
+  - 新增内部写作记录：
+    - `3rd/CoralinkerKitDocs/_write_request/2026-06-03-agent-host-docs.md`
+  - 重写：
+    - `3rd/CoralinkerKitDocs/README.md`
+  - 新增：
+    - `00-system-overview.md`
+    - `09-agent-workflows.md`
+    - `10-agent-api.md`
+  - 更新：
+    - `03-build-and-deploy.md`
+    - `04-variables-and-io.md`
+    - `07-node-management.md`
+  - 文档明确：
+    - Agent 默认读 Markdown。
+    - 人读 HTML。
+    - 文件同步走 Host API，不操作网页编辑器。
+    - 真实节点和模拟节点统一生命周期。
+    - 模拟节点 `sim://{uuid}`、独立 `CoralinkerSimNodeHost` 子进程、默认 32 DI/32 DO + RS485/RS232/CAN layout。
+    - 多节点编程按 `logicName` 和节点 UUID，Program 后刷新 variables/meta/flow。
+- 验证：
+  - `dotnet build 3rd/CoralinkerHost/CoralinkerHost.csproj` 成功；仅剩既有 `DiverCompiler/Processor.cs` unreachable warning。
+  - `ReadLints` 检查新增/修改 Host C# 文件无错误。
+  - 启动临时 Host 并验证端点：
+    - `/api/ping`
+    - `/api/docs/kit`
+    - `/api/docs/kit/md/README.md`
+    - `/docs/kit/README.html`
+    - `/api/agent/capabilities`
+    - `/api/files/snapshot`
+    - `/api/agent/state`
+    - `/api/variables/flow`
+    - `/api/errors/fatal`
+    - `/api/logs/build`
+  - `/api/files/sync` 空 changes 返回 `ok=True, committed=False`。
+  - `POST /api/agent/refresh` 返回 `ok=True`。
+  - HTML 验证：
+    - `_write_request` 不在 docs index。
+    - `href="*.md"` 数量为 0。
+    - `href="*.html"` 存在。
+  - `publish-host.ps1 -SkipNativeBuild -NoRestore -ExcludeIisConfig -ExcludeStaticWebAssetsEndpoints` 成功。
+  - 发布包验证：
+    - `res/docs/kit/md/README.md` 存在。
+    - `wwwroot/docs/kit/README.html` 存在。
+    - `res/docs/kit/md/10-agent-api.md` 存在。
+    - `_write_request` 未发布。
+    - manifest 中包含 `kitDocs.markdown=res/docs/kit/md` 和 `kitDocs.html=wwwroot/docs/kit`。
+  - `git diff --check -- . ":(exclude)CORAL-NODE-V2.1/**"` 通过，仅有 LF/CRLF 提示。
+
+### [docs-kit-agent-entry] 明确 README 相对链接到 Agent Markdown API 的解析规则
+- 用户反馈：
+  - 读取 `http://localhost:4499/api/docs/kit/md/` 只看到 README 时，担心没有上下文的 Agent 不知道应该去哪里读取其他文档。
+- 判断：
+  - 当前 README 已写 `GET /api/docs/kit` 和 `GET /api/docs/kit/md/README.md`，并列出相对 Markdown 链接。
+  - 对人或较强 Agent 足够，但对低能力 Agent 来说，相对链接应解析到哪个 API 前缀仍不够显式。
+  - `/api/docs/kit` 的索引已能返回每个文件的 `markdownUrl`，这是最稳妥入口。
+- 修复：
+  - `3rd/CoralinkerKitDocs/README.md`
+    - 新增“Agent 如何继续读取其他文档”。
+    - 明确优先调用 `GET /api/docs/kit` 获取 `markdownUrl`。
+    - 明确相对 Markdown 链接解析规则：`/api/docs/kit/md/{相对路径}`。
+    - 给出 `00-system-overview.md`、`09-agent-workflows.md`、`10-agent-api.md` 的 API 路径示例。
+    - 明确 `examples/` 和 `stubs/` 也按同一 API 前缀读取源文件。
+- 验证：
+  - `rg` 确认 README 源文件包含新增标题和 `/api/docs/kit/md/00-system-overview.md`。
+  - `/api/docs/kit` 返回 `files[].markdownUrl`，包含 `/api/docs/kit/md/00-system-overview.md?...`。
+  - `/api/docs/kit/md/README.md` 内容可匹配 `00-system-overview`。
+
+### [publish-kit-agent-docs-auto] 生成 Auto 试验用 Host publish 包
+- 用户要求：
+  - 编译到新的 publish 中，用于后续 Auto 试验。
+- 执行：
+  - 运行 `3rd/CoralinkerHost/publish-host.ps1 -SkipNativeBuild -NoRestore`。
+  - 未重新构建 native runtime，复用已有 native build 输出。
+  - 前端 `npm run build` 成功。
+  - 后端 `dotnet publish` 成功。
+  - Kit docs 发布步骤成功。
+- 输出：
+  - `3rd/CoralinkerHost/Publish/CoralinkerHost_c7f234b_20260603-133618`
+- 验证：
+  - `res/docs/kit/md/README.md` 存在。
+  - `wwwroot/docs/kit/README.html` 存在。
+  - `res/docs/kit/md/_write_request` 不存在。
+  - `simnode/CoralinkerSimNodeHost.dll` 存在。
+  - `publish-info.json` 存在。
+- 注意：
+  - 构建输出仍有既有 Vite/Rollup warning 和既有 `DiverCompiler/Processor.cs` unreachable warning。
+
+### [agent-host-api-auto-diff-drive] 从 Kit 文档入口真实执行差速底盘闭环
+- 用户要求：
+  - 作为全新 Agent，不假设已有上下文，只从 `http://localhost:4499/api/docs/kit/md/` 理解系统。
+  - 通过 Host API 新建工程、添加子节点、写 Root/Child 用户逻辑、同步提交、编译、编程、启动，并读取变量、Variables Flow、日志、错误状态。
+  - 不直接修改网页，不手工修改 generated 文件。
+- 文档读取：
+  - 入口：`GET /api/docs/kit/md/`。
+  - 索引：`GET /api/docs/kit`。
+  - 重点文档：
+    - `/api/docs/kit/md/README.md`
+    - `/api/docs/kit/md/00-system-overview.md`
+    - `/api/docs/kit/md/01-quickstart.md`
+    - `/api/docs/kit/md/09-agent-workflows.md`
+    - `/api/docs/kit/md/10-agent-api.md`
+    - `/api/docs/kit/md/02-logic-api.md`
+    - `/api/docs/kit/md/03-build-and-deploy.md`
+    - `/api/docs/kit/md/04-variables-and-io.md`
+    - `/api/docs/kit/md/07-node-management.md`
+    - `/api/docs/kit/md/08-faq.md`
+    - `/api/docs/kit/md/examples/README.md`
+- 执行：
+  - 读取 `/api/agent/capabilities`、`/api/files/snapshot`、`/api/agent/state`。
+  - 通过只读/OPTIONS 探测确认 `/api/project/new` 存在，随后调用 `POST /api/project/new` 新建/清空工程。
+  - 调用 `POST /api/node/add-simulated` 新增模拟节点：
+    - UUID：`6c44b44c-a25b-4424-9f01-fed1a597d32b`
+    - URI：`sim://6c44b44c-a25b-4424-9f01-fed1a597d32b`
+    - 名称：`Sim Diff Drive Child Agent Fresh`
+  - 通过 `POST /api/files/sync` 写入并提交 `assets/inputs/DiffDriveAgentFresh.cs`。
+  - 最终代码：
+    - Root：`DiffDriveRootCart` + `DiffDriveRoot`
+      - `[AsControlItem] joystickX`
+      - `[AsControlItem] joystickY`
+      - `[AsUpperIO] left_diff_speed`
+      - `[AsUpperIO] right_diff_speed`
+      - 差速计算：`left = joystickY + joystickX`，`right = joystickY - joystickX`，限制 `[-100, 100]`。
+    - Child：`DiffDriveChildCart` + `DiffDriveChild`
+      - 读取 `left_diff_speed/right_diff_speed`。
+      - 输出 `received_left_diff_speed/received_right_diff_speed`。
+      - 输出 `actual_left_speed/actual_right_speed`。
+      - 输出 `statusCode/statusTextCode`。
+      - `Console.WriteLine` 打印 `iteration/left/right/statusCode`。
+  - 第一次尝试使用 `string statusText`，编译成功但 Host 变量表显示 `Unknown(12)` 且值为 `0`，节点日志插值为空；改为 `int statusTextCode` 后重新提交。
+- 验证：
+  - `POST /api/build` 成功：
+    - buildId：`20260603-055629`
+    - sourceCommit：`58d14f7a2a869324c5a7ca8808d3e0a4805ecd07`
+    - artifacts：`DiffDriveChild`
+    - rootLogics：`DiffDriveRoot`
+  - `GET /api/logic/list` 显示 `DiffDriveChild`，bin `934` bytes。
+  - `GET /api/root/logics` 显示 `DiffDriveRoot`，control fields 为 `joystickX/joystickY`。
+  - `POST /api/node/{uuid}/program` 成功，`programSize=934`。
+  - `POST /api/root/configure` 正确请求体为 `{ "logicName": "DiffDriveRoot" }`。
+  - 干净顺序 `stop -> root configure -> start -> control set -> refresh` 成功：
+    - `/api/session/state`：`Running`，`isRunning=true`。
+    - `/api/nodes/state`：节点 `running`、`isConnected=true`、`isProgrammed=true`。
+    - `/api/root/state`：`isRunning=true`，`logicName=DiffDriveRoot`。
+    - `POST /api/root/control/set` 设置 `joystickX=10`、`joystickY=40` 成功。
+    - `/api/variables`：
+      - `joystickX=10`
+      - `joystickY=40`
+      - `left_diff_speed=50`
+      - `right_diff_speed=30`
+      - `received_left_diff_speed=50`
+      - `received_right_diff_speed=30`
+      - `actual_left_speed=50`
+      - `actual_right_speed=30`
+      - `statusCode=1`
+      - `statusTextCode=1`
+    - `/api/variables/flow`：
+      - 包含 `root-runtime` 和模拟节点。
+      - `left_diff_speed/right_diff_speed` 由 `root-runtime` 写，模拟节点读。
+      - LowerIO 由模拟节点写。
+    - `/api/logs/node/{uuid}`：
+      - 日志包含 `DiffDriveChild iteration=... left=50 right=30 statusCode=1`。
+    - `/api/errors/fatal`：`fatalError=null`。
+- 困难/缺口：
+  - `/api/project/new` 没有在 Kit docs 和 `/api/agent/capabilities` 中列出；只能通过 `/api/project/new` 的 405 行为判断 POST 端点存在。
+  - `/api/root/configure` 文档只列了路径，没有请求体；错误字段名如 `{ "name": "DiffDriveRoot" }` 也返回 `ok=true`，但会清空 Root 配置。
+  - `examples/hello.cs`、`examples/numeric.cs`、`examples/car_demo.cs`、`examples/dual_node_skeleton.cs`、`stubs/CartActivator.cs` 在当前发布包通过 Markdown API 返回 404。
+  - 文档说 `string` 是支持类型，但 Host 对 `string` LowerIO 显示 `Unknown(12)` 且运行值/日志不可用，弱 Agent 会误用。
+  - 如果在 session running 时交错执行 build/program/start，Root/control meta 会出现不完整状态；文档应强调 program 或 root configure 前先 stop。
+- 建议文档修改：
+  - 在 `10-agent-api.md` 增加 Project API：`GET /api/project`、`POST /api/project/new`，说明副作用、是否清空节点/文件、返回体为空是否代表成功。
+  - 在 Root Runtime API 下给出 `POST /api/root/configure` 和 `POST /api/root/control/set` 的完整 JSON 示例，并说明错误字段名不应返回 `ok=true`。
+  - 修复 examples/stubs 发布路径，或从 README 移除不可访问链接。
+  - 在 `04-variables-and-io.md` 或 `02-logic-api.md` 标注当前 Host 对 `string` 变量的显示限制。
+  - 在 Agent workflow 中补充推荐顺序：`stop -> build -> program -> root configure -> start -> root/control/set -> variables/flow/logs/fatal`。
+
+## 2026-06-03 14:03 UTC+8 — 根据 Auto SubAgent 反馈修正 Agent Docs/API 缺口
+
+- 背景：
+  - 按用户要求新建无上下文 SubAgent，只给入口 `http://localhost:4499/api/docs/kit/md/` 和目标任务。
+  - SubAgent 真实完成新工程、模拟子节点、Root joystick 控制、差速左右轮速、子节点接收轮速、文件同步提交、build/program/start、变量/flow/log/fatal 验证。
+  - SubAgent 反馈出若干弱 Agent 会被卡住的问题，需要立即修正。
+- 修正 Host API：
+  - `3rd/CoralinkerHost/Web/ApiRoutes.cs`
+    - `/api/root/configure` 改为读取 `JsonObject`。
+    - 缺少 `logicName` 字段时返回 HTTP 400：`Missing logicName...`。
+    - `{ "logicName": null }` 才表示显式清空 Root 配置。
+    - 避免弱 Agent 写错字段名时仍返回 `ok=true` 并清空 Root。
+  - `3rd/CoralinkerHost/Services/AgentStateService.cs`
+    - `/api/agent/capabilities` 增加：
+      - `POST /api/project/new`
+      - `GET /api/project`
+      - `POST /api/root/configure`
+- 修正 Kit Docs 服务：
+  - `3rd/CoralinkerHost/Services/KitDocsService.cs`
+    - 文档源接口允许发布/读取 `.md/.cs/.txt/.json`。
+    - `/api/docs/kit/md/stubs/CartActivator.cs` 和 `examples/*.cs` 不再返回 404。
+    - `/docs/kit/stubs/CartActivator.cs` 这类非 Markdown HTML 路由按静态源文件返回，不再强行追加 `.html`。
+    - index 中非 Markdown 文件的 `HtmlUrl` 指向原始静态路径，Markdown 文件仍指向 `.html`。
+- 修正 Kit Docs 内容：
+  - `3rd/CoralinkerKitDocs/10-agent-api.md`
+    - 增加 Project API：`POST /api/project/new`、`GET /api/project`。
+    - 写明新建/清空工程的副作用。
+    - 增加 running 状态下可靠流程：
+      - `stop -> files/sync -> build -> program -> root/configure -> start -> root/control/set -> agent/state`
+    - 增加 `/api/root/configure` 请求体示例：
+      - `{ "logicName": "DiffDriveRoot" }`
+      - `{ "logicName": null }`
+    - 明确字段名必须是 `logicName`，错误字段名返回 400。
+  - `3rd/CoralinkerKitDocs/09-agent-workflows.md`
+    - 增加 running 状态下的 stop-first 顺序。
+    - Start 流程中写明先 configure Root，再 start，之后再 set control 和 refresh。
+  - `3rd/CoralinkerKitDocs/02-logic-api.md`
+    - 保留 `string` 是底层协议类型的事实。
+    - 增加 Agent 调试建议：Host 变量表/API/Flow 对字符串显示可能不完整，自动验证优先用 `int/uint/float`。
+  - `3rd/CoralinkerKitDocs/08-faq.md`
+    - 增加 `string` 字段不建议用于 Agent 自动验证的 FAQ。
+- 验证：
+  - `dotnet build 3rd/CoralinkerHost/CoralinkerHost.csproj --no-restore` 成功，0 error。
+  - 仍有既有 nullable/unreachable/unused field warning。
+  - `ReadLints` 检查：
+    - `Services/KitDocsService.cs`
+    - `Services/AgentStateService.cs`
+    - `Web/ApiRoutes.cs`
+    - 均无错误。
+  - `publish-host.ps1 -SkipNativeBuild -NoRestore` 成功。
+  - 最终发布包：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_c7f234b_20260603-140210`
+  - 已确认最终发布包包含：
+    - `res/docs/kit/md/stubs/CartActivator.cs`
+    - `wwwroot/docs/kit/stubs/CartActivator.cs`
+    - `res/docs/kit/md/10-agent-api.md`
+    - `wwwroot/docs/kit/10-agent-api.html`
+    - `publish-info.json`
+
+## 2026-06-03 15:38 UTC+8 — Graph 工具栏增加 Agent 编程入口
+
+- 用户需求：
+  - 在网页 Graph 栏最右边增加 Agent 按钮。
+  - 点击后弹出 Agent 弹窗。
+  - 弹窗中写明：
+    - Agent编程。
+    - 对人类接口文档地址。
+    - Agent文档地址和建议Prompt。
+- 实现：
+  - 修改 `3rd/CoralinkerHost/ClientApp/src/views/HomeView.vue`。
+  - Graph toolbar：
+    - 在 `About` 按钮后增加 `Agent` 按钮，使其成为 Graph 工具组最右侧按钮。
+    - 点击后设置 `showAgentDialog = true`。
+  - 新增 Agent modal：
+    - 使用现有 Naive UI `n-modal` + `n-card` 风格。
+    - 标题：`Agent Programming`。
+    - 第一段 `Agent编程`：
+      - 说明外部 Agent 应读取 Markdown 文档入口，并通过 Host HTTP API 完成文件同步、提交、编译、节点操作、变量读取、日志和错误监控。
+    - 第二段 `对人类接口文档地址`：
+      - 使用当前页面 origin 生成 `${window.location.origin}/docs/kit/`。
+    - 第三段 `Agent文档地址和建议Prompt`：
+      - 使用当前页面 origin 生成 `${window.location.origin}/api/docs/kit/md/`。
+      - 提供建议 Prompt，要求 Agent 从文档入口开始、只修改 `assets/inputs/*.cs`、通过文件同步 API 提交、按 stop-first 流程执行并用 Variables/Flow/log/fatal 验证。
+  - 样式：
+    - 新增 `.toolbar-btn.agent:hover`。
+    - 新增 `.agent-dialog`、`.agent-section`、`.agent-prompt`。
+- 验证：
+  - `ReadLints` 检查 `HomeView.vue` 无错误。
+  - `npm run build` 成功。
+  - 剩余 warning 为既有 Vite/Rollup warning：
+    - SignalR pure annotation comment warning。
+    - `device.ts` 同时 dynamic/static import chunk warning。
+    - 大 chunk size warning。
+
+## 2026-06-03 15:42 UTC+8 — 发布包含 Agent 按钮的新 Host 包
+
+- 用户需求：
+  - 对刚才加入 Graph 工具栏 Agent 按钮和 Agent 弹窗的版本执行 publish。
+- 执行：
+  - 运行 `3rd/CoralinkerHost/publish-host.ps1 -SkipNativeBuild -NoRestore`。
+  - 发布脚本完成：
+    - 前端 `npm run build`。
+    - `dotnet publish`。
+    - Kit docs 发布。
+    - `publish-info.json` 生成。
+- 输出目录：
+  - `3rd/CoralinkerHost/Publish/CoralinkerHost_c7f234b_20260603-154221`
+- 验证：
+  - 发布命令退出码为 0。
+  - 已确认发布包关键文件存在：
+    - `publish-info.json`
+    - `CoralinkerHost.dll`
+    - `wwwroot/index.html`
+    - `wwwroot/docs/kit/README.html`
+    - `res/docs/kit/md/README.md`
+    - `simnode/CoralinkerSimNodeHost.dll`
+- 注意：
+  - 剩余 warning 为既有：
+    - Vite/Rollup SignalR pure annotation warning。
+    - `device.ts` dynamic/static import chunk warning。
+    - 大 chunk size warning。
+    - `DiverCompiler/Processor.cs` unreachable code warning。
+
+## 2026-06-04 11:26 UTC+8 — 前后桥舵轮模拟工程示例
+
+- 用户需求：
+  - 从 `http://localhost:4499/api/docs/kit/md/README.md` 入口开始，按文档要求新建工程、添加虚拟节点、编写前后桥舵轮控制示例。
+  - Root 接收摇杆输入并下发前/后桥目标速度和目标舵角。
+  - 前桥、后桥节点分别执行本地控制，并包含急停、触边、通信停滞、故障状态、目标限幅等安全逻辑。
+- 执行：
+  - 下载并解压 Host docs bundle 到 `ai-deck/kit-docs/_bundle`。
+  - 阅读 `resources.json`、`README.md`、`09-agent-workflows.md`、`10-agent-api.md`、`tools/README.md`、`02-logic-api.md`、`04-variables-and-io.md`、`06-remote-control.md`、`11-multinode-system-design-reference.md`、示例和 stub。
+  - 创建 `ai-deck/agent_work/20260604-1126-steer-bridge/SteerBridgeAgvDemo.cs`，并通过 CLI 同步到 Host `assets/inputs/SteerBridgeAgvDemo.cs`。
+  - 调用 `project new`，添加两个模拟节点：
+    - 前桥：`e86098ef-40aa-445b-89fe-c8c08917ecb1`
+    - 后桥：`7a88202e-b6d3-4c2d-8c9f-8604a8951be2`
+  - Build 后分别 program `FrontSteerBridgeLogic`、`RearSteerBridgeLogic`，并配置 Root `SteerBridgeRootLogic`。
+- 验证：
+  - `logic list` 看到 `FrontSteerBridgeLogic` 与 `RearSteerBridgeLogic` 产物。
+  - `variables flow` 看到 Root Runtime、前桥模拟节点、后桥模拟节点，UpperIO/LowerIO 读写方向符合设计。
+  - 设置 `enable=true`、`speedLimit=600`、`angleLimit=300`、`joystickX=40`、`joystickY=70` 后，变量值显示：
+    - `frontBridgeTargetSpeed=420`
+    - `rearBridgeTargetSpeed=420`
+    - `frontBridgeTargetAngle=120`
+    - `rearBridgeTargetAngle=-120`
+    - `frontBridgeActualSpeed=420`
+    - `rearBridgeActualSpeed=420`
+    - `frontBridgeActualAngle=120`
+    - `rearBridgeActualAngle=-120`
+  - 设置 `emergencyStop=true` 后，目标速度/角度清零，前后桥 enable 关闭，实际速度降为 0。
+  - `errors fatal` 返回 `fatalError=null`。
+- 【发现】当前 Host 的 `RootLogic<T>` 实际要求重写无参 `Operation()`；bundle 中 `agv_three_sim_demo.py` 的 Root 示例使用 `Operation(int iteration)`，会导致 build 失败。
+- 【发现】Windows GBK 控制台下，CLI/workflow 在打印或读取包含 Unicode 字符的大 JSON 时可能报 `UnicodeEncodeError`/`UnicodeDecodeError`；设置 `$env:PYTHONUTF8='1'` 后直接调用 CLI 可绕过部分问题。
+- 【注意】模拟节点中 `WriteSnapshot()` 输出会影响 `node states` 的 digital IO 数值；示例中安全 DI 低位和状态 DO 低位不要重叠，否则会自触发触边/故障。
+- 反馈文件：
+  - `ai-deck/agent_feedback/20260604-1126-steer-bridge-demo.md`
+- 接下来：
+  - 若接入真实硬件，需要确认前/后桥驱动器协议、速度和角度单位、急停/触边接线、电平有效方向、通信超时时间、故障复位策略和验证方式。
+
+## 2026-06-04 11:03 UTC+8 — 补充 CLI 缺口反馈、iteration 语义和多节点设计参考
+
+- 用户需求：
+  - `10-agent-api.md` 的 curl 使用前置判断中，增加“缺少 Python CLI/workflow 导致必须写大量 curl 时，反馈给开发团队”的规则。
+  - 明确 `iteration` 的真实含义：只有 `DIVERSession` 下发 IO 更新表并收到节点正常响应后才递增，停滞代表通信周期没有完成。
+  - 新增多节点系统设计参考，帮助 SubAgent 理解 AGV 前后桥、差速、舵轮、Root 解算、节点本地安全和用户追问。
+- 修改：
+  - `3rd/CoralinkerKitDocs/10-agent-api.md`
+    - 在“如果你准备写 curl”下增加 CLI/workflow 缺口反馈要求。
+  - `3rd/CoralinkerKitDocs/02-logic-api.md`
+    - 扩展 `iteration` 说明，明确其不是普通本地计时器，而是 Host 与节点通信健康度信号。
+    - 更新通信安全检测示例，按 `scanInterval=50ms` 使用 `commLossCount > 20` 表示约 1 秒停滞。
+  - `3rd/CoralinkerKitDocs/11-multinode-system-design-reference.md`
+    - 新增多节点设计参考。
+    - 覆盖 Root/MCU 职责、双差速桥 AGV、前后舵轮、中央安全 IO、同 Logic 多实例、变量命名、安全逻辑、必须向用户确认的问题和 Agent 执行建议。
+  - `3rd/CoralinkerKitDocs/README.md`
+    - 将 `11-multinode-system-design-reference.md` 加入必读顺序、文档索引和关键规则摘要。
+  - `3rd/CoralinkerKitDocs/09-agent-workflows.md`
+    - 在多节点编程工作流前增加先读 `11-multinode-system-design-reference.md` 的要求。
+  - `3rd/CoralinkerHost/Services/KitDocsService.cs`
+    - 将 `11-multinode-system-design-reference.md` 加入 API resources 推荐阅读顺序。
+  - `3rd/CoralinkerHost/publish-host.ps1`
+    - 将 `11-multinode-system-design-reference.md` 加入发布包 `resources.json` 推荐阅读顺序。
+- 【发现】SubAgent 容易把多节点任务直接理解成“多个节点都 program 一段逻辑”，但 AGV 类系统更需要先拆清 Root 运动解算、节点本地控制和安全输入归属。
+- 【注意】`iteration` 停滞是通信周期未完成的信号，文档中必须把它和安全回路绑定，避免 Agent 只把它当成普通循环计数器。
+- 验证：
+  - `ReadLints` 检查本次修改的 KitDocs Markdown、`KitDocsService.cs`、`publish-host.ps1` 无错误。
+  - `rg` 确认新章节已被 README、09 工作流、Host resources 和发布脚本引用。
+
+## 2026-06-04 11:08 UTC+8 — 修正 Logic 与节点的一对一编程规则
+
+- 用户需求：
+  - 与总设计师确认后，规则改为“同一个 Logic 不可以编程到多个节点上”。
+  - 原因是同一个 Logic class 产生同一组 LowerIO 字段，多个节点同时写入会互相覆盖，导致变量和 Root 读取混乱。
+  - 检查教程和实现，把 README、工作流和 Host 行为改为正确规则。
+- 实现修改：
+  - `3rd/CoralinkerHost/Web/ApiRoutes.cs`
+    - `/api/node/{uuid}/program` 增加重复 `logicName` 检查。
+    - 如果同一 `logicName` 已绑定到其他节点，返回 `400 BadRequest`，包含冲突节点信息和修复 hint。
+    - `/api/nodes/import` 增加重复 `logicName` 检查，拒绝导入不合法节点集合。
+    - `/api/start` 增加重复 `logicName` 检查，防止历史工程绕过新 program 规则直接启动。
+  - `3rd/CoralinkerKitDocs/tools/workflows/deploy_logic.py`
+  - `3rd/CoralinkerKitDocs/tools/workflows/safe_stop_build_program_start.py`
+  - `3rd/CoralinkerKitDocs/tools/workflows/add_nodes_and_program.py`
+    - 同一次 workflow 参数中，如果多个 UUID 使用同一个 LogicName，提前报错。
+- 文档修改：
+  - `README.md` 增加关键规则：一个 Logic class 只能编程到一个 MCU 节点。
+  - `00-system-overview.md`、`02-logic-api.md`、`03-build-and-deploy.md`、`04-variables-and-io.md`、`07-node-management.md`、`09-agent-workflows.md`、`10-agent-api.md`、`11-multinode-system-design-reference.md` 全部改为一对一规则。
+  - `tools/README.md` 和 workflow help 改为“多节点可编程，但每个节点必须使用 distinct LogicName”。
+  - `_write_request/2026-06-03-agent-host-docs.md` 中旧写作原则也同步改正，避免后续文档再引用错误事实。
+- 【发现】Variables Flow 能区分节点 UUID，但不能解决同一 Logic 多节点写同名 LowerIO 的冲突；正确做法是每个节点使用独立 Logic class 和角色化 LowerIO 字段名。
+- 【注意】旧 publish 包中仍有历史文档内容；下次 publish 会由源文档重新生成并覆盖。
+- 验证：
+  - `rg` 检查源 KitDocs 中不再存在“同一个 Logic 可以/同一个 logicName 可以”等允许复用表述。
+  - `ReadLints` 检查 `ApiRoutes.cs`、KitDocs 和修改的 Python workflows 无错误。
+  - `python -m py_compile` 检查修改的 workflow 脚本成功。
+  - `dotnet build 3rd/CoralinkerHost/CoralinkerHost.csproj --no-restore` 成功，0 error；剩余 warning 为既有 nullable/unreachable code warning。
+
+## 2026-06-04 11:19 UTC+8 — 增加 Agent 目录规则、发布并启动新 Host、启动无上下文 SubAgent
+
+- 用户需求：
+  - 补充 Agent 本地目录规则到文档。
+  - publish 一个新包。
+  - 启动新的发布包。
+  - 启动一个无上下文 SubAgent，Prompt 必须是中文，并且只包含网页上能看到的入口和普通用户任务，不额外灌输隐藏规则。
+- 文档修改：
+  - `3rd/CoralinkerKitDocs/README.md`
+    - 新增“Agent 本地目录规则”。
+    - 明确 `ai-deck/kit-docs/` 用于下载和解压文档 bundle、CLI、workflow。
+    - 明确 `ai-deck/agent_work/<YYYYMMDD-HHMMSS-task>/` 用于临时草稿、代码、调试脚本、请求/响应样本和中间结果。
+    - 明确 `ai-deck/agent_feedback/` 用于反馈文档、API、CLI、workflow 问题。
+    - 要求每个 Agent 自建目录包含 `desc.md`。
+  - `3rd/CoralinkerKitDocs/09-agent-workflows.md`
+    - 下载命令改为 `--out ai-deck/kit-docs`。
+    - 总规则增加 Agent 本地工作目录要求。
+    - 新增 Agent 临时工作区说明。
+  - `3rd/CoralinkerKitDocs/10-agent-api.md`
+    - 顶部 Python 工具示例改为 `--out ai-deck/kit-docs`。
+  - `3rd/CoralinkerKitDocs/tools/README.md`
+    - 下载示例改为 `--out ai-deck/kit-docs`。
+    - Agent Behavior Rules 中补充 `ai-deck/kit-docs`、`ai-deck/agent_work`、`ai-deck/agent_feedback` 用途。
+- 发布：
+  - 运行 `3rd/CoralinkerHost/publish-host.ps1 -SkipNativeBuild -NoRestore`。
+  - 新发布目录：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_c7f234b_20260604-112133`
+  - 发布成功，剩余 warning 为既有 Vite chunk warning、SignalR pure annotation warning、DiverCompiler unreachable code 和 nullable warning。
+- 启动：
+  - 第一次启动新包失败，原因是 4499 已被旧 Host 占用。
+  - 确认旧 Host PID 10168 是 `dotnet .\CoralinkerHost.dll --urls http://localhost:4499`。
+  - 停止旧 Host 后重新启动新包。
+  - 当前 4499 已监听新发布包。
+- 验证：
+  - `ReadLints` 检查 README、09、10、tools README 无错误。
+  - 发布包 `res/docs/kit/md/README.md` 已包含 `Agent 本地目录规则`。
+  - `http://localhost:4499/api/docs/kit/md/README.md` 返回 200。
+  - 接口内容包含 `ai-deck/kit-docs`，确认当前服务文档已刷新。
+- SubAgent：
+  - 启动无上下文 SubAgent。
+  - Prompt 为中文，仅提供 `http://localhost:4499/api/docs/kit/md/README.md` 和普通用户任务：新建工程、添加虚拟节点、实现前后桥舵轮控制、Root 摇杆输入运动解算、前后桥节点控制、安全逻辑、验证和反馈。
+- 【注意】这次 SubAgent Prompt 没有额外灌输隐藏操作规则，目的是验证网页文档自身能否教会 Agent 使用 bundle、工具、目录规则和反馈协议。
+
+## 2026-06-04 11:37 UTC+8 — 根据前后桥舵轮 SubAgent 反馈修复工具和文档
+
+- SubAgent 结果：
+  - 已完成前后桥舵轮模拟工程，验证 build/program/start、Root 摇杆解算、急停清零和 fatal error。
+  - 反馈文件：
+    - `ai-deck/agent_feedback/20260604-1126-steer-bridge-demo.md`
+- 反馈问题：
+  - 官方 `agv_three_sim_demo.py` 的 Root 示例使用 `Operation(int iteration)`，但当前 Root 逻辑应使用无参 `Operation()`。
+  - Windows GBK 控制台下，CLI/workflow 输出 Unicode JSON 可能触发编码错误。
+  - workflow 最终 `state` 汇总失败时容易让 Agent 误判前面的 build/program/start 失败。
+  - 模拟 Snapshot IO 示例可能低位 DI/DO 自触发；用户指出 SnapIO 主要是模拟用途，后续真实项目不重要，不需要过度强调。
+  - 网页 Agent Prompt 和给 SubAgent 的 Prompt 不一致，规则应主要写在文档中。
+  - 真实硬件会让车辆动起来时，Agent 不应默认直接 Start。
+- 修改：
+  - `3rd/CoralinkerKitDocs/tools/workflows/agv_three_sim_demo.py`
+    - Root 示例改为无参 `Operation()`，内部用 `_iteration` 字段分频。
+    - 三个 MCU Logic 改为各自独立 CartDefinition，避免 LowerIO 声明混用。
+    - `subprocess.run` 增加 `encoding="utf-8"`、`errors="replace"`。
+    - 输出 JSON 改为 `ensure_ascii=True`。
+    - 最终 `state` 汇总失败时写入 `stateError`，不抹掉已完成步骤。
+  - `3rd/CoralinkerKitDocs/tools/agent_cli/coral_agent.py`
+    - stdout/stderr reconfigure 为 UTF-8 + replace。
+    - `print_json` 改为 ASCII-safe JSON。
+  - 其他 workflow：
+    - `deploy_logic.py`
+    - `safe_stop_build_program_start.py`
+    - `add_nodes_and_program.py`
+    - `configure_root_and_controls.py`
+    - `debug_serial.py`
+    - `debug_can_wiretap.py`
+    - 增加 UTF-8 subprocess 解码和 ASCII-safe JSON 输出。
+  - `safe_stop_build_program_start.py`
+    - 新增 `--manual-start`，不调用 `/api/start`，等待人类在网页点击 Start。
+    - 新增 `--wait-before-state`，便于人工 Start 后再读取状态。
+  - `3rd/CoralinkerKitDocs/02-logic-api.md`
+    - 新增 Root `Operation()` 与 MCU `Operation(int iteration)` 的签名差异说明。
+    - Snapshot IO 增加模拟节点低位 DI/DO 自触发风险说明，但仅作为模拟验证注意事项。
+  - `03-build-and-deploy.md`、`08-faq.md`
+    - 修正 Operation 未实现的 FAQ：MCU 与 Root 签名不同。
+  - `README.md`、`09-agent-workflows.md`、`10-agent-api.md`、`11-multinode-system-design-reference.md`
+    - 增加真实硬件启动授权策略：模拟节点可自动 Start；真实硬件、车辆运动或危险输出任务必须先询问启动授权。
+    - 默认无确认时，人类手动 Start。
+  - `tools/README.md`
+    - 说明真实硬件可使用 `safe_stop_build_program_start.py --manual-start --wait-before-state 30` 完成部署后等待人类点击 Start。
+  - `3rd/CoralinkerHost/ClientApp/src/views/HomeView.vue`
+    - Agent 弹窗建议 Prompt 改为入口式中文 Prompt，不重复具体 API 细节。
+    - 明确真实硬件启动、车辆运动或危险输出前必须询问启动方式。
+- 【发现】SubAgent 没追问硬件接线是合理的，因为测试任务明确使用虚拟节点；但文档必须明确“模拟可自动验证，真实硬件必须确认启动授权”。
+- 【注意】真实车辆或执行器调试中，Start 和会导致运动的 control/UpperIO 写入都应视为危险操作，默认等待人类确认。
+- 验证：
+  - `ReadLints` 检查修改的 KitDocs、tools README 和 `HomeView.vue` 无错误。
+  - `python -m py_compile` 覆盖 Agent CLI 和全部 workflow 脚本成功。
+
+## 2026-06-04 11:57 UTC+8 — 增加硬件事实沉淀规则 fact.md
+
+- 用户反馈：
+  - 刚才交互式提问卡住，需要继续执行。
+  - Agent 向用户提问并确认的硬件连接方式、型号、极性、端口、波特率、负载重量、安装位置、减速比、最大速度、控制协议、车辆构型、实际应用场景、节拍等信息，应整理后添加到 `ai-deck/fact.md`。
+- 修改：
+  - `3rd/CoralinkerKitDocs/README.md`
+    - 关键规则摘要增加：确认过的硬件事实要整理到 `ai-deck/fact.md`。
+  - `3rd/CoralinkerKitDocs/09-agent-workflows.md`
+    - 总规则增加：后续 Agent 应优先读取 `ai-deck/fact.md`，不要重复追问已确认事实。
+    - “用户补充输入和硬件信息”章节扩展硬件事实清单。
+    - 明确 `fact.md` 只记录已确认事实、来源和待确认问题，不写猜测。
+  - `3rd/CoralinkerKitDocs/11-multinode-system-design-reference.md`
+    - 多节点真实硬件确认清单增加型号、安装位置、负载、减速比、轮径、速度/加速度/舵角限制、机械限位、车辆构型、应用场景和节拍。
+    - 明确确认后的硬件事实必须沉淀到 `ai-deck/fact.md`。
+  - `3rd/CoralinkerKitDocs/tools/README.md`
+    - Agent Behavior Rules 增加真实硬件事实写入 `ai-deck/fact.md` 的说明。
+  - `3rd/CoralinkerHost/ClientApp/src/views/HomeView.vue`
+    - Agent 弹窗建议 Prompt 增加：把确认过的硬件事实整理到 `ai-deck/fact.md`。
+  - `ai-deck/fact.md`
+    - 新建硬件事实模板，分为设备与节点、接线与端口、机械与运动、控制协议、安全策略、应用场景与节拍。
+- 【注意】`fact.md` 是现场事实来源，应只写已确认内容和待确认问题；不能把 Agent 猜测写成事实。
+- 验证：
+  - `ReadLints` 检查修改的 KitDocs、`HomeView.vue` 和 `ai-deck/fact.md` 无错误。
+  - `python -m py_compile` 再次检查 Agent CLI 和全部 workflow 脚本成功。
+  - `rg` 确认 README、09、11、tools README、网页 Prompt 和 `fact.md` 均包含新规则。
+
+## 2026-06-04 12:00 UTC+8 — 将 fact 模板纳入 KitDocs bundle 并补全启动授权流程
+
+- 用户反馈：
+  - `ai-deck/fact.md` 放在当前仓库不会随 KitDocs bundle 打包给客户 Agent。
+  - 启动授权章节还不够完整。
+- 修改：
+  - 新增 `3rd/CoralinkerKitDocs/runtime/fact-template.md`
+    - 作为 `ai-deck/fact.md` 的分发模板，会随 KitDocs bundle/resources 发布。
+    - 内容覆盖设备与节点、接线与端口、机械与运动、控制协议、安全策略、应用场景与节拍。
+  - `3rd/CoralinkerKitDocs/README.md`
+    - Agent 本地目录规则增加 `ai-deck/fact.md`。
+    - 指向 `runtime/fact-template.md`。
+    - 文档索引增加 `runtime/fact-template.md`。
+  - `3rd/CoralinkerKitDocs/09-agent-workflows.md`
+    - 补全启动授权流程：
+      - 模拟节点可自动 Start。
+      - 真实硬件/车辆运动/危险输出必须确认启动授权。
+      - 选项 1：人类手动 Start，Agent 只部署到 build/program/root configure。
+      - 选项 2：每次确认后 Agent 执行 Start/control。
+      - 选项 3：本次会话授权 Agent 直接执行，但仍需说明计划和结果。
+      - 未明确授权时默认人类手动 Start。
+    - 明确 `ai-deck/fact.md` 不存在时，从 `runtime/fact-template.md` 创建。
+  - `3rd/CoralinkerKitDocs/10-agent-api.md`
+    - Start API 安全规则补充三种启动授权模式和默认行为。
+  - `3rd/CoralinkerKitDocs/03-build-and-deploy.md`
+    - 启动章节补充 `runtime/fact-template.md`。
+  - `3rd/CoralinkerKitDocs/11-multinode-system-design-reference.md`
+    - 将启动授权模式扩展为三种模式，并说明无明确授权时默认人类手动 Start。
+  - `3rd/CoralinkerHost/Services/KitDocsService.cs`
+  - `3rd/CoralinkerHost/publish-host.ps1`
+    - 将 `runtime/fact-template.md` 加入 recommendedReadOrder。
+- 【发现】`fact.md` 应是 Agent 工作区文件，模板必须在 KitDocs bundle 中分发；否则客户环境首次使用时没有来源。
+- 【注意】启动授权不是一句提醒，而是可持久化现场事实；必须写入 `ai-deck/fact.md`，后续 Agent 按记录执行。
+- 验证：
+  - `ReadLints` 检查 README、09、10、11、03、runtime/fact-template、KitDocsService、publish-host 无错误。
+  - `rg` 确认 `runtime/fact-template.md` 已出现在 README、09、11、KitDocsService 和 publish-host 推荐顺序中。
+
+## 2026-06-04 12:04 UTC+8 — 发布包含 fact 模板和启动授权规则的新包
+
+- 用户需求：
+  - 直接打一个新包。
+- 执行：
+  - 运行 `3rd/CoralinkerHost/publish-host.ps1 -SkipNativeBuild -NoRestore`。
+  - 发布成功。
+- 输出目录：
+  - `3rd/CoralinkerHost/Publish/CoralinkerHost_c7f234b_20260604-120452`
+- 验证：
+  - `publish-info.json` 存在，记录 `publishTime=2026-06-04T12:04:52.5705076+08:00`。
+  - 发布包 `res/docs/kit/md/runtime/fact-template.md` 存在。
+  - 发布包 `wwwroot/docs/kit/resources.json` 的 `recommendedReadOrder` 包含 `runtime/fact-template.md`。
+  - 发布包 `wwwroot/docs/kit/bundle.zip` 存在（为二进制 zip，不能按文本读取）。
+- 注意：
+  - 剩余 warning 为既有：
+    - Vite/Rollup SignalR pure annotation warning。
+    - `device.ts` dynamic/static import chunk warning。
+    - 大 chunk size warning。
+    - `DiverCompiler/Processor.cs` unreachable code warning。
+    - 既有 nullable warning。
+
+## 2026-06-04 12:06 UTC+8 — 修复人类 HTML 文档入口路由与中文编码
+
+- 用户反馈：
+  - `http://127.0.0.1:4499/docs/kit/` 打不开。
+  - 后续确认旧 Host 未停止导致新包无法运行。
+  - 新包运行后 HTML 中文显示乱码，例如 `Coralinker Kit 寮€鍙戞枃妗?`。
+- 问题定位：
+  - `/docs/kit/` 命中多个 endpoint：
+    - `/docs/kit`
+    - `/docs/kit/`
+    - `/docs/kit/{**path}`
+    - 导致 ASP.NET Core `AmbiguousMatchException`，返回 500。
+  - `publish-host.ps1` 使用 `Get-Content -Raw` 读取 Markdown，未指定 UTF-8，在 Windows PowerShell 下按默认编码读取，导致生成的 HTML 已经乱码。
+- 修改：
+  - `3rd/CoralinkerHost/Web/ApiRoutes.cs`
+    - 删除显式 `/docs/kit/` 路由。
+    - catch-all `/docs/kit/{**path}` 遇到空 path 时返回 `README.html`。
+  - `3rd/CoralinkerHost/publish-host.ps1`
+    - 生成 HTML 时读取 Markdown 改为 `Get-Content -Raw -Encoding UTF8`。
+- 执行：
+  - 停止占用 4499 的旧 Host：
+    - PID 23536，旧包 `CoralinkerHost_c7f234b_20260604-120815`。
+  - 重新发布：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_c7f234b_20260604-121453`
+  - 启动新包到 `http://localhost:4499`。
+- 验证：
+  - `dotnet build 3rd/CoralinkerHost/CoralinkerHost.csproj --no-restore` 成功，0 error。
+  - `http://127.0.0.1:4499/docs/kit/` 返回 200。
+  - 返回内容包含 `Coralinker Kit 开发文档`，确认中文编码正常。
+  - 发布包 `wwwroot/docs/kit/README.html` 标题为 `Coralinker Kit 开发文档 - Coralinker Kit Docs`。
+- 【注意】如果用户启动旧包占住 4499，新包会启动失败；publish 后验证前应先确认端口上的 Host 路径。
+
+## 2026-06-04 10:54 UTC+8 — 统一 Host 地址占位符并压缩 Agent 文档重复
+
+- 用户反馈：
+  - 文档示例写死 `localhost:4499`，客户使用其他 Host 地址时会误导 Agent。
+  - `README.md` 前面要求 bundle-first，后面又写 GET 读取，语义容易混淆。
+  - `README.md`、`09-agent-workflows.md`、`10-agent-api.md` 存在部分重复。
+- 修改：
+  - 将 KitDocs Markdown 示例中的 `http://localhost:4499` 统一替换为 `<HOST_URI>`。
+  - `README.md` 明确 `<HOST_URI>` 是当前 CoralinkerHost 的 origin，并把逐个读取 Markdown 改成“bundle 下载失败时的 fallback”。
+  - `README.md` 的规则区压缩为入口摘要，详细流程交给 `09-agent-workflows.md`，底层 API 交给 `10-agent-api.md`。
+  - `10-agent-api.md` 顶部明确 `<HOST_URI>`，并把“Agent 启动后应先调用”改成底层 API 说明，避免和 Python 工具优先冲突。
+  - 顺手修正相关 Markdown 表格分隔符和一个代码块语言标记，消除 markdownlint 诊断。
+- 【发现】Host 地址不适合发布时动态替换 zip；文档使用 `<HOST_URI>` 更稳定，同一包可服务 localhost、局域网 IP、远程 VH 和客户自定义域名。
+- 【注意】Python 工具源码仍保留 localhost 作为本机开发默认值，但教程示例显式要求 Agent 传入 `--host <HOST_URI>`。
+- 验证：
+  - `rg` 确认 KitDocs Markdown 中没有残留 `localhost:4499` 或 `http://localhost`。
+  - `ReadLints` 检查本次修改的 KitDocs Markdown 无错误。
+
+## 2026-06-04 10:22 UTC+8 — Agent 编程系统黑盒可用性测试
+
+- 用户需求：
+  - 作为全新 Agent，只从 `http://localhost:4499/api/docs/kit/md/` 开始，验证是否能仅凭文档和 API 完成 Agent programming workflow。
+- 执行：
+  - 阅读入口文档、`/api/docs/kit`、`/api/docs/kit/resources`、`00-system-overview.md`、`09-agent-workflows.md`、`10-agent-api.md`、`02-logic-api.md`、`04-variables-and-io.md`、`06-remote-control.md`、stub、示例和工具说明。
+  - 在 `ai-deck/agent_programming_test_20260604/` 建立本次测试工作目录，包含 `desc.md`、`scripts/`、`logics/`、`results/`。
+  - 通过 Host API 新建工程，添加 3 个 simulated MCU 节点。
+  - 编写 `AgvAgentWorkflow.cs`，包含 3 个 MCU logic：drive、safety、actuator/status；以及 1 个 Host-side Root logic：`AgvJoystickRootLogic`。
+  - 使用 bundled `coral_agent.py files sync` 将源码同步到 `assets/inputs/AgvAgentWorkflow.cs`，没有直接编辑 Host data folder。
+  - Build 成功，产物包含 3 个 MCU artifacts 和 1 个 root logic。
+  - 分别 program 3 个 simulated 节点，配置 Root，启动会话，设置 `enable`、`joystickX/Y`、`liftRequest` 等 ControlItem，刷新 state/variables/flow/logs/fatal errors。
+  - 测试结束后使用 CLI stop 停止会话。
+- 结果：
+  - `start --require-all` 返回 `totalNodes=3`、`successNodes=3`。
+  - Variables/flow 显示 Root 写入 `agv_drive_left_cmd`、`agv_drive_right_cmd`、`agv_safety_brake_cmd`、`agv_actuator_lift_cmd`，对应 MCU 节点读取。
+  - 节点日志分别出现 `DRIVE`、`SAFETY`、`ACTUATOR`，行为差异可见。
+  - Fatal error 为 null。
+- 【发现】Root vs MCU 边界在 README/Agent workflows/tools 中足够明确：MCU 使用 `/api/node/{uuid}/program`，Root 使用 `/api/root/configure` 和 control API。
+- 【注意】Root 的具体 C# 写法需要从 stub、`04-variables-and-io.md`、`06-remote-control.md` 组合推断；入口推荐阅读顺序未显式包含 `04`/`06`，弱 Agent 可能遗漏。
+- 【发现】MCU 日志频率与示例中 `iteration % N` 的直觉不完全一致，drive/safety 日志比代码条件预期更频繁，可能是 iteration 语义或 sim runtime 行为需要进一步说明。
+- 接下来：
+  - 根据最终报告中的 blocker/confusing points，考虑补充一份“一键 AGV 三节点 + Root”完整示例和 workflow 脚本。
+
+## 2026-06-04 10:04 UTC+8 — Agent 工具链、Root 编程差异和 API 反馈修复
+
+- 用户需求：
+  - 继续完成 Agent 反馈修复计划。
+  - 本次使用中其他 Agent 对 Root 节点“编程”理解有误，需要强调 Root 与 MCU 节点差异。
+  - 不要遗忘 Root 配置、Root 控制示例和工具链。
+- 修改：
+  - 新增和完善 Agent Python 工具：
+    - `3rd/CoralinkerKitDocs/tools/agent_cli/coral_agent.py`
+      - 增加 `node add`、`node add-simulated`、`node info`。
+      - 增加 `root meta`、`root set-control`。
+      - 保留 `files sync` 自动 snapshot/baseHash/JSON 序列化，避免手写转义 payload。
+    - `3rd/CoralinkerKitDocs/tools/workflows/add_nodes_and_program.py`
+      - 支持 0/1/多真实节点或模拟节点。
+      - 支持重复 `--program UUID=LogicName`。
+      - 增加 `--root-logic`，并在输出中注明 Root 不走 `/api/node/{uuid}/program`。
+    - `3rd/CoralinkerKitDocs/tools/workflows/configure_root_and_controls.py`
+      - 专门演示 Root configure、读取 control meta、设置 ControlItem。
+    - `3rd/CoralinkerKitDocs/tools/README.md`
+      - 说明 CLI、workflow、Root 与 MCU program 差异。
+    - 修复 `debug_can_wiretap.py` 被重复拼接导致 `from __future__` 位置错误的问题。
+  - 离线文档包：
+    - `KitDocsService` 支持 `.py` 文档资源、`GetResources()` 和 `BuildBundle()`。
+    - `ApiRoutes` 增加：
+      - `GET /api/docs/kit/resources`
+      - `GET /api/docs/kit/bundle.zip`
+    - `publish-host.ps1` 生成 `resources.json` 和静态 `bundle.zip`。
+    - `AgentStateService` capabilities 增加 docs resources/bundle。
+  - API 行为修复：
+    - `/api/files/sync` 对旧 `files[]` 格式明确返回 400，提示使用 `changes[]`。
+    - `/api/start` 部分节点失败时返回 `ok=false/status=PartialFailure/sessionRunning=true`，避免 Agent 只看 `ok` 误判。
+    - `/api/node/{uuid}/configure` 的 `portConfigs` 支持按 `index`/`name`/顺序局部合并，保留未提交端口配置。
+    - `PortConfigSnapshot` 增加 `index`，节点信息和 probe layout 都能暴露端口 index。
+    - probe/add 失败返回 `mcuUri` 和 `hint`，方便 Agent 排查 URI、设备占用、供电和接线。
+    - `DIVERSession.StopBackgroundWorkers()` 改为局部交换 CTS/worker 引用；worker 超时未退出时延迟 dispose，并捕获 `token.WaitHandle` 的 `ObjectDisposedException`，降低 stop/start 竞态崩溃风险。
+  - 文档更新：
+    - `README.md`
+      - 补充 bundle/resources/tools 入口。
+      - 明确不要手写 sync JSON，Root 不使用 MCU node program。
+    - `09-agent-workflows.md`
+      - 增加工具优先的 sync 流程。
+      - 新增 Root 配置和控制工作流。
+      - 明确 `PartialFailure` 处理规则。
+    - `10-agent-api.md`
+      - 补充 docs bundle/resources。
+      - 补充 sync CLI 示例、旧 `files[]` 400 说明。
+      - 补充 start partial failure 返回示例。
+      - 补充 portConfigs 局部合并和 Root control 示例。
+    - `08-faq.md`
+      - 新增 Agent 常见阻塞：sync、probe/add、Root 编程误解、start partial、stop 冷却、portConfigs、WireTap。
+- 【发现】Root Logic 的正确模型是 Host 侧 .NET runtime 逻辑：Build 发现并生成 Root metadata，`/api/root/configure` 只负责选择绑定；Root ControlItem 通过 `/api/root/control/meta` 和 `/api/root/control/set` 操作。不能把 Root 当 MCU 节点调用 `/api/node/{uuid}/program`。
+- 【注意】Agent 开发文件时应优先使用 `coral_agent.py files sync` 或语言内置 JSON 序列化。手写 shell 转义 JSON 很容易造成 payload 形状错误或 silently no-op。
+- 【注意】`/api/start` 现在 `ok=true` 只表示全部节点启动成功。部分成功会返回 `ok=false/status=PartialFailure`，但 `sessionRunning=true` 表示已有节点在运行，排查前通常应先 stop。
+- 验证：
+  - `python -m py_compile` 覆盖：
+    - `tools/agent_cli/coral_agent.py`
+    - `tools/workflows/add_nodes_and_program.py`
+    - `tools/workflows/configure_root_and_controls.py`
+    - `tools/workflows/debug_can_wiretap.py`
+    - `tools/workflows/debug_serial.py`
+    - `tools/workflows/deploy_logic.py`
+    - `tools/workflows/safe_stop_build_program_start.py`
+  - `dotnet build` 在 `3rd/CoralinkerHost` 成功，0 error。
+  - `ReadLints` 检查修改的 C# 文件无错误。
+  - 剩余 warning 为项目既有 nullable/未使用/unreachable code warning。
+- 接下来：
+  - 如需给 Auto/其他 Agent 试用，建议发布 Host 后让新 Agent 先下载 `/api/docs/kit/bundle.zip`，再使用 `tools/agent_cli/coral_agent.py` 完成 sync/build/program/root/start。
+
+## 2026-06-04 10:19 UTC+8 — 发布新包并启动无上下文 Agent 试用
+
+- 用户需求：
+  - 确认前一轮任务是否全部做完。
+  - 发布一个全新 CoralinkerHost 包。
+  - 从新包启动后台 Host。
+  - 启动一个无上下文 SubAgent，要求它仅按 Host 文档和 API 完成：
+    - 添加 3 个虚拟/模拟 MCU 节点。
+    - 为每个节点写不同逻辑。
+    - 写 Root logic，将 joystick X/Y 分解并下发给子节点执行。
+    - 跑常见 AGV 逻辑测试。
+    - 调试整个 Agent 编程系统，并提出问题和建议。
+- 执行：
+  - 运行 `3rd/CoralinkerHost/publish-host.ps1 -SkipNativeBuild -NoRestore`。
+  - 新发布包目录：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_c7f234b_20260604-101955`
+  - 从发布目录启动后台 Host：
+    - `dotnet .\CoralinkerHost.dll --urls http://localhost:4499`
+  - 使用 `Invoke-RestMethod http://localhost:4499/api/ping` 验证 Host 可访问，返回 `ok=true`。
+  - 启动无上下文 SubAgent，入口只给：
+    - `http://localhost:4499/api/docs/kit/md/`
+- 【注意】当前后台 Host 使用的是新发布包目录，不是源码目录直接运行。
+- 【注意】SubAgent 任务要求它不能直接编辑 Host data folder，只能使用 Host API 或文档包内 Agent 工具。
+- 接下来：
+  - 等待 SubAgent 返回中文报告后，根据其反馈继续修正文档/API/工具链。
+
+## 2026-06-04 10:35 UTC+8 — 根据黑盒 Agent 反馈强化教程约束
+
+- 用户反馈：
+  - SubAgent 虽然完成了测试，但仍大量用 curl 逐个读取文档，而不是下载 `bundle.zip` 解压。
+  - SubAgent 仍倾向手写 Python/HTTP 流程，没有优先发现和使用已有 `coral_agent.py` 与 workflows。
+  - 对整个系统缺少一次性理解。
+  - 之前给 SubAgent 的许多 prompt 约束应写入网页 Agent 初始 Prompt 和文档，而不是依赖用户每次提醒。
+  - Agent 应在每次任务中把准备做什么、做了什么、下一步做什么讲清楚，不能隐藏过程。
+- 修改：
+  - `3rd/CoralinkerKitDocs/README.md`
+    - 新增“Agent 启动后的强制步骤”。
+    - 明确所有任务先 `/api/docs/kit/resources`，再下载 `/api/docs/kit/bundle.zip` 解压。
+    - 明确先读 `resources.json`、`README.md`、`09-agent-workflows.md`、`10-agent-api.md`、`tools/README.md`。
+    - 明确 Root/变量/遥控任务继续读 `04-variables-and-io.md` 和 `06-remote-control.md`。
+    - 明确优先使用 bundle 内 `tools/agent_cli/coral_agent.py` 和 `tools/workflows/*.py`，不要默认 curl 或手写脚本。
+    - 增加透明度要求：开始前讲计划，执行中讲关键结果，结束讲验证证据和风险。
+  - `3rd/CoralinkerKitDocs/09-agent-workflows.md`
+    - 总规则改成 bundle-first、tools-first。
+    - 新增“Agent 对用户的透明度要求”。
+    - 新增“工具优先规则”，明确 workflow > CLI > direct HTTP > 临时脚本。
+    - 禁止为 sync 手写 shell 转义 JSON，禁止明明有工具还用 curl 上传大段源码。
+  - `3rd/CoralinkerKitDocs/10-agent-api.md`
+    - 文档 API 中明确 Agent 默认应下载 bundle，而不是逐个 curl Markdown。
+  - `3rd/CoralinkerKitDocs/tools/README.md`
+    - 强化 Agent 行为规则。
+    - 明确 direct HTTP 和临时 Python 只是 fallback。
+    - 增加官方 AGV smoke test 命令。
+  - `3rd/CoralinkerHost/ClientApp/src/views/HomeView.vue`
+    - 扩展 Agent 弹窗建议 Prompt。
+    - 初始 Prompt 现在直接要求：
+      - 先 `/api/docs/kit/resources`。
+      - 下载并解压 `/api/docs/kit/bundle.zip`。
+      - 先读 resources 和关键文档。
+      - 优先使用 `agent_cli` 和 workflows。
+      - 不要优先 curl、不要手写 sync JSON、不要已有 workflow 还从零写 Python。
+      - 执行前/中/后向用户透明说明计划、进度、结果、验证和风险。
+  - `3rd/CoralinkerHost/Services/KitDocsService.cs`
+    - `RecommendedReadOrder` 增加 `04-variables-and-io.md`、`06-remote-control.md`。
+  - `3rd/CoralinkerHost/publish-host.ps1`
+    - 静态 `resources.json` 的 `recommendedReadOrder` 同步增加 04/06。
+  - 新增 `3rd/CoralinkerKitDocs/tools/workflows/agv_three_sim_demo.py`
+    - 官方一键三模拟节点 AGV workflow。
+    - 流程：new project -> add 3 simulated nodes -> sync AGV C# -> build -> program 3 MCU nodes -> configure Root -> start -> set joystick/lift -> dump state -> 可选 stop。
+    - 目的：给弱 Agent 一个完整可跑样例，避免从零手写整个流程。
+- 【发现】只在文档深处写“可以下载 bundle/可以用工具”不够，Agent 会沿用通用 curl/临时脚本习惯。必须在入口 README、workflow 总规则、tools README、网页初始 Prompt 同时写成强约束。
+- 【注意】文档角色从“API 说明”升级为“Agent 行为教程”。要约束 Agent 先理解系统、先用工具、向用户透明报告，而不是只列接口。
+- 验证：
+  - `python -m py_compile tools/workflows/agv_three_sim_demo.py tools/agent_cli/coral_agent.py` 成功。
+  - `dotnet build` 在 `3rd/CoralinkerHost` 成功，0 error。
+  - `ReadLints` 检查 `HomeView.vue`、`KitDocsService.cs` 无错误。
+  - 剩余 warning 为项目既有 nullable/未使用/unreachable code warning。
+- 接下来：
+  - 后续发布新包后，可再次启动无上下文 Agent，观察它是否先下载 bundle、是否优先运行 `tools/workflows/agv_three_sim_demo.py`，以及是否主动向用户报告计划/进度/验证。
+
+## 2026-06-04 10:43 UTC+8 — 让工具入口和反馈协议在 09/10 文档中更显眼
+
+- 用户反馈：
+  - `09-agent-workflows.md` 和 `10-agent-api.md` 中仍有大量 GET/POST/JSON 内容，弱 Agent 可能直接照抄 curl。
+  - Python 工具路径不够显眼，SubAgent 不容易发现已有 `coral_agent.py` 和 workflows。
+  - 需要教 SubAgent 主动发现 workflow 和系统问题，知道意见建议记录到哪里、怎么反馈给开发团队。
+- 修改：
+  - `3rd/CoralinkerKitDocs/09-agent-workflows.md`
+    - 在“工具优先规则”中新增固定工具清单表：
+      - `tools/agent_cli/coral_agent.py`
+      - `tools/workflows/deploy_logic.py`
+      - `tools/workflows/safe_stop_build_program_start.py`
+      - `tools/workflows/add_nodes_and_program.py`
+      - `tools/workflows/configure_root_and_controls.py`
+      - `tools/workflows/agv_three_sim_demo.py`
+      - `tools/workflows/debug_serial.py`
+      - `tools/workflows/debug_can_wiretap.py`
+    - 增加常见命令示例，特别是 `state`、`files sync`、`agv_three_sim_demo.py`。
+    - 新增“Agent 反馈协议”：
+      - 主动检查文档、工具、Root/MCU 边界、API 错误、warning、刷新顺序、用户可理解性。
+      - 反馈文件写入 `ai-deck/agent_feedback/YYYYMMDD-HHMMSS-brief-topic.md`。
+      - 提供反馈文件模板和最终回复要求。
+    - 修正有序列表编号风格，消除 markdownlint warning。
+  - `3rd/CoralinkerKitDocs/10-agent-api.md`
+    - 开头明确本文是 API 参考，不是默认操作教程。
+    - 明确默认流程是下载 bundle -> 读 tools README -> 优先 CLI/workflow -> 最后才直接 GET/POST。
+    - 第一屏新增 “Python 工具入口” 和常用 CLI/workflow 命令。
+    - 明确不要因为文档列出 GET/POST/JSON 就默认 curl 或手写 HTTP。
+  - `3rd/CoralinkerKitDocs/tools/README.md`
+    - 新增 “Feedback To Developers”。
+    - 说明复杂任务后应把问题和建议写入 `ai-deck/agent_feedback/...` 并在最终回复中总结。
+  - 新增 `ai-deck/agent_feedback/desc.md`
+    - 说明本目录用于记录外部 Agent/SubAgent 使用文档、API、CLI、workflow 的问题、建议和复现步骤。
+- 【发现】API 参考文档必须主动声明“不要从这里开始操作”，否则 Agent 会把参考文档当教程，按 GET/POST 顺序写 curl。
+- 【注意】反馈协议不能只写在最终 prompt 里，必须发布到 docs/tools 中，让客户 Agent 自己知道如何把问题带回开发团队。
+- 验证：
+  - `ReadLints` 检查 `09-agent-workflows.md`、`10-agent-api.md`、`tools/README.md`、`ai-deck/agent_feedback/desc.md` 无错误。
+  - `python -m py_compile tools/agent_cli/coral_agent.py tools/workflows/agv_three_sim_demo.py` 成功。
+
+## 2026-06-04 10:47 UTC+8 — 全目录审查 GET/POST 并改为 Python 工具优先
+
+- 用户反馈：
+  - 需要检查 `3rd/CoralinkerKitDocs` 全部文档里仍存在 `GET`/`POST` 的地方。
+  - 判断是否已有 Python 脚本覆盖；如果 Python 能节省大量 token，则教程应优先调用 Python。
+- 执行：
+  - 使用全文搜索扫描发布文档中的 `GET /api...`、`POST /api...`、`/api/...`。
+  - 分类结果：
+    - `10-agent-api.md` 是 API 参考，保留 GET/POST，但第一屏必须明确 CLI/workflow 优先。
+    - `_write_request/` 是不发布的写作记录，保留历史 API 需求。
+    - `README.md` 的少量 GET/POST 是入口和 fallback 说明。
+    - `03/04/07/08/09/tools README` 中可由 Python 覆盖的操作流程应改成 Python 优先。
+- 修改：
+  - `3rd/CoralinkerKitDocs/tools/agent_cli/coral_agent.py`
+    - 新增 `project new`。
+    - 新增 `node probe/list/states/state/remove`。
+    - 新增 `variables meta/values/flow/set`。
+    - 新增 `logs terminal/build/root`。
+    - 新增 `errors fatal`。
+    - 新增 `logic list`。
+    - 这些命令覆盖大部分原先文档中的 GET/POST 查询和常见动作。
+  - `3rd/CoralinkerKitDocs/tools/README.md`
+    - 常用命令增加 project/state/files snapshot/node/variables/logs/errors。
+    - Root 和 MCU 差异改成 CLI 命令示例，不再直接展示 POST/GET。
+  - `3rd/CoralinkerKitDocs/04-variables-and-io.md`
+    - 变量 meta/values/flow、变量 set、节点 states/state 改为 `coral_agent.py` 命令优先。
+  - `3rd/CoralinkerKitDocs/07-node-management.md`
+    - 真实节点 probe/add/configure/info/states 改为 CLI 优先。
+    - 模拟节点 add-simulated 改为 CLI 优先。
+    - 多节点刷新、删除节点和刷新变量 flow 改为 CLI 优先。
+  - `3rd/CoralinkerKitDocs/08-faq.md`
+    - Root 编程误解、PartialFailure、stop 等排障步骤改为 CLI/workflow 优先。
+    - portConfigs 局部修改改为 `node configure-port` 示例。
+  - `3rd/CoralinkerKitDocs/00-system-overview.md`
+    - 文件 sync/snapshot、节点 layout 查看、聚合刷新改为 CLI 命令描述。
+  - `3rd/CoralinkerKitDocs/03-build-and-deploy.md`
+    - 从“Agent API 流程”改为“Agent 工具流程”。
+    - 保存、build、program、start、stop、刷新全部改为 CLI 命令。
+  - `3rd/CoralinkerKitDocs/09-agent-workflows.md`
+    - 读取系统、文件 sync、build、真实/模拟节点、多节点 program、Root configure/control、start/stop、变量、WireTap、fatal error 全部改为 CLI/workflow 优先。
+    - 只保留少量 `/api/...` 作为 bundle fallback、ping 排查和 Root 禁止 node program 的概念说明。
+  - `3rd/CoralinkerKitDocs/10-agent-api.md`
+    - 保持 API 参考定位。
+    - 第一屏补充更完整的 CLI 覆盖说明，明确 CLI 覆盖文档下载、项目新建、状态聚合、文件、build、logic list、节点、Root、variables、logs、wiretap、fatal errors。
+  - `3rd/CoralinkerKitDocs/README.md`
+    - 启动强制步骤改为先给 `coral_agent.py docs download --bundle` 命令。
+- 【发现】仅仅在文档中写“不要 curl”不够；必须把教程正文中的操作步骤替换成 Python 命令，否则 Agent 看到 GET/POST 会自然模仿。
+- 【注意】`10-agent-api.md` 仍会包含大量 GET/POST，这是它作为 API reference 的职责；关键是它第一屏必须声明“不是默认教程”，并给出 Python 等价入口。
+- 验证：
+  - `ReadLints` 检查 `3rd/CoralinkerKitDocs` 和 `ai-deck/agent_feedback/desc.md` 无错误。
+  - `python -m py_compile` 覆盖全部 Agent CLI/workflow 脚本成功。
+  - `dotnet build` 在 `3rd/CoralinkerHost` 成功，0 error，仅剩既有 `DiverCompiler/Processor.cs` unreachable code warning。
+
+## 2026-06-03 15:48 UTC+8 — 缩短 Agent Prompt 并补充硬件信息追问规则
+
+- 用户反馈：
+  - 网页 Agent 弹窗里的建议 Prompt 与 Docs 内容有重复，整体偏长。
+  - 实际使用时用户还会继续输入任务补充。
+  - 例如真实连接的灯、按键、驱动器等硬件信息，需要其他 Agent 按用户补充输入工作。
+  - 如果用户补充不够，Agent 应该要求用户继续补充，而不是猜测。
+- 修改：
+  - `3rd/CoralinkerHost/ClientApp/src/views/HomeView.vue`
+    - 缩短 `agentSuggestedPrompt`。
+    - Prompt 现在只保留核心导向：
+      - 从 `${agentDocsUrl.value}` 开始阅读文档并按 Agent 工作流操作。
+      - 用户后续补充的实际任务和硬件连接信息优先。
+      - 硬件信息不足时先追问，不猜测接线、端口参数和控制方向。
+    - 去掉原来与 Docs 重复的逐条 API/流程说明。
+  - `3rd/CoralinkerKitDocs/09-agent-workflows.md`
+    - 总规则增加：
+      - 用户补充输入优先于示例代码。
+      - 涉及真实硬件时不要猜测灯、按键、驱动器、传感器、端口、协议、电平、方向和安全限制。
+      - 信息不足以安全编程、编程节点或验证结果时，先向用户追问。
+    - 新增“用户补充输入和硬件信息”章节。
+    - 明确真实硬件任务至少确认：
+      - 设备类型。
+      - 节点、端口、通道。
+      - 串口/CAN/IO 参数。
+      - 控制变量和反馈变量命名。
+      - 安全限制。
+      - 验证方式。
+    - 增加具体追问示例。
+  - `3rd/CoralinkerKitDocs/README.md`
+    - Agent 必须知道的规则中增加：
+      - 用户补充的实际任务和硬件连接信息是任务输入的一部分。
+      - 信息不足时先追问，不要猜测真实硬件参数。
+- 验证：
+  - `ReadLints` 检查 `HomeView.vue` 无错误。
+  - `npm run build` 成功。
+  - 剩余 warning 为既有：
+    - SignalR pure annotation comment warning。
+    - `device.ts` 同时 dynamic/static import chunk warning。
+    - 大 chunk size warning。
+
+## 2026-06-03 15:50 UTC+8 — 发布包含缩短 Prompt 和硬件补充规则的新 Host 包
+
+- 用户需求：
+  - 对刚才缩短 Agent Prompt、补充硬件信息追问规则的版本执行 publish。
+- 执行：
+  - 运行 `3rd/CoralinkerHost/publish-host.ps1 -SkipNativeBuild -NoRestore`。
+  - 发布脚本完成：
+    - 前端 `npm run build`。
+    - `dotnet publish`。
+    - Kit docs 发布。
+    - `publish-info.json` 生成。
+- 输出目录：
+  - `3rd/CoralinkerHost/Publish/CoralinkerHost_c7f234b_20260603-155042`
+- 验证：
+  - 发布命令退出码为 0。
+  - 已确认发布包关键文件存在：
+    - `publish-info.json`
+    - `CoralinkerHost.dll`
+    - `wwwroot/index.html`
+    - `wwwroot/docs/kit/README.html`
+    - `wwwroot/docs/kit/09-agent-workflows.html`
+    - `res/docs/kit/md/README.md`
+    - `res/docs/kit/md/09-agent-workflows.md`
+    - `simnode/CoralinkerSimNodeHost.dll`
+- 注意：
+  - 剩余 warning 为既有：
+    - Vite/Rollup SignalR pure annotation warning。
+    - `device.ts` dynamic/static import chunk warning。
+    - 大 chunk size warning。
+    - `DiverCompiler/Processor.cs` unreachable code warning。
+
+## 2026-06-04 16:48 UTC+8 — VarFlow 自动排序与同关系变量分组框
+
+- 用户需求：
+  - 取消变量拖动排序功能，避免用户手动排列不清楚。
+  - 新变量出现后自动触发重新排序和布局计算。
+  - Root 与节点之间的横排变量按关系优化，例如双节点时希望接近 `ToA FromA ToB FromB`，减少线交叉。
+  - 多个同方向、同来源、同去向变量不要一字排开；改为竖向堆叠，外面加一个大框；每个大框最多 6 个变量。
+  - 出现合并变量大框时，Root 和节点之间的竖向间距需要随分组高度自动增大。
+- 修改：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`
+    - 新增 `VariableFlowGroup` 输出，描述横排变量的分组框。
+    - 固定布局入口改为 `autoOrderVariables()` 自动排序，不再依赖 `projectStore.variableFlowOrder`。
+    - 自动排序按变量关系计算 key：优先按相邻节点通信、节点顺序、Root 写/Root 读角色、变量方向排序。
+    - `layoutExternalVariables()` 改为输出 `{ items, groups, height }`。
+    - 同 `direction + writerIds + readerIds` 的变量会形成同一列，每列最多 6 个变量；超过 6 个拆成下一列。
+    - 分组列使用 `FLOW_GROUP_PADDING`、`FLOW_GROUP_ITEM_GAP`、`FLOW_GROUP_GAP` 控制内部堆叠和列间距。
+    - 主关系线的路由目标改为 `groups + 未分组 items`；带 `groupId` 的变量不再单独产生主关系线，避免同一组重复拉多条长线。
+    - 分组高度参与节点层 Y 坐标计算，使 Root 与节点之间间距随竖排变量自动增大。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`
+    - 新增 `.variable-flow-group` 渲染和颜色样式。
+    - 移除变量卡片 `draggable`、`dragstart/drop/dragend`、`draggedVariableName` 和 `saveVariableFlowOrder()`。
+    - 移除变量拖拽排序样式。
+    - 移除监听 `variableFlowLayout.value.variableOrder` 后写回项目的 watcher。
+    - `flowCanvasSize` 纳入分组框边界，避免分组框超出画布尺寸计算。
+- 验证：
+  - `ReadLints` 检查 `variableFlowLayout.ts`、`GraphCanvas.vue` 无错误。
+  - `npx vue-tsc -b` 通过。
+  - `npx vite build` 通过。
+  - `git diff --check -- "3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts" "3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue"` 通过，仅有 LF/CRLF 提示。
+- 注意：
+  - Vite warning 为既有构建提示：
+    - SignalR pure annotation comment。
+    - `device.ts` dynamic/static import chunk warning。
+    - 大 chunk size warning。
+
+## 2026-06-04 16:53 UTC+8 — 使用 Kit Docs Python CLI 创建双模拟节点 VarFlow 测试工程
+
+- 用户需求：
+  - 在 `localhost:4499` 新建一个工程试一下。
+  - 使用两个模拟节点，每个节点多弄几个变量。
+  - 按 `3rd/CoralinkerKitDocs` 的 Python API/CLI 工作流操作。
+- 执行：
+  - 下载/刷新 Kit Docs 工具包：
+    - `python 3rd/CoralinkerKitDocs/tools/agent_cli/coral_agent.py --host http://localhost:4499 docs download --out ai-deck/kit-docs --bundle`
+  - 读取状态：
+    - `python ai-deck/kit-docs/tools/agent_cli/coral_agent.py --host http://localhost:4499 state`
+  - 创建临时工作目录：
+    - `ai-deck/agent_work/20260604-1653-varflow-two-sim/`
+  - 新增临时草稿：
+    - `ai-deck/agent_work/20260604-1653-varflow-two-sim/desc.md`
+    - `ai-deck/agent_work/20260604-1653-varflow-two-sim/VarFlowTwoSim.cs`
+  - 使用 CLI 新建工程、同步源码、编译：
+    - `project new`
+    - `files sync --path assets/inputs/VarFlowTwoSim.cs --from-file ai-deck/agent_work/20260604-1653-varflow-two-sim/VarFlowTwoSim.cs --message "add varflow two sim test"`
+    - `build`
+  - Build 结果：
+    - `sourceCommitShort=48e3559`
+    - `buildId=20260604-085616`
+    - MCU artifacts：`VarFlowNodeALogic`、`VarFlowNodeBLogic`
+    - Root logics：`VarFlowRootLogic`
+  - 添加模拟节点：
+    - `VarFlow Sim A`：`04b7b024-8a6e-49f1-ad99-0602956df4ef`
+    - `VarFlow Sim B`：`2832b8fb-f371-46f6-a744-996b47ca93ee`
+  - 编程和启动：
+    - A -> `VarFlowNodeALogic`，`programSize=785`
+    - B -> `VarFlowNodeBLogic`，`programSize=586`
+    - Root -> `VarFlowRootLogic`
+    - `start --require-all` 成功，`successNodes=2/2`
+- 验证：
+  - `variables flow` 返回 Root Runtime、两个模拟节点和多组变量关系。
+  - Root -> A 变量：`ToA1`...`ToA7` 由 `root-runtime` 写、A 读；`ToA8` 是 Root 发布但无人读，用于测试无消费者布局。
+  - Root -> B 变量：`ToB1`...`ToB6` 由 `root-runtime` 写、B 读；`ToB7` 是 Root 发布但无人读。
+  - A -> Root 变量：`FromA1`...`FromA5` 由 A 写、Root 读。
+  - B -> Root 变量：`FromB1`...`FromB6` 由 B 写、Root 读。
+  - A -> B 变量：`AToB1`...`AToB3` 由 A 写、B 读。
+  - `node states` 返回两个模拟节点均：
+    - `runState=running`
+    - `isConnected=true`
+    - `isConfigured=true`
+    - `isProgrammed=true`
+- 注意：
+  - `/api/about` 显示当前 `localhost:4499` 是 `Published` 布局，frontend/backend buildTime 为 `2026-06-04T12:14:53`。
+  - 该运行包早于 16:48 的 VarFlow 前端分组框修改；后端工程和变量关系已准备好，但网页要看到最新分组框布局，需要重新发布/重启 Host 到最新前端构建。
+
+## 2026-06-04 17:00 UTC+8 — 修复 VarFlow 分组后 Root 槽位顺序导致的线交叉
+
+- 用户反馈：
+  - 截图中 `ToA7` 和 `FromA1..FromA5` 聚合之间发生线交叉。
+  - 用户判断为 `ToA7` 与 `FromA1..FromA5` 聚合的顺序不对。
+- 根因：
+  - `routeVariableLines()` 为主关系线分配 Root 底边槽位时，使用 `groups + items.filter(!groupId)` 的数据顺序。
+  - 分组框和未分组单变量列在 DOM/视觉上已经按 X 排列，但连线槽位没有按 X 重新排序。
+  - 当同一关系超过 6 个变量被拆成多列时，例如 `ToA1..ToA6` 聚合框 + `ToA7` 单变量，`ToA7` 的视觉位置在 `FromA` 之前，但 Root 出线槽位可能被排到 `FromA` 之后，于是线交叉。
+- 修改：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`
+    - `routeItems` 改为：
+      - 合并 `groups` 与未分组 items。
+      - 通过 `compareRouteItemPosition()` 按 `x + width / 2` 从左到右排序。
+      - 同 X 时按 `y` 排序。
+    - Root bottom slots 与 node top slots 都基于排序后的视觉顺序分配。
+- 验证：
+  - `ReadLints` 检查 `variableFlowLayout.ts` 无错误。
+  - `npx vue-tsc -b` 通过。
+- 注意：
+  - 这是前端源码修复；如果用户正在看 `localhost:4499` 的旧 Published 包，需要重新构建/发布或启动最新前端后才能看到效果。
+
+## 2026-06-04 17:03 UTC+8 — 取消 Graph 节点拖动换序和顺序持久化
+
+- 用户需求：
+  - 取消 Node 自由拖动特性。
+  - Project 不再保存和解析节点顺序。
+  - 节点直接按照创建顺序渲染。
+- 修改：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`
+    - `VueFlow` 的 `nodes-draggable` 从 `!isRunning` 改为固定 `false`。
+    - 删除 `@node-drag-stop` 事件绑定。
+    - `applyFixedLayout()` 中 Coral Node 固定 `draggable: false`，运行/停止状态不再改变节点拖动能力。
+    - 固定布局输入中不再传节点 `order`，`nodeOrder` 固定为空数组。
+    - 删除 `readNodeOrder()` 和 `currentNodeOrder()`，不再读取 `extraInfo.order`。
+    - 删除 `saveNodeOrder()`，不再通过 `configureNode(uuid, { extraInfo })` 保存排序。
+    - 删除 `targetNodeOrderIndex()` 和 `applyNodeOrderLocally()`，不再支持拖动交换顺序。
+    - `addNode()` 不再写入 `extraInfo: { order }`，添加节点后只按数组追加顺序布局。
+    - `loadFromStore()` 不再把后端 `extraInfo` 放入节点 data，也不再解析历史排序信息。
+    - `removeNode()` 删除节点后只重新应用固定布局，不再重写剩余节点顺序。
+- 验证：
+  - `ReadLints` 检查 `GraphCanvas.vue` 无错误。
+  - `npx vue-tsc -b` 通过。
+  - `npx vite build` 通过。
+  - `rg` 确认 `GraphCanvas.vue` 中无 `readNodeOrder/currentNodeOrder/saveNodeOrder/targetNodeOrderIndex/applyNodeOrderLocally/onNodeDragStop/extraInfo/NODE_SIZE` 残留引用。
+  - `git diff --check -- "3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue"` 通过，仅有 LF/CRLF 提示。
+- 注意：
+  - Vite warning 为既有构建提示：
+    - SignalR pure annotation comment。
+    - `device.ts` dynamic/static import chunk warning。
+    - 大 chunk size warning。
+
+## 2026-06-04 17:12 UTC+8 — ControlPanel 绑定变量特殊样式与变量框尺寸统一
+
+- 用户需求：
+  - 被遥控器面板（ControlPanel）绑定的变量需要特殊表示，方便直观看到哪些变量受遥控面板绑定。
+  - 样式可以是变量框背景颜色带条纹渐变。
+  - 变量框最小宽度需要加宽，避免 float 值变长时频繁重新调整宽度。
+  - ControlItem 和普通变量的高度、间距 CSS 不一致，需要统一。
+- 修改：
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts`
+    - `FLOW_ITEM_WIDTH`：`210 -> 220`。
+    - `CONTROL_ITEM_MIN_WIDTH`：`124 -> 168`。
+    - `CONTROL_ITEM_MAX_WIDTH`：`220 -> 260`。
+    - `FLOW_ITEM_MIN_WIDTH`：`132 -> 168`。
+    - 保持 `FLOW_ITEM_HEIGHT=38`，通过更宽 min width 减少短变量名 + float 值变化导致的宽度抖动。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`
+    - 新增 `controlPanelBoundVariables` computed。
+    - 从 `projectStore.controlLayout.widgets` 收集绑定变量：
+      - `config.variable`：slider/switch/gauge/lamp 等。
+      - `config.variableX`、`config.variableY`：joystick。
+    - 模板中对绑定变量框添加 `control-panel-bound` class。
+    - `.variable-flow-item.control-panel-bound` 增加更亮描边和外发光。
+    - `.variable-flow-item.control-panel-bound::before` 增加斜向 repeating-linear-gradient 条纹覆盖层。
+    - `.variable-flow-item` 增加 `overflow: hidden`，保证条纹被圆角裁剪。
+    - `.var-type/.var-name/.var-value` 增加相对定位和 `z-index: 1`，确保文字在条纹层上方。
+    - 移除 `.variable-flow-item.control-io` 的 `min-height: 30px`、`grid-template-rows: 13px 13px`、`font-size: 10px`，让 ControlItem 与普通变量使用一致高度、行高和字号。
+- 验证：
+  - `ReadLints` 检查 `GraphCanvas.vue`、`variableFlowLayout.ts` 无错误。
+  - `npx vue-tsc -b` 通过。
+  - `npx vite build` 通过。
+  - `git diff --check -- "3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue" "3rd/CoralinkerHost/ClientApp/src/components/graph/variableFlowLayout.ts"` 通过，仅有 LF/CRLF 提示。
+- 注意：
+  - Vite warning 为既有构建提示：
+    - SignalR pure annotation comment。
+    - `device.ts` dynamic/static import chunk warning。
+    - 大 chunk size warning。
+
+## 2026-06-04 17:18 UTC+8 — ControlPanel 变量支持从 Graph 变量框拾取
+
+- 用户需求：
+  - 遥控器绑定变量时变量列表太长，实际项目可能有 40 多个变量。
+  - 变量列表右侧增加 `Select From Graph` 按钮。
+  - 点击后 ControlPanel 更透明，焦点来到 Graph。
+  - 允许选择 Graph 中的变量框作为绑定对象。
+  - 能绑定的变量保持彩色，不能绑定的变量变灰。
+  - Hover 时颜色更加加深。
+  - 单击变量后绑定成功；点击别的地方绑定失败/取消。
+- 修改：
+  - `3rd/CoralinkerHost/ClientApp/src/stores/ui.ts`
+    - 新增 `GraphVariablePickRequest` / `GraphVariablePickResult` 类型。
+    - 新增 `graphVariablePickRequest` / `graphVariablePickResult` 状态。
+    - 新增 `startGraphVariablePick(allowedNames, label)`：
+      - 创建 request id。
+      - 保存可绑定变量名集合。
+      - 切换到 Graph view。
+    - 新增 `finishGraphVariablePick(variableName)`：
+      - 写入 pick result。
+      - 清除 active request。
+    - 新增 `cancelGraphVariablePick()` 和 `clearGraphVariablePickResult()`。
+  - `3rd/CoralinkerHost/ClientApp/src/components/control/ControlWindow.vue`
+    - 在以下变量选择行右侧添加 `Select From Graph`：
+      - joystick `variableX`
+      - joystick `variableY`
+      - slider `variable`
+      - switch `variable`
+      - gauge `variable`
+      - lamp `variable`
+    - 新增 `pendingGraphPick`，记录 request id 和待写入字段。
+    - 新增 `startGraphPick(field, scope)`：
+      - `scope='controllable'` 使用 `controllableVarList`，用于 joystick/slider/switch。
+      - `scope='all'` 使用 `allVarList`，用于 gauge/lamp。
+    - 新增 `applyGraphPickedVariable()`：
+      - 写回 `editingWidget.config[field]`。
+      - joystick X/Y 与 slider 会刷新默认范围。
+    - 监听 `uiStore.graphVariablePickResult`，匹配 request id 后写回变量或取消。
+    - 关闭配置弹窗、关闭 ControlWindow、组件卸载时取消未完成拾取。
+    - 拾取期间 `.control-window` 和 `.config-dialog-overlay` 半透明，配置弹窗不再截获点击。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`
+    - 新增 `graphVariablePickActive` 和 `graphVariablePickAllowedNames`。
+    - Variables Flow layer 在拾取模式下开启 pointer events。
+    - 变量框增加：
+      - `graph-pick-bindable`
+      - `graph-pick-disabled`
+    - 可绑定变量保持原色，hover 增亮、轻微上移并加高亮阴影。
+    - 不可绑定变量 grayscale/变暗，hover 仅轻微恢复亮度。
+    - 点击可绑定变量调用 `finishGraphVariablePick(name)`。
+    - 点击不可绑定变量或空白区域调用 `finishGraphVariablePick(null)`。
+- 验证：
+  - `ReadLints` 检查 `ui.ts`、`ControlWindow.vue`、`GraphCanvas.vue` 无错误。
+  - `npx vue-tsc -b` 通过。
+  - `npx vite build` 通过。
+  - `git diff --check -- "3rd/CoralinkerHost/ClientApp/src/stores/ui.ts" "3rd/CoralinkerHost/ClientApp/src/components/control/ControlWindow.vue" "3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue"` 通过，仅有 LF/CRLF 提示。
+- 注意：
+  - Vite warning 为既有构建提示：
+    - SignalR pure annotation comment。
+    - `device.ts` dynamic/static import chunk warning。
+    - 大 chunk size warning。
+
+## 2026-06-04 17:42 UTC+8 — 修正 Graph 变量拾取模式遮挡与缩放控件
+
+- 用户反馈：
+  - 进入拾取模式后，ControlPanel 仍在前台，遮住了 Graph。
+  - 应该全面隐藏 ControlPanel 和 Configure Panel 配置页面。
+  - Graph 内除了变量框以外的东西需要加一层蒙影。
+  - 左下角 `+/-/[]` 缩放控件在进入拾取模式后不可用了，需要保持可用。
+- 根因：
+  - 之前只把 ControlPanel 和配置弹窗做半透明，但它们仍然保留在高 z-index 前台。
+  - Variables Flow layer 在拾取模式下启用了整层 `pointer-events: auto`，覆盖了 VueFlow 的缩放控件。
+- 修改：
+  - `3rd/CoralinkerHost/ClientApp/src/components/control/ControlWindow.vue`
+    - ControlWindow 根节点改为 `v-if="visible && !graphVariablePickActive"`。
+    - 拾取模式中 ControlPanel 与配置弹窗完整不渲染，不再遮挡 Graph。
+  - `3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue`
+    - Graph wrapper 增加 `@click.capture="handleGraphCanvasClickCapture"`。
+    - 新增 `graph-pick-dim` 蒙影层：
+      - z-index 位于 VueFlow 内容之上、变量层之下。
+      - `pointer-events: none`，只负责视觉变暗，不拦截交互。
+    - Variables Flow layer 在拾取模式下保持 `pointer-events: none`，避免覆盖左下角缩放控件。
+    - 变量框自身仍保持 `pointer-events: auto`，可以点击选择。
+    - `handleGraphCanvasClickCapture()`：
+      - 点击变量框：不取消，交给变量框 click 处理。
+      - 点击 `.vue-flow__controls` / `.vue-flow__minimap`：不取消，保证缩放/视图控件可用。
+      - 点击其他区域：取消拾取。
+- 验证：
+  - `ReadLints` 检查 `ControlWindow.vue`、`GraphCanvas.vue` 无错误。
+  - `npx vue-tsc -b` 通过。
+  - `npx vite build` 通过。
+  - `git diff --check -- "3rd/CoralinkerHost/ClientApp/src/components/control/ControlWindow.vue" "3rd/CoralinkerHost/ClientApp/src/components/graph/GraphCanvas.vue"` 通过，仅有 LF/CRLF 提示。
+- 注意：
+  - Vite warning 为既有构建提示：
+    - SignalR pure annotation comment。
+    - `device.ts` dynamic/static import chunk warning。
+    - 大 chunk size warning。
+
+## 2026-06-04 18:35 UTC+8 — 发布最新 CoralinkerHost 包
+
+- 用户需求：
+  - “现在打包一个新的publish”。
+- 执行：
+  - 在 `3rd/CoralinkerHost` 运行：
+    - `.\publish-host.ps1 -SkipNativeBuild`
+  - 选择 `-SkipNativeBuild` 的原因：
+    - 本轮后续修改主要是前端交互和 Host 层逻辑。
+    - 没有修改 native runtime / sim node native shim。
+    - 复用已有 SimNode native runtime 产物，缩短发布时间。
+- 发布输出：
+  - `3rd/CoralinkerHost/Publish/CoralinkerHost_c7f234b_20260604-183507`
+- 发布信息：
+  - `configuration=Release`
+  - `tag=c7f234b-dirty`
+  - `commit=c7f234b`
+  - `commitTime=2026-06-03T12:37:46+08:00`
+  - `publishTime=2026-06-04T18:35:07.2618241+08:00`
+  - `skipNativeBuild=true`
+  - `nativeBridgeRuntimes=win-x64, linux-x64, linux-arm64`
+  - `nativeSimNodeRuntimes=win-x64, linux-x64, linux-arm64`
+- 验证：
+  - 发布命令退出码为 0。
+  - 已读取 `publish-info.json`。
+  - 已确认关键文件存在：
+    - `publish-info.json`
+    - `CoralinkerHost.dll`
+    - `wwwroot/index.html`
+    - `wwwroot/assets`
+    - `res/docs/kit/md/README.md`
+    - `wwwroot/docs/kit/README.html`
+    - `simnode/CoralinkerSimNodeHost.dll`
+- 注意：
+  - Vite warning 为既有构建提示：
+    - SignalR pure annotation comment。
+    - `device.ts` dynamic/static import chunk warning。
+    - 大 chunk size warning。
+  - dotnet publish 仍有既有 nullable/unused field warnings，未阻塞发布。

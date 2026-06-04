@@ -26,6 +26,17 @@ export interface Notification {
   duration?: number
 }
 
+export interface GraphVariablePickRequest {
+  id: string
+  allowedNames: string[]
+  label?: string
+}
+
+export interface GraphVariablePickResult {
+  requestId: string
+  variableName: string | null
+}
+
 export const useUiStore = defineStore('ui', () => {
   // ============================================
   // 状态定义
@@ -59,6 +70,10 @@ export const useUiStore = defineStore('ui', () => {
 
   /** 源码跳转请求 */
   const sourceJumpRequest = ref<{ file: string; line: number } | null>(null)
+
+  /** 从 Graph 变量框拾取 ControlPanel 绑定变量 */
+  const graphVariablePickRequest = ref<GraphVariablePickRequest | null>(null)
+  const graphVariablePickResult = ref<GraphVariablePickResult | null>(null)
   
   // ============================================
   // 计算属性
@@ -205,6 +220,36 @@ export const useUiStore = defineStore('ui', () => {
   function clearSourceJumpRequest() {
     sourceJumpRequest.value = null
   }
+
+  function startGraphVariablePick(allowedNames: string[], label?: string): string {
+    const id = `graph-var-pick-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    graphVariablePickResult.value = null
+    graphVariablePickRequest.value = {
+      id,
+      allowedNames: Array.from(new Set(allowedNames)),
+      label
+    }
+    viewMode.value = 'graph'
+    return id
+  }
+
+  function finishGraphVariablePick(variableName: string | null) {
+    const request = graphVariablePickRequest.value
+    if (!request) return
+    graphVariablePickResult.value = {
+      requestId: request.id,
+      variableName
+    }
+    graphVariablePickRequest.value = null
+  }
+
+  function clearGraphVariablePickResult() {
+    graphVariablePickResult.value = null
+  }
+
+  function cancelGraphVariablePick() {
+    finishGraphVariablePick(null)
+  }
   
   return {
     // 状态
@@ -216,6 +261,8 @@ export const useUiStore = defineStore('ui', () => {
     notifications,
     initialized,
     sourceJumpRequest,
+    graphVariablePickRequest,
+    graphVariablePickResult,
     
     // 计算属性
     isGraphView,
@@ -235,6 +282,10 @@ export const useUiStore = defineStore('ui', () => {
     info,
     setInitialized,
     gotoSource,
-    clearSourceJumpRequest
+    clearSourceJumpRequest,
+    startGraphVariablePick,
+    finishGraphVariablePick,
+    clearGraphVariablePickResult,
+    cancelGraphVariablePick
   }
 })

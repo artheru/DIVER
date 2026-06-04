@@ -153,6 +153,13 @@
                   >
                     <span class="btn-text">About</span>
                   </button>
+                  <button
+                    class="toolbar-btn agent"
+                    @click="showAgentDialog = true"
+                    title="Agent programming guide"
+                  >
+                    <span class="btn-text">Agent</span>
+                  </button>
                 </div>
               </div>
 
@@ -277,6 +284,37 @@
     
     <!-- 遥控器浮动窗口 -->
     <ControlWindow v-model:visible="showControlWindow" />
+
+    <n-modal v-model:show="showAgentDialog">
+      <n-card
+        title="Agent Programming"
+        style="width: min(760px, 92vw)"
+        :bordered="false"
+        closable
+        @close="showAgentDialog = false"
+      >
+        <div class="agent-dialog">
+          <section class="agent-section">
+            <h4>Agent编程</h4>
+            <p>
+              外部 Agent 应优先读取 Markdown 文档入口，再通过 Host HTTP API 完成文件同步、提交、
+              编译、添加/配置节点、编程、启动、变量读取、日志和错误监控。
+            </p>
+          </section>
+
+          <section class="agent-section">
+            <h4>对人类接口文档地址</h4>
+            <a :href="humanDocsUrl" target="_blank" rel="noreferrer">{{ humanDocsUrl }}</a>
+          </section>
+
+          <section class="agent-section">
+            <h4>Agent文档地址和建议Prompt</h4>
+            <a :href="agentDocsUrl" target="_blank" rel="noreferrer">{{ agentDocsUrl }}</a>
+            <pre class="agent-prompt">{{ agentSuggestedPrompt }}</pre>
+          </section>
+        </div>
+      </n-card>
+    </n-modal>
 
     <n-modal v-model:show="showAboutDialog">
       <n-card
@@ -410,12 +448,24 @@ const importFileRef = ref<HTMLInputElement | null>(null)
 const showAddNodeDialog = ref(false)
 const showControlWindow = ref(false)
 const showHistoryPanel = ref(false)
+const showAgentDialog = ref(false)
 const showAboutDialog = ref(false)
 const aboutLoading = ref(false)
 const aboutError = ref<string | null>(null)
 const aboutInfo = ref<HostAboutSnapshot | null>(null)
 const showBuildErrorDialog = ref(false)
 const buildErrorMessage = ref('')
+const humanDocsUrl = computed(() => `${window.location.origin}/docs/kit/`)
+const agentDocsUrl = computed(() => `${window.location.origin}/api/docs/kit/md/`)
+const agentSuggestedPrompt = `请从 ${agentDocsUrl.value} 开始阅读 Coralinker Kit/Host 文档，并严格按文档中的 Agent 工作流操作。
+
+请把文档中的规则视为唯一操作依据：先下载文档包，优先使用包内 Python CLI/workflow，所有临时文件放到文档要求的 ai-deck 目录中，执行过程中向我说明计划、进度、结果和验证证据。
+
+我接下来会补充实际任务和硬件连接信息。请以我的补充为准；信息不足时先追问，不要猜测接线、端口、协议、方向、安全阈值或启动授权。
+
+请把向我确认过的硬件事实整理到 ai-deck/fact.md，包括设备型号、接线、极性、端口、波特率、负载重量、安装位置、减速比、最大速度、控制协议、车辆构型、实际应用场景和节拍等。
+
+如果任务涉及真实硬件启动、车辆运动或危险输出，请先问我希望采用哪种启动方式：由我在网页上手动点击 Start、每次确认后由你启动，还是本次会话授权你直接启动。没有确认前，不要直接 Start 或写入会导致运动的控制量。`
 
 // 运行控制状态
 const isBuilding = ref(false)
@@ -1255,6 +1305,11 @@ async function handleStop() {
   color: var(--text-color);
 }
 
+.toolbar-btn.agent:hover {
+  background: rgba(79, 140, 255, 0.15);
+  color: var(--primary);
+}
+
 .toolbar-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -1277,6 +1332,42 @@ async function handleStop() {
   flex-direction: column;
   gap: 16px;
   color: var(--text-color);
+}
+
+.agent-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  color: var(--text-color);
+}
+
+.agent-section h4 {
+  margin: 0 0 8px;
+  color: var(--text-color);
+}
+
+.agent-section p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.agent-section a {
+  color: var(--primary);
+  word-break: break-all;
+}
+
+.agent-prompt {
+  margin: 10px 0 0;
+  padding: 12px;
+  max-height: 260px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-color);
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .about-section h4 {

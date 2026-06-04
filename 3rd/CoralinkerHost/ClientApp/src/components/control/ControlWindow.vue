@@ -13,13 +13,14 @@
 <template>
   <component :is="embedded ? 'div' : Teleport" :to="embedded ? undefined : 'body'">
     <div 
-      v-if="visible"
+      v-if="visible && !graphVariablePickActive"
       class="control-window"
       :class="{ 
         'is-dragging': isDragging, 
         'is-resizing': isResizing,
         'is-embedded': embedded,
-        'is-readonly': readonly
+        'is-readonly': readonly,
+        'is-graph-picking': graphVariablePickActive
       }"
       :style="embedded ? embeddedStyle : windowStyle"
     >
@@ -191,7 +192,12 @@
       </div>
 
       <!-- 控件配置对话框（只读模式下不显示） -->
-      <div v-if="showConfigDialog && editingWidget && !readonly" class="config-dialog-overlay" @click="closeConfigDialog">
+      <div
+        v-if="showConfigDialog && editingWidget && !readonly"
+        class="config-dialog-overlay"
+        :class="{ 'is-graph-picking': graphVariablePickActive }"
+        @click="closeConfigDialog"
+      >
         <div class="config-dialog" @click.stop>
           <div class="config-dialog-header">
             <span>Configure {{ editingWidget.type }}</span>
@@ -228,12 +234,15 @@
                 <h4>X Axis (Left/Right)</h4>
                 <div class="config-row">
                   <label>Variable</label>
-                  <select v-model="editingWidget.config.variableX" @change="onJoystickVarXChange">
-                    <option value="">-- None --</option>
-                    <option v-for="v in controllableVarList" :key="v.name" :value="v.name">
-                      {{ v.name }} ({{ v.type }})
-                    </option>
-                  </select>
+                  <div class="variable-select-row">
+                    <select v-model="editingWidget.config.variableX" @change="onJoystickVarXChange">
+                      <option value="">-- None --</option>
+                      <option v-for="v in controllableVarList" :key="v.name" :value="v.name">
+                        {{ v.name }} ({{ v.type }})
+                      </option>
+                    </select>
+                    <button class="graph-pick-btn" @click="startGraphPick('variableX', 'controllable')">Select From Graph</button>
+                  </div>
                 </div>
                 <div class="config-row-inline">
                   <div class="range-field">
@@ -265,12 +274,15 @@
                 <h4>Y Axis (Up/Down)</h4>
                 <div class="config-row">
                   <label>Variable</label>
-                  <select v-model="editingWidget.config.variableY" @change="onJoystickVarYChange">
-                    <option value="">-- None --</option>
-                    <option v-for="v in controllableVarList" :key="v.name" :value="v.name">
-                      {{ v.name }} ({{ v.type }})
-                    </option>
-                  </select>
+                  <div class="variable-select-row">
+                    <select v-model="editingWidget.config.variableY" @change="onJoystickVarYChange">
+                      <option value="">-- None --</option>
+                      <option v-for="v in controllableVarList" :key="v.name" :value="v.name">
+                        {{ v.name }} ({{ v.type }})
+                      </option>
+                    </select>
+                    <button class="graph-pick-btn" @click="startGraphPick('variableY', 'controllable')">Select From Graph</button>
+                  </div>
                 </div>
                 <div class="config-row-inline">
                   <div class="range-field">
@@ -344,12 +356,15 @@
                 <h4>Variable &amp; Settings</h4>
                 <div class="config-row">
                   <label>Variable</label>
-                  <select v-model="editingWidget.config.variable" @change="onSliderVarChange">
-                    <option value="">-- None --</option>
-                    <option v-for="v in controllableVarList" :key="v.name" :value="v.name">
-                      {{ v.name }} ({{ v.type }})
-                    </option>
-                  </select>
+                  <div class="variable-select-row">
+                    <select v-model="editingWidget.config.variable" @change="onSliderVarChange">
+                      <option value="">-- None --</option>
+                      <option v-for="v in controllableVarList" :key="v.name" :value="v.name">
+                        {{ v.name }} ({{ v.type }})
+                      </option>
+                    </select>
+                    <button class="graph-pick-btn" @click="startGraphPick('variable', 'controllable')">Select From Graph</button>
+                  </div>
                 </div>
                 <div class="config-row-inline">
                   <div class="range-field">
@@ -429,12 +444,15 @@
                 <h4>Variable &amp; Settings</h4>
                 <div class="config-row">
                   <label>Variable</label>
-                  <select v-model="editingWidget.config.variable">
-                    <option value="">-- None --</option>
-                    <option v-for="v in controllableVarList" :key="v.name" :value="v.name">
-                      {{ v.name }} ({{ v.type }})
-                    </option>
-                  </select>
+                  <div class="variable-select-row">
+                    <select v-model="editingWidget.config.variable">
+                      <option value="">-- None --</option>
+                      <option v-for="v in controllableVarList" :key="v.name" :value="v.name">
+                        {{ v.name }} ({{ v.type }})
+                      </option>
+                    </select>
+                    <button class="graph-pick-btn" @click="startGraphPick('variable', 'controllable')">Select From Graph</button>
+                  </div>
                 </div>
                 <div class="config-row">
                   <label>States</label>
@@ -470,17 +488,20 @@
                 <h4>Variable</h4>
                 <div class="config-row">
                   <label>Variable</label>
-                  <select v-model="editingWidget.config.variable" class="var-select-mixed">
-                    <option value="">-- None --</option>
-                    <option 
-                      v-for="v in allVarList" 
-                      :key="v.name" 
-                      :value="v.name"
-                      :class="v.isControllable ? 'var-controllable' : 'var-readonly'"
-                    >
-                      {{ v.isControllable ? '✎' : '👁' }} {{ v.name }} ({{ v.type }})
-                    </option>
-                  </select>
+                  <div class="variable-select-row">
+                    <select v-model="editingWidget.config.variable" class="var-select-mixed">
+                      <option value="">-- None --</option>
+                      <option
+                        v-for="v in allVarList"
+                        :key="v.name"
+                        :value="v.name"
+                        :class="v.isControllable ? 'var-controllable' : 'var-readonly'"
+                      >
+                        {{ v.isControllable ? '✎' : '👁' }} {{ v.name }} ({{ v.type }})
+                      </option>
+                    </select>
+                    <button class="graph-pick-btn" @click="startGraphPick('variable', 'all')">Select From Graph</button>
+                  </div>
                 </div>
               </div>
               
@@ -525,17 +546,20 @@
                 <h4>Variable</h4>
                 <div class="config-row">
                   <label>Variable</label>
-                  <select v-model="editingWidget.config.variable" class="var-select-mixed">
-                    <option value="">-- None --</option>
-                    <option 
-                      v-for="v in allVarList" 
-                      :key="v.name" 
-                      :value="v.name"
-                      :class="v.isControllable ? 'var-controllable' : 'var-readonly'"
-                    >
-                      {{ v.isControllable ? '✎' : '👁' }} {{ v.name }} ({{ v.type }})
-                    </option>
-                  </select>
+                  <div class="variable-select-row">
+                    <select v-model="editingWidget.config.variable" class="var-select-mixed">
+                      <option value="">-- None --</option>
+                      <option
+                        v-for="v in allVarList"
+                        :key="v.name"
+                        :value="v.name"
+                        :class="v.isControllable ? 'var-controllable' : 'var-readonly'"
+                      >
+                        {{ v.isControllable ? '✎' : '👁' }} {{ v.name }} ({{ v.type }})
+                      </option>
+                    </select>
+                    <button class="graph-pick-btn" @click="startGraphPick('variable', 'all')">Select From Graph</button>
+                  </div>
                 </div>
               </div>
               
@@ -586,7 +610,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, Teleport } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useRuntimeStore, useProjectStore } from '@/stores'
+import { useRuntimeStore, useProjectStore, useUiStore } from '@/stores'
 import JoystickWidget from './JoystickWidget.vue'
 import SliderWidget from './SliderWidget.vue'
 import SwitchWidget from './SwitchWidget.vue'
@@ -616,6 +640,7 @@ const emit = defineEmits<{
 
 const runtimeStore = useRuntimeStore()
 const projectStore = useProjectStore()
+const uiStore = useUiStore()
 
 // ============================================
 // 类型定义
@@ -670,6 +695,7 @@ const showConfigDialog = ref(false)
 const editingWidget = ref<GridWidget | null>(null)
 const selectedWidgetId = ref<string | null>(null)
 const draggingWidgetId = ref<string | null>(null)
+const pendingGraphPick = ref<{ requestId: string; field: 'variable' | 'variableX' | 'variableY' } | null>(null)
 // 控件拖动
 const widgetDragStartX = ref(0)
 const widgetDragStartY = ref(0)
@@ -770,6 +796,8 @@ const allVarList = computed<AllVariable[]>(() => {
     }))
 })
 
+const graphVariablePickActive = computed(() => !!pendingGraphPick.value && !!uiStore.graphVariablePickRequest)
+
 // 根据变量名获取类型信息
 function getVarTypeId(varName: string): number {
   const v = variableList.value.find(v => v.name === varName)
@@ -813,6 +841,35 @@ function onSliderVarChange() {
   const range = getDefaultRange(typeId)
   editingWidget.value.config.min = range.min
   editingWidget.value.config.max = range.max
+}
+
+function startGraphPick(field: 'variable' | 'variableX' | 'variableY', scope: 'controllable' | 'all') {
+  if (!editingWidget.value) return
+  const allowedNames = scope === 'controllable'
+    ? controllableVarList.value.map(variable => variable.name)
+    : allVarList.value.map(variable => variable.name)
+  pendingGraphPick.value = {
+    requestId: uiStore.startGraphVariablePick(allowedNames, `${editingWidget.value.type}.${field}`),
+    field
+  }
+}
+
+function applyGraphPickedVariable(field: 'variable' | 'variableX' | 'variableY', variableName: string) {
+  if (!editingWidget.value) return
+  editingWidget.value.config[field] = variableName
+  if (field === 'variableX') {
+    onJoystickVarXChange()
+  } else if (field === 'variableY') {
+    onJoystickVarYChange()
+  } else if (editingWidget.value.type === 'slider') {
+    onSliderVarChange()
+  }
+}
+
+function cancelGraphPickIfActive() {
+  if (!pendingGraphPick.value) return
+  uiStore.cancelGraphVariablePick()
+  pendingGraphPick.value = null
 }
 
 // ============================================
@@ -1082,6 +1139,7 @@ function openWidgetConfig(widget: GridWidget) {
 }
 
 function closeConfigDialog() {
+  cancelGraphPickIfActive()
   showConfigDialog.value = false
   editingWidget.value = null
 }
@@ -1308,10 +1366,22 @@ watch(() => props.visible, (visible) => {
     document.addEventListener('click', onDocumentClick)
   } else {
     document.removeEventListener('click', onDocumentClick)
+    cancelGraphPickIfActive()
   }
 })
 
+watch(() => uiStore.graphVariablePickResult, (result) => {
+  const pending = pendingGraphPick.value
+  if (!pending || !result || result.requestId !== pending.requestId) return
+  if (result.variableName) {
+    applyGraphPickedVariable(pending.field, result.variableName)
+  }
+  pendingGraphPick.value = null
+  uiStore.clearGraphVariablePickResult()
+})
+
 onUnmounted(() => {
+  cancelGraphPickIfActive()
   document.removeEventListener('click', onDocumentClick)
   document.removeEventListener('mousemove', onDrag)
   document.removeEventListener('mouseup', stopDrag)
@@ -1343,6 +1413,11 @@ onUnmounted(() => {
 .control-window.is-dragging {
   opacity: 0.9;
   cursor: grabbing;
+}
+
+.control-window.is-graph-picking {
+  opacity: 0.42;
+  filter: saturate(0.8);
 }
 
 /* 标题栏 */
@@ -1574,6 +1649,16 @@ onUnmounted(() => {
   z-index: 1100;
 }
 
+.config-dialog-overlay.is-graph-picking {
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.config-dialog-overlay.is-graph-picking .config-dialog {
+  opacity: 0.38;
+  filter: saturate(0.75);
+}
+
 .config-dialog {
   background: var(--panel-color);
   border: 1px solid var(--border-color);
@@ -1659,6 +1744,41 @@ onUnmounted(() => {
   border-radius: var(--radius-sm);
   color: var(--text-color);
   font-size: 13px;
+}
+
+.variable-select-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.variable-select-row select {
+  min-width: 0;
+}
+
+.graph-pick-btn {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(56, 189, 248, 0.55);
+  border-radius: var(--radius-sm);
+  background: rgba(56, 189, 248, 0.14);
+  color: #bae6fd;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.graph-pick-btn:hover {
+  border-color: rgba(125, 211, 252, 0.9);
+  background: rgba(56, 189, 248, 0.24);
+  color: #eff6ff;
 }
 
 /* 内联多字段行 */
