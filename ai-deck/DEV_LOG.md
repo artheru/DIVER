@@ -4628,3 +4628,146 @@
 - 接下来：
   - 若需要进一步验证真实硬件，需要用户补充硬件型号、连接、端口、协议和安全限制。
   - 若需要发布包验收归档，可将 `ai-deck/agent_work/20260605-1248-host-e2e/*.json` 作为证据样本保留。
+
+## 2026-06-08 20:20 UTC+8 — 修复 SimNode runtime fatal 静默退出
+
+- 用户反馈：
+  - `ai-deck/crash_code.cs` 在真实硬件中会触发 `Null reference`/`Null point` fatal，并且网页会弹窗。
+  - Virtual SimNode 跑同类代码时网页没有弹出错误。
+  - Snapshot 也不工作，说明 SimNode 节点实际已经不在运行。
+- 排查：
+  - `CoralinkerSimNodeHost/native/sim_node_runtime.c` 的 `report_error()` 当前行为是：
+    - 通过 console callback 输出错误字符串。
+    - `exit(2)` 直接退出子进程。
+  - `CoralinkerSimNodeHost/Program.cs` 只捕获 P/Invoke 装载类异常，不会拦截 native `exit(2)`。
+  - `3rd/CoralinkerSDK/SimulatedMcuNode.cs` 原先只读取 stdout/stderr 事件，没有监控子进程退出，也不会把非预期退出转换为 `OnFatalError`。
+  - 真实硬件路径中 `MCUNode` 会经 `RegisterFatalErrorCallback` 触发 `IRuntimeNode.OnFatalError`，再由 `DIVERSession.HandleFatalError()` 统一推送 SignalR `fatalError`。
+- 修改：
+  - 在 `SimulatedMcuNode` 中增加子进程退出监控 `MonitorProcessExitAsync()`。
+  - 在 `Connect()` 时清空 `_expectingProcessExit`、`_fatalReported`、`_lastConsoleMessage`。
+  - 在 `Disconnect()` 和主动 kill 前设置 `_expectingProcessExit=true`，避免正常关闭误报 fatal。
+  - 收到 `console` event 时保存最后一条 runtime message。
+  - 子进程非预期退出时：
+    - 更新 `IsRunning=false`。
+    - 更新 `State=Error`。
+    - 记录 `LastError` 并触发 `OnError`。
+    - 构造字符串型 `ErrorPayload`，`CoreDumpLayout=String`，错误字符串包含 exit code 和最后 runtime message。
+    - 触发 `OnFatalError`，复用现有 fatal dialog / FatalErrorStore / 节点断开路径。
+- 验证：
+  - `ReadLints` 检查 `3rd/CoralinkerSDK/SimulatedMcuNode.cs` 无错误。
+  - `dotnet build "3rd\CoralinkerHost\CoralinkerHost.csproj" -c Release --no-restore` 成功，只有既有 warning。
+  - 创建验证目录：
+    - `ai-deck/agent_work/20260608-simnode-fatal-repro/`
+  - 写入 `CrashSimRepro.cs`，包含：
+    - `CrashCart`
+    - `StatusLightLogic`：调用 `RunOnMCU.WriteSnapshot(Snapshots[step])`
+    - `CrashRootLogic`
+  - 使用隔离 Host 数据目录启动：
+    - `CORALINKER_DATA_DIR=ai-deck/agent_work/20260608-simnode-fatal-repro/host-data`
+  - 用 `3rd/CoralinkerKitDocs/tools/agent_cli/coral_agent.py` 执行：
+    - `project new`
+    - `files sync`
+    - `build`
+    - `node add-simulated`
+    - `node program --logic StatusLightLogic`
+    - `root configure --logic CrashRootLogic`
+    - `start --require-all`
+    - `errors fatal`
+    - `node states`
+    - `logs node`
+  - 验证结果：
+    - `buildOk=true`
+    - `fatalError.seq=1`
+    - `errorType=String`
+    - `errorString=Simulated node host exited unexpectedly with code 2. Last runtime message: Null reference`
+    - node `runState=error`
+    - node `isConnected=false`
+    - node log 包含：
+      - `Null reference`
+      - `[Transport] Simulated node host exited unexpectedly with code 2. Last runtime message: Null reference`
+      - `FATAL ERROR: Simulated node host exited unexpectedly with code 2. Last runtime message: Null reference`
+- 注意：
+  - 验证初期旧 Debug Host 进程仍占用 `localhost:4499`，且旧项目数据中的 `LogicBuild_*.dll` 被锁，导致 `project new` 报 `Access to the path ... is denied`。
+  - 已通过进程命令行清理所有 `CoralinkerHost` / `CoralinkerSimNodeHost` 相关进程，再用隔离数据目录完成验证。
+  - 验证后已停止后台 Host/SimNode 进程。
+
+## 2026-06-08 20:24 UTC+8 — SimNode fatal 内容改为结构化 runtime error
+
+- 用户反馈：
+  - 首版修复后网页会弹 fatal，但错误文本显示为：
+    - `Simulated node host exited unexpectedly with code 2. Last runtime message: Null reference`
+  - 这不应该显示给用户；应该直接显示 `Null reference`。
+  - Debug Location 的 `IL Offset=-1` 也不对，真实 MCU 会带 IL Offset，前端可据此跳转源代码。
+- 进一步排查：
+  - native `report_error(int il_offset, uchar* error_str, int line_no)` 本身已经有真实 `il_offset` 和 `line_no`。
+  - 首版 C# 侧只能在进程退出后兜底上报，因此丢失了 IL Offset，并把 transport exit code 拼进了用户错误文本。
+- 修改：
+  - `3rd/CoralinkerSimNodeHost/native/sim_node_runtime.c`
+    - 新增 `SimFatalCb`。
+    - `sim_set_callbacks(...)` 追加 `fatal_cb`。
+    - `report_error()` 中先调用 `sim_fatal_cb(il_offset, error_str, line_no, sim_tick_ms)`，再保留 console callback 和 `exit(2)`。
+  - `3rd/CoralinkerSimNodeHost/McuRuntimeNative.cs`
+    - 新增 `FatalCallback(int ilOffset, IntPtr message, int lineNo, uint timestampMs)`。
+    - `SetCallbacks()` 追加 fatal callback 参数。
+  - `3rd/CoralinkerSimNodeHost/Program.cs`
+    - 注册 `FatalCallback`。
+    - 新增 `OnFatal()`，输出 NDJSON：
+      - `event=fatal`
+      - `message`
+      - `ilOffset`
+      - `lineNo`
+      - `mcuTimestampMs`
+  - `3rd/CoralinkerSDK/SimulatedMcuNode.cs`
+    - `HandleLine()` 增加 `case "fatal"`。
+    - `HandleFatalEvent()` 用原始 runtime message、IL Offset、LineNo 构造字符串型 `ErrorPayload`。
+    - `MonitorProcessExitAsync()` 在已经收到 fatal 时直接返回，避免 transport exit code 覆盖用户可见 fatal 文本。
+- Native 构建：
+  - 执行：
+    - `powershell -ExecutionPolicy Bypass -File "3rd\CoralinkerSimNodeHost\build-native.ps1"`
+  - 结果：
+    - `win-x64` 使用 MSVC 成功生成 `sim_node_runtime.dll`。
+    - `linux-x64` 使用 Zig target `x86_64-linux-gnu` 成功生成 `.so`。
+    - `linux-arm64` 使用 Zig target `aarch64-linux-gnu` 成功生成 `.so`。
+  - 为本地开发验证，将 `build/runtimes` 同步到：
+    - `3rd/CoralinkerSimNodeHost/bin/Release/net8.0/runtimes`
+    - `3rd/CoralinkerHost/bin/Release/net8.0/simnode/runtimes`
+- 验证：
+  - C# build：
+    - `dotnet build "3rd\CoralinkerHost\CoralinkerHost.csproj" -c Release --no-restore`
+    - 成功，只有既有 warning。
+  - 用隔离数据目录启动 Host：
+    - `CORALINKER_DATA_DIR=ai-deck/agent_work/20260608-simnode-fatal-repro/host-data-structured2`
+  - 使用 `CrashSimRepro.cs` 和 CLI 复现。
+  - 最终 `errors fatal` 结果：
+    - `errorString=Null reference`
+    - `debugInfo.ilOffset=133`
+    - `debugInfo.lineNo=2502`
+    - `errorType=String`
+    - node `runState=error`
+    - node `isConnected=false`
+  - node log：
+    - `FATAL ERROR: Null reference`
+    - `Disconnecting node due to fatal error...`
+    - `Null reference`
+- 结论：
+  - SimNode runtime fatal 已与真实 MCU fatal 路径更一致：用户弹窗显示 runtime 错误本身，并保留 IL Offset 供前端跳源代码。
+  - 进程退出监控仍保留作为 native 崩溃或 helper 异常退出的兜底。
+
+---
+
+## 2026-06-08 20:29 — crash_code.cs `Null reference` 根因定位
+
+### [analysis] StatusLightLogic 为什么触发 Null reference
+- 现象：`ai-deck/crash_code.cs`（`StatusLightLogic`）在 DIVER MCU runtime 运行即报 `Null reference`，复现记录 `ilOffset=133 / lineNo=2502`。
+- 定位：
+  - `mcu_runtime.c:2502` 是 `Ldelem`(0x90) 分支里的 `ASSERT_RT(arr_id != 0, "Null reference")`，即数组引用为 0（null）。
+  - 对应用户代码 `RunOnMCU.WriteSnapshot(Snapshots[step])` 中的 `Snapshots[step]`：`Snapshots` 本身是 null。
+- 根因：
+  - 【发现】`DiverCompiler` 完全不处理静态构造函数 `.cctor`/类型初始化器：在 `DiverCompiler` 目录搜索 `cctor`/`TypeInitializer`/static 初始化 均无任何实现。
+  - 【发现】`statics_descriptor` 只写静态字段 `typeid + aux`，不写初始值；引用型静态字段默认就是 0（null reference id）。
+  - 因此 `private static readonly byte[][] Snapshots = new byte[][]{...}` 的初始化（C# 编译进 `.cctor`）在 MCU 上不会执行，`Snapshots` 运行时恒为 null，`Snapshots[step]` 必崩。
+  - 【注意】实例字段初始化器（`.ctor`）是会被运行的——见 `MCURuntime/BUGS.md` 案例 3 的 `private byte[] buffer = new byte[8]` 能成功分配。只有 `static` 字段的 `.cctor` 不跑。
+- 建议修复（未改代码，待用户确认）：
+  - 方案 A：去掉 `static`，把 `Snapshots` 改成实例字段，让初始化落到 `.ctor`。
+  - 方案 B：不用查表，`Operation` 内直接按 `step` 拼出 4 字节 snapshot。
+- 本轮仅做根因分析与日志记录，未改用户逻辑代码、runtime、编译器。

@@ -16,12 +16,14 @@
 typedef void(*SimBytesCb)(unsigned char* data, int length, unsigned int timestamp_ms);
 typedef void(*SimTextCb)(unsigned char* message, unsigned int timestamp_ms);
 typedef void(*SimPortBytesCb)(unsigned char port_index, unsigned char direction, unsigned char* data, int length, unsigned int timestamp_ms);
+typedef void(*SimFatalCb)(int il_offset, unsigned char* message, int line_no, unsigned int timestamp_ms);
 
 static SimBytesCb sim_lower_cb = 0;
 static SimTextCb sim_console_cb = 0;
 static SimBytesCb sim_snapshot_cb = 0;
 static SimPortBytesCb sim_stream_cb = 0;
 static SimPortBytesCb sim_event_cb = 0;
+static SimFatalCb sim_fatal_cb = 0;
 static uchar* sim_vm_memory = 0;
 static int sim_vm_memory_size = 0;
 static unsigned int sim_tick_ms = 0;
@@ -58,6 +60,8 @@ void flush_console(void) { fflush(stdout); }
 void report_error(int il_offset, uchar* error_str, int line_no)
 {
     flush_console();
+    if (sim_fatal_cb != 0)
+        sim_fatal_cb(il_offset, error_str, line_no, sim_tick_ms);
     if (sim_console_cb != 0)
         sim_console_cb(error_str, sim_tick_ms);
     exit(2);
@@ -83,13 +87,15 @@ SIM_EXPORT void sim_set_callbacks(
     SimTextCb console_cb,
     SimBytesCb snapshot_cb,
     SimPortBytesCb stream_cb,
-    SimPortBytesCb event_cb)
+    SimPortBytesCb event_cb,
+    SimFatalCb fatal_cb)
 {
     sim_lower_cb = lower_cb;
     sim_console_cb = console_cb;
     sim_snapshot_cb = snapshot_cb;
     sim_stream_cb = stream_cb;
     sim_event_cb = event_cb;
+    sim_fatal_cb = fatal_cb;
 }
 
 SIM_EXPORT int sim_load_program(uchar* bin, int len, int memory_size)

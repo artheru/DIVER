@@ -17,6 +17,7 @@ internal static class Program
     private static readonly McuRuntimeNative.BytesCallback SnapshotCallback = OnSnapshot;
     private static readonly McuRuntimeNative.PortBytesCallback StreamCallback = OnPortBytes;
     private static readonly McuRuntimeNative.PortBytesCallback EventCallback = OnPortBytes;
+    private static readonly McuRuntimeNative.FatalCallback FatalCallback = OnFatal;
 
     public static async Task<int> Main()
     {
@@ -95,7 +96,7 @@ internal static class Program
         int interval;
         try
         {
-            McuRuntimeNative.SetCallbacks(LowerCallback, ConsoleCallback, SnapshotCallback, StreamCallback, EventCallback);
+            McuRuntimeNative.SetCallbacks(LowerCallback, ConsoleCallback, SnapshotCallback, StreamCallback, EventCallback, FatalCallback);
             interval = McuRuntimeNative.LoadProgram(program, program.Length, memorySize);
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
@@ -237,6 +238,17 @@ internal static class Program
         {
             WriteEvent("error", new { message = $"Cannot loop back port input: {ex.Message}" });
         }
+    }
+
+    private static void OnFatal(int ilOffset, IntPtr message, int lineNo, uint timestampMs)
+    {
+        WriteEvent("fatal", new
+        {
+            message = Marshal.PtrToStringUTF8(message) ?? "MCU runtime fatal error",
+            ilOffset,
+            lineNo,
+            mcuTimestampMs = timestampMs
+        });
     }
 
     private static void OnWire(byte portIndex, byte direction, IntPtr data, int length, uint timestampMs)

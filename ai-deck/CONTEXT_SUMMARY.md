@@ -2,6 +2,55 @@
 
 ## 最近一次支持
 
+- 时间：2026-06-08 20:20 UTC+8
+- 事项：修复 Virtual SimNode 遇到 MCU runtime `Null reference` 时网页不弹 fatal error、节点静默停止的问题。
+- 问题：
+  - `ai-deck/crash_code.cs` 在真实硬件会触发 `Null reference`/`Null point` fatal。
+  - SimNode 跑同类逻辑时，native `report_error()` 只通过 console callback 打出错误并 `exit(2)`。
+  - `SimulatedMcuNode` 没有监控子进程异常退出，也没有把该退出转换为 `IRuntimeNode.OnFatalError`，因此前端收不到 `fatalError` SignalR 事件，Snapshot 也停止更新。
+- 已执行：
+  - 修改 `3rd/CoralinkerSDK/SimulatedMcuNode.cs`：
+    - 新增 SimNode 子进程退出监控。
+    - 正常 `Disconnect`/`shutdown`/主动 kill 不上报 fatal。
+    - 非预期退出时作为兜底 fatal。
+    - 收到结构化 `fatal` 事件时直接用 runtime `message`、`ilOffset`、`lineNo` 构造字符串型 `ErrorPayload`。
+    - 触发 `OnFatalError`，复用 `DIVERSession` 既有 fatal 记录、SignalR 弹窗、节点断开逻辑。
+  - 修改 `3rd/CoralinkerSimNodeHost/native/sim_node_runtime.c`：
+    - 在 native `report_error(int il_offset, uchar* error_str, int line_no)` 中调用新增 fatal callback。
+    - 将 `il_offset`、`error_str`、`line_no` 传出，而不是只打 console 后 `exit(2)`。
+  - 修改 `3rd/CoralinkerSimNodeHost/McuRuntimeNative.cs`、`Program.cs`：
+    - 为 `sim_set_callbacks` 增加 `FatalCallback`。
+    - 子进程输出 `event=fatal`，包含 `message`、`ilOffset`、`lineNo`。
+- 验证：
+  - `ReadLints` 检查 `3rd/CoralinkerSDK/SimulatedMcuNode.cs` 无错误。
+  - `dotnet build 3rd\CoralinkerHost\CoralinkerHost.csproj -c Release --no-restore` 通过，仅既有 warning。
+  - `powershell -ExecutionPolicy Bypass -File 3rd\CoralinkerSimNodeHost\build-native.ps1` 通过，重建 Windows/Linux x64/Linux ARM64 native runtime。
+  - 使用隔离数据目录启动 Host：
+    - `CORALINKER_DATA_DIR=ai-deck/agent_work/20260608-simnode-fatal-repro/host-data-structured2`
+  - 写入并同步复现代码：
+    - `ai-deck/agent_work/20260608-simnode-fatal-repro/CrashSimRepro.cs`
+  - CLI 流程：
+    - `project new`
+    - `files sync`
+    - `build`
+    - `node add-simulated`
+    - `node program --logic StatusLightLogic`
+    - `root configure --logic CrashRootLogic`
+    - `start --require-all`
+    - `errors fatal`
+  - 结果：
+    - `fatalError.seq=1`
+    - `errorType=String`
+    - `errorString=Null reference`
+    - `debugInfo.ilOffset=133`
+    - `debugInfo.lineNo=2502`
+    - 节点 `runState=error`
+    - 节点 `isConnected=false`
+- 备注：
+  - 验证过程中发现旧 Debug Host 占用端口且持有旧 `LogicBuild_*.dll` 文件锁；已清理所有 Host/SimNode 后台进程。
+  - 初版验证只把进程退出转换成 fatal，弹窗文本包含 transport 文本且 IL Offset 为 `-1`；已改为 native structured fatal。
+  - 复现输出保存在 `ai-deck/agent_work/20260608-simnode-fatal-repro/structured2-summary.json`。
+
 - 时间：2026-06-08 19:50 UTC+8
 - 事项：在 `ai-deck/kit-docs` 新增“根据 UpperIO DO(u32) 写到 snapshot”的最小示例代码。
 - 已执行：

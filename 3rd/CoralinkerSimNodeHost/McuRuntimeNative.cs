@@ -13,13 +13,17 @@ internal static class McuRuntimeNative
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate void PortBytesCallback(byte portIndex, byte direction, IntPtr data, int length, uint timestampMs);
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate void FatalCallback(int ilOffset, IntPtr message, int lineNo, uint timestampMs);
+
     [DllImport("sim_node_runtime", EntryPoint = "sim_set_callbacks", CallingConvention = CallingConvention.Cdecl)]
     public static extern void SetCallbacks(
         BytesCallback lowerCallback,
         TextCallback consoleCallback,
         BytesCallback snapshotCallback,
         PortBytesCallback streamCallback,
-        PortBytesCallback eventCallback
+        PortBytesCallback eventCallback,
+        FatalCallback fatalCallback
     );
 
     [DllImport("sim_node_runtime", EntryPoint = "sim_load_program", CallingConvention = CallingConvention.Cdecl)]

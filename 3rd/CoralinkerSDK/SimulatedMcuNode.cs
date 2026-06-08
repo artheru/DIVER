@@ -19,6 +19,9 @@ internal sealed class SimulatedMcuNode : IRuntimeNode
     private Process? _process;
     private Task? _readerTask;
     private bool _disposed;
+    private bool _expectingProcessExit;
+    private int _fatalReported;
+    private string? _lastConsoleMessage;
     private bool _configured;
     private bool _programmed;
     private uint _startTick;
@@ -105,6 +108,9 @@ internal sealed class SimulatedMcuNode : IRuntimeNode
             }
 
             var target = ResolveHostPath();
+            _expectingProcessExit = false;
+            Interlocked.Exchange(ref _fatalReported, 0);
+            _lastConsoleMessage = null;
             var psi = new ProcessStartInfo
             {
                 FileName = target.UseDotNet ? "dotnet" : target.ExecutablePath,
@@ -128,6 +134,7 @@ internal sealed class SimulatedMcuNode : IRuntimeNode
 
             _readerTask = Task.Run(() => ReadLoopAsync(_cts.Token));
             _ = Task.Run(() => ReadErrorLoopAsync(_process, _cts.Token));
+            _ = Task.Run(() => MonitorProcessExitAsync(_process, _cts.Token));
 
             var ok = SendCommand("hello", new { nodeId = NodeId, mcuUri = McuUri }).Ok;
             if (!ok)
@@ -149,6 +156,7 @@ internal sealed class SimulatedMcuNode : IRuntimeNode
             {
                 if (IsConnected)
                 {
+                    _expectingProcessExit = true;
                     _ = TrySendCommand("shutdown", null);
                 }
             }
@@ -161,6 +169,7 @@ internal sealed class SimulatedMcuNode : IRuntimeNode
             {
                 if (_process is { HasExited: false })
                 {
+                    _expectingProcessExit = true;
                     _process.Kill(entireProcessTree: true);
                 }
             }
@@ -173,6 +182,7 @@ internal sealed class SimulatedMcuNode : IRuntimeNode
             _process = null;
             IsRunning = false;
             State = CreateState(MCURunState.Idle, _configured, _programmed);
+            Interlocked.Exchange(ref _fatalReported, 0);
         }
     }
 
@@ -399,6 +409,50 @@ internal sealed class SimulatedMcuNode : IRuntimeNode
         catch (OperationCanceledException) { }
     }
 
+    private async Task MonitorProcessExitAsync(Process process, CancellationToken ct)
+    {
+        try
+        {
+            await process.WaitForExitAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            LastError = ex.Message;
+            OnError?.Invoke(ex.Message);
+            return;
+        }
+
+        if (ct.IsCancellationRequested || _disposed || _expectingProcessExit)
+        {
+            return;
+        }
+
+        IsRunning = false;
+        State = CreateState(MCURunState.Error, _configured, _programmed);
+
+        if (Volatile.Read(ref _fatalReported) == 1)
+        {
+            return;
+        }
+
+        var exitCode = TryGetExitCode(process);
+        var message = exitCode == 0
+            ? "Simulated node host exited unexpectedly."
+            : $"Simulated node host exited unexpectedly with code {exitCode}.";
+        if (!string.IsNullOrWhiteSpace(_lastConsoleMessage))
+        {
+            message += $" Last runtime message: {_lastConsoleMessage}";
+        }
+
+        LastError = message;
+        OnError?.Invoke(message);
+        ReportFatalError(message, ilOffset: -1, lineNo: 0);
+    }
+
     private void HandleLine(string line)
     {
         using var doc = JsonDocument.Parse(line);
@@ -429,13 +483,18 @@ internal sealed class SimulatedMcuNode : IRuntimeNode
                 }
                 break;
             case "console":
+                var consoleMessage = root.GetProperty("message").GetString() ?? "";
+                _lastConsoleMessage = consoleMessage;
                 OnConsoleOutput?.Invoke(
-                    root.GetProperty("message").GetString() ?? "",
+                    consoleMessage,
                     root.TryGetProperty("mcuTimestampMs", out var ts) ? ts.GetUInt32() : 0
                 );
                 break;
             case "snapshot":
                 HandleSnapshotEvent(root);
+                break;
+            case "fatal":
+                HandleFatalEvent(root);
                 break;
             case "error":
                 LastError = root.GetProperty("message").GetString();
@@ -481,6 +540,20 @@ internal sealed class SimulatedMcuNode : IRuntimeNode
         _stats.DigitalOutputs = bits;
         _stats.DigitalInputs = bits;
         Stats = _stats;
+    }
+
+    private void HandleFatalEvent(JsonElement root)
+    {
+        var message = root.GetProperty("message").GetString() ?? "MCU runtime fatal error";
+        _lastConsoleMessage = message;
+        IsRunning = false;
+        State = CreateState(MCURunState.Error, _configured, _programmed);
+        LastError = message;
+        ReportFatalError(
+            message,
+            root.TryGetProperty("ilOffset", out var ilOffset) ? ilOffset.GetInt32() : -1,
+            root.TryGetProperty("lineNo", out var lineNo) ? lineNo.GetInt32() : 0
+        );
     }
 
     private void UpdatePortStats(byte portIndex, byte direction, int byteCount)
@@ -544,6 +617,40 @@ internal sealed class SimulatedMcuNode : IRuntimeNode
         };
     }
 
+    private void ReportFatalError(string message, int ilOffset, int lineNo)
+    {
+        if (Interlocked.Exchange(ref _fatalReported, 1) == 1)
+        {
+            return;
+        }
+
+        OnFatalError?.Invoke(CreateStringErrorPayload(message, ilOffset, lineNo));
+    }
+
+    private static ErrorPayload CreateStringErrorPayload(string message, int ilOffset, int lineNo)
+    {
+        var raw = new byte[128];
+        var bytes = Encoding.UTF8.GetBytes(message);
+        Buffer.BlockCopy(bytes, 0, raw, 0, Math.Min(bytes.Length, raw.Length - 1));
+
+        return new ErrorPayload
+        {
+            PayloadVersion = 1,
+            Version = CreateVersionInfo(),
+            DebugInfo = new DIVERDebugInfo
+            {
+                ILOffset = ilOffset,
+                LineNo = lineNo,
+                Reserved = new uint[14]
+            },
+            CoreDumpLayoutValue = (uint)CoreDumpLayout.String,
+            CoreDump = new CoreDumpData
+            {
+                Raw = raw
+            }
+        };
+    }
+
     private static RuntimeStats CreateStats()
     {
         return new RuntimeStats
@@ -560,6 +667,18 @@ internal sealed class SimulatedMcuNode : IRuntimeNode
     private static uint EnvironmentTickMs()
     {
         return unchecked((uint)Environment.TickCount);
+    }
+
+    private static int TryGetExitCode(Process process)
+    {
+        try
+        {
+            return process.ExitCode;
+        }
+        catch
+        {
+            return int.MinValue;
+        }
     }
 
     private static SimHostTarget ResolveHostPath()
