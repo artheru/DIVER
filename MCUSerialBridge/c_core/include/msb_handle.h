@@ -92,6 +92,10 @@ typedef struct msb_handle {
     msb_on_console_writeline_callback_function_t console_writeline_callback;
     void* console_writeline_callback_ctx;
 
+    // VM Stats 回调（DIVER 模式每轮运行遥测上报）
+    msb_on_vm_stats_callback_function_t vm_stats_callback;
+    void* vm_stats_callback_ctx;
+
     // Fatal Error 回调（MCU 致命错误上报）
     msb_on_fatal_error_callback_function_t fatal_error_callback;
     void* fatal_error_callback_ctx;

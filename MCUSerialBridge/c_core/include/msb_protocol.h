@@ -211,6 +211,23 @@ typedef enum {
     CommandUploadConsoleWriteLine = 0x71,
 
     /**
+     * @brief LowerIO + VM 运行遥测合并上报 (MCU → PC)
+     *
+     * DIVER 模式下，每个 vm_loop 迭代结束时主动上报一次。为减少包数量，本命令
+     * 将「LowerIO 输出变量」与「本轮 vm_run() 的运行遥测」合并到一个包里发送。
+     *
+     * Payload 布局（紧随 PayloadHeader 之后）：
+     *   [ VmStatsC stats (28B) ][ MemoryExchangePacket lower_io (2B len + N) ]
+     *
+     * 上位机协议层（c_core）解析后会拆开：把 VmStatsC 投递给 vm_stats 回调，把
+     * LowerIO 字节投递给 memory_lower_io 回调，对上层保持与原先一致的两个事件。
+     *
+     * vm_stats 用途：绘制每节点 CPU 负载曲线（load% = last_micros / interval_us）。
+     * 无需确认响应，sequence 固定为 0。
+     */
+    CommandUploadLowerIoAndVmStats = 0x72,
+
+    /**
      * @brief 获取运行时统计数据 (PC → MCU)
      *
      * 查询 MCU 的运行时统计：IO 状态、端口收发统计。
@@ -586,6 +603,40 @@ typedef struct {
 
 STATIC_ASSERT(sizeof(RuntimeStatsC) == 16 + 16 * PACKET_MAX_PORTS_NUM, 
               "RuntimeStatsC size error");
+
+/* ===============================
+ * VM Stats Telemetry (CommandUploadVmStats 0x72)
+ * =============================== */
+
+/**
+ * @brief 单轮 VM 运行遥测数据
+ *
+ * MCU 在每个 vm_loop 迭代结束后上报，用于上位机统计每节点 CPU 负载。
+ * - iteration:   单调递增的循环计数（与 vm_run 的 iteration 一致）。
+ * - last_cycles: 本轮 vm_run() 的 DWT CYCCNT 周期数（CPU 时钟周期，最准确）。
+ * - last_micros: 本轮 vm_run() 的墙钟耗时（微秒）。
+ * - interval_us: 配置的循环周期（微秒）；CPU 负载% = last_micros / interval_us。
+ * - cpu_hz:      SystemCoreClock（Hz），便于上位机在周期数与时间之间换算。
+ * - heap_used:   堆已用字节数（heap 从高地址向下增长的占用量，cycle 结束时的静止值）。
+ * - mem_capacity:  整个 VM 工作缓冲区总大小（program+statics+stack+heap）。
+ * - mem_peak_used: 本轮 cycle 内存占用峰值（high-water mark，含 program+statics+峰值栈+峰值堆）。
+ *                  Memory 负载% = mem_peak_used / mem_capacity。
+ * - heap_objs:   当前存活的堆对象数量（上限 1023）。
+ */
+typedef struct {
+    u32 iteration;     /**< 循环计数 */
+    u32 last_cycles;   /**< 本轮 vm_run() DWT 周期数（最精确，亚微秒） */
+    u32 last_micros;   /**< 本轮 vm_run() 墙钟耗时（微秒，量化到 1ms） */
+    u32 interval_us;   /**< 循环周期（微秒） */
+    u32 cpu_hz;        /**< CPU 主频（Hz），用于周期数↔时间换算 */
+    u32 heap_used;     /**< 堆已用字节数（静止值） */
+    u32 mem_capacity;  /**< VM 工作缓冲区总大小（字节） */
+    u32 mem_peak_used; /**< 本轮内存占用峰值（high-water，字节） */
+    u16 heap_objs;     /**< 存活堆对象数量 */
+    u16 reserved;      /**< 保留对齐 */
+} VmStatsC;
+
+STATIC_ASSERT(sizeof(VmStatsC) == 36, "VmStatsC size must be 36 bytes");
 
 /* ===============================
  * Error Payload (CommandError 0xFF)

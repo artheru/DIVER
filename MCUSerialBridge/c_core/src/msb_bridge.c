@@ -800,6 +800,28 @@ MCUSerialBridgeError msb_register_console_writeline_callback(
 }
 
 // --------------------
+// 注册 VM Stats 回调
+// --------------------
+MCUSerialBridgeError msb_register_vm_stats_callback(
+        msb_handle* handle,
+        msb_on_vm_stats_callback_function_t callback,
+        void* user_ctx)
+{
+    if (!handle)
+        return MSB_Error_Win_HandleNotFound;
+
+    handle->vm_stats_callback = NULL;
+    handle->vm_stats_callback_ctx = user_ctx;
+    handle->vm_stats_callback = callback;
+
+    DBG_PRINT(
+            "Registered vm_stats callback to[0x%08X]",
+            (uint32_t)(size_t)(void*)callback);
+
+    return MSB_Error_OK;
+}
+
+// --------------------
 // 注册 Fatal Error 回调
 // --------------------
 MCUSerialBridgeError msb_register_fatal_error_callback(
@@ -944,6 +966,7 @@ void mcu_serial_bridge_get_api(MCUSerialBridgeAPI* api)
     api->msb_memory_upper_io = msb_memory_upper_io;
     api->msb_register_memory_lower_io_callback = msb_register_memory_lower_io_callback;
     api->msb_register_console_writeline_callback = msb_register_console_writeline_callback;
+    api->msb_register_vm_stats_callback = msb_register_vm_stats_callback;
     api->msb_register_fatal_error_callback = msb_register_fatal_error_callback;
     api->msb_register_error_callback = msb_register_error_callback;
     api->msb_get_stats = msb_get_stats;

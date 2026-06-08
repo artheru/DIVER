@@ -373,6 +373,77 @@ namespace MCUSerialBridgeCLR
     }
 
     /// <summary>
+    /// 单轮 VM 运行遥测数据（CommandUploadVmStats）。
+    /// MCU 在每个 vm_loop 迭代后上报，用于统计每节点 CPU 负载。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public struct VmStats
+    {
+        /// <summary>循环计数（单调递增）</summary>
+        public uint Iteration;
+
+        /// <summary>本轮 vm_run() 的 DWT CPU 周期数</summary>
+        public uint LastCycles;
+
+        /// <summary>本轮 vm_run() 的耗时（微秒）</summary>
+        public uint LastMicros;
+
+        /// <summary>配置的循环周期（微秒）</summary>
+        public uint IntervalUs;
+
+        /// <summary>CPU 主频（Hz）</summary>
+        public uint CpuHz;
+
+        /// <summary>堆已用字节数（cycle 结束时的静止值）</summary>
+        public uint HeapUsed;
+
+        /// <summary>VM 工作缓冲区总大小（字节）</summary>
+        public uint MemCapacity;
+
+        /// <summary>本轮内存占用峰值（high-water mark，字节）</summary>
+        public uint MemPeakUsed;
+
+        /// <summary>存活堆对象数量</summary>
+        public ushort HeapObjs;
+
+        /// <summary>保留对齐</summary>
+        public ushort Reserved;
+
+        /// <summary>
+        /// 本轮有效执行耗时（微秒）。优先用 DWT 周期数换算（亚微秒精度），
+        /// 但 micros 墙钟只有 1ms 精度——若 DWT 换算结果与墙钟显著不一致
+        /// （DWT 回绕 / cpu_hz 异常），退回到 micros。
+        /// </summary>
+        public readonly double EffectiveMicros
+        {
+            get
+            {
+                double micros = LastMicros;
+                if (CpuHz == 0 || LastCycles == 0) return micros;
+                double cyclesUs = LastCycles * 1_000_000.0 / CpuHz;
+                // micros is quantized to 1ms; tolerate that plus 50% slack.
+                double tol = Math.Max(2000.0, micros * 0.5);
+                return Math.Abs(cyclesUs - micros) <= tol ? cyclesUs : micros;
+            }
+        }
+
+        /// <summary>
+        /// CPU 负载百分比 = 有效耗时 / 循环周期（用 DWT，micros 兜底）。无周期信息时返回 0。
+        /// </summary>
+        public readonly double LoadPercent =>
+            IntervalUs > 0 ? Math.Min(100.0 * EffectiveMicros / IntervalUs, 1000.0) : 0.0;
+
+        /// <summary>
+        /// 内存负载百分比 = 本轮峰值占用 / 缓冲区总容量。无容量信息时返回 0。
+        /// </summary>
+        public readonly double MemLoadPercent =>
+            MemCapacity > 0 ? Math.Min(100.0 * MemPeakUsed / MemCapacity, 100.0) : 0.0;
+
+        public override readonly string ToString() =>
+            $"iter={Iteration}, cycles={LastCycles}, us={LastMicros}, interval_us={IntervalUs}, cpu={LoadPercent:F1}%, mem={MemLoadPercent:F1}% ({MemPeakUsed}/{MemCapacity}B), heap={HeapUsed}B/{HeapObjs}objs";
+    }
+
+    /// <summary>
     /// Core Dump 数据布局类型
     /// </summary>
     public enum CoreDumpLayout : uint
@@ -1009,6 +1080,20 @@ namespace MCUSerialBridgeCLR
         );
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate void msb_on_vm_stats_callback_function_t(
+            IntPtr stats,
+            uint timestamp_ms,
+            IntPtr user_ctx
+        );
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern MCUSerialBridgeError msb_register_vm_stats_callback(
+            IntPtr handle,
+            msb_on_vm_stats_callback_function_t callback,
+            IntPtr user_ctx
+        );
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         internal delegate void msb_on_fatal_error_callback_function_t(
             IntPtr payload,
             IntPtr user_ctx
@@ -1432,6 +1517,7 @@ namespace MCUSerialBridgeCLR
 
         private MCUSerialBridgeCoreAPI.msb_on_memory_lower_io_callback_function_t _memoryLowerIOCallback;
         private MCUSerialBridgeCoreAPI.msb_on_console_writeline_callback_function_t _consoleWriteLineCallback;
+        private MCUSerialBridgeCoreAPI.msb_on_vm_stats_callback_function_t _vmStatsCallback;
         private MCUSerialBridgeCoreAPI.msb_on_fatal_error_callback_function_t _fatalErrorCallback;
         private MCUSerialBridgeCoreAPI.msb_on_error_callback_function_t? _errorCallback;
 
@@ -1741,6 +1827,44 @@ namespace MCUSerialBridgeCLR
             return MCUSerialBridgeCoreAPI.msb_register_console_writeline_callback(
                 nativeHandle,
                 _consoleWriteLineCallback,
+                IntPtr.Zero
+            );
+        }
+
+        /// <summary>
+        /// 注册 VM 运行遥测回调（DIVER 模式每轮 vm_run 的 CPU 负载/堆占用）。
+        /// </summary>
+        /// <param name="callback">接收 VmStats 的回调</param>
+        /// <returns>错误码</returns>
+        /// <remarks>
+        /// 回调会在底层 C 线程中调用，请勿在回调内阻塞或调用其他发送函数。
+        /// </remarks>
+        public MCUSerialBridgeError RegisterVmStatsCallback(Action<VmStats> callback)
+        {
+            if (callback == null)
+                return MCUSerialBridgeError.Win_InvalidParam;
+
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            void del(IntPtr stats, uint timestamp_ms, IntPtr user_ctx)
+            {
+                try
+                {
+                    var s = Marshal.PtrToStructure<VmStats>(stats);
+                    callback(s);
+                }
+                catch
+                {
+                    // 解析失败直接忽略，保证回调不会抛异常阻塞 C 层线程
+                }
+            }
+
+            _vmStatsCallback = del;
+
+            return MCUSerialBridgeCoreAPI.msb_register_vm_stats_callback(
+                nativeHandle,
+                _vmStatsCallback,
                 IntPtr.Zero
             );
         }

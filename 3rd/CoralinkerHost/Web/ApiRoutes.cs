@@ -1122,6 +1122,40 @@ public static class ApiRoutes
             return JsonHelper.Json(new { ok = true });
         });
 
+        // 节点 VM 运行遥测（CPU 负载/堆占用曲线）
+        app.MapGet("/api/node/{uuid}/vmstats", (string uuid, long? afterSeq, int? maxCount) =>
+        {
+            var result = DIVERSession.Instance.GetNodeVmStats(uuid, afterSeq, maxCount ?? 240);
+            if (result == null)
+                return Results.NotFound(new { ok = false, error = "Node not found" });
+
+            static object Sample(VmStatsSample s) => new
+            {
+                seq = s.Seq,
+                timestamp = s.Timestamp.ToString("O"),
+                iteration = s.Iteration,
+                cycles = s.LastCycles,
+                micros = s.LastMicros,
+                intervalUs = s.IntervalUs,
+                cpuHz = s.CpuHz,
+                heapUsed = s.HeapUsed,
+                heapObjs = s.HeapObjs,
+                loadPercent = s.LoadPercent,
+                memCapacity = s.MemCapacity,
+                memPeakUsed = s.MemPeakUsed,
+                memLoadPercent = s.MemLoadPercent
+            };
+
+            return JsonHelper.Json(new
+            {
+                ok = true,
+                uuid = result.Uuid,
+                latestSeq = result.LatestSeq,
+                latest = result.Latest is { } l ? Sample(l) : null,
+                samples = result.Samples.Select(Sample)
+            });
+        });
+
         app.MapPost("/api/logs/clear", () =>
         {
             DIVERSession.Instance.ClearAllLogs();

@@ -122,6 +122,9 @@
         :output-count="digitalOutputCount"
       />
 
+      <!-- CPU 负载曲线（运行中显示，来自 VM 遥测） -->
+      <CpuLoadChart v-if="isRunning && data.isProgrammed" :uuid="id" :running="isRunning" />
+
       <!-- LowerIO Variables -->
       <div class="section" v-if="lowerIOVariables.length > 0">
         <div class="section-title">LOWER I/O</div>
@@ -164,6 +167,7 @@ import type { PortConfig, RuntimeStats, LogicInfo, LayoutInfo, VersionInfo } fro
 import PortConfigEdit from './PortConfigEdit.vue'
 import PortView from './PortView.vue'
 import IOView from './IOView.vue'
+import CpuLoadChart from './CpuLoadChart.vue'
 import UpgradeDialog from './UpgradeDialog.vue'
 
 // Props from vue-flow

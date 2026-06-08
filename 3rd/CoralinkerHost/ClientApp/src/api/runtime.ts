@@ -179,6 +179,49 @@ export async function clearNodeLogs(uuid: string): Promise<{ ok: boolean }> {
   return post(`/api/logs/node/${uuid}/clear`)
 }
 
+/** VM 运行遥测采样点（每轮 vm_run 的 CPU 负载/堆占用） */
+export interface VmStatsSample {
+  seq: number
+  timestamp: string
+  iteration: number
+  cycles: number
+  micros: number
+  intervalUs: number
+  cpuHz: number
+  heapUsed: number
+  heapObjs: number
+  loadPercent: number
+  memCapacity: number
+  memPeakUsed: number
+  memLoadPercent: number
+}
+
+/**
+ * 获取节点 VM 运行遥测（CPU 负载曲线）
+ * @param uuid 节点 UUID
+ * @param afterSeq 仅获取 seq 大于此值的采样（增量轮询）
+ * @param maxCount 最大返回采样数
+ */
+export async function getNodeVmStats(
+  uuid: string,
+  afterSeq?: number,
+  maxCount = 240
+): Promise<{
+  ok: boolean
+  uuid?: string
+  latestSeq?: number
+  latest?: VmStatsSample | null
+  samples?: VmStatsSample[]
+  error?: string
+}> {
+  const params = new URLSearchParams()
+  if (afterSeq !== undefined) {
+    params.append('afterSeq', afterSeq.toString())
+  }
+  params.append('maxCount', maxCount.toString())
+  return get(`/api/node/${uuid}/vmstats?${params.toString()}`)
+}
+
 /**
  * 清空所有日志
  */

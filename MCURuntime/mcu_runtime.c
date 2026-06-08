@@ -210,6 +210,15 @@ struct per_field
 uchar* mem0;
 uchar* heap_tail;
 int heap_newobj_id = 1;
+
+// ---- Memory high-water telemetry (per vm_run cycle) ----
+// The whole VM lives in one buffer [mem0 .. heap_tail). The stack grows up from
+// stack0; the heap grows down from heap_tail. These track the worst extent each
+// reached during a cycle so we can report a (conservative) peak usage without
+// touching the hot opcode loop: mem_stack_hi is updated once per method call,
+// mem_heap_lo once per allocation. Reset at the top of vm_run().
+uchar* mem_stack_hi; // highest stack address reached this cycle
+uchar* mem_heap_lo;  // lowest heap address reached this cycle
 struct heap_obj_slot
 {
 	uchar* pointer;
@@ -385,6 +394,7 @@ int newobj(int clsid)
 	struct object_val* my_ptr = tail - mysz;
 	if (new_stack_depth > 0 && (uchar*)my_ptr < stack_ptr[new_stack_depth - 1]->evaluation_pointer)
 		ASSERT_RT(0, "Out of memory allocating %d bytes for obj(%d)", mysz, clsid);
+	if ((uchar*)my_ptr < mem_heap_lo) mem_heap_lo = (uchar*)my_ptr; // mem telemetry
 	heap_obj[reference_id] = (struct heap_obj_slot){ .pointer = my_ptr, };
 	// initialize:
 	my_ptr->header = ObjectHeader;
@@ -438,6 +448,7 @@ int newstr(short len, uchar* src)
 	struct string_val* my_ptr = tail - mysz;
 	if (new_stack_depth > 0 && (uchar*)my_ptr < stack_ptr[new_stack_depth - 1]->evaluation_pointer)
 		ASSERT_RT(0, "Out of memory allocating %d bytes for str[%d]", mysz, len);
+	if ((uchar*)my_ptr < mem_heap_lo) mem_heap_lo = (uchar*)my_ptr; // mem telemetry
 	heap_obj[reference_id] = (struct heap_obj_slot){ .pointer = my_ptr, };
 	// initialize:
 	my_ptr->header = StringHeader;
@@ -465,6 +476,7 @@ int newarr(short len, uchar type_id)
 	struct array_val* my_ptr = tail - mysz;
 	if (new_stack_depth > 0 && (uchar*)my_ptr < stack_ptr[new_stack_depth - 1]->evaluation_pointer)
 		ASSERT_RT(0, "Out of memory allocating %dB for arr[%d](%d)", mysz, len, type_id);
+	if ((uchar*)my_ptr < mem_heap_lo) mem_heap_lo = (uchar*)my_ptr; // mem telemetry
 	heap_obj[reference_id] = (struct heap_obj_slot){ .pointer = my_ptr, };
 
 	// initialize:
@@ -1477,6 +1489,13 @@ void vm_push_stack(int method_id, int new_obj_id, uchar** reptr)
 	// evaluation stack is predetermined max_stack.
 	my_stack->max_stack = ReadInt;
 	my_stack->evaluation_st_ptr = my_stack->evaluation_pointer = (((int)(sptr - mem0 + 3) >> 2) << 2) + mem0 + 3;
+
+	// mem telemetry: this frame's worst-case ceiling = base of eval stack + the
+	// reserved max_stack slots. Captured once per call (not per opcode).
+	{
+		uchar* frame_top = my_stack->evaluation_st_ptr + my_stack->max_stack * STACK_STRIDE;
+		if (frame_top > mem_stack_hi) mem_stack_hi = frame_top;
+	}
 
 	DBG(">>> Stack Custom Method %d, pop %d vals\n", method_id, n_args);
 
@@ -3176,6 +3195,12 @@ void vm_run(int iteration)
 
 	// put refreshed cart_IO static vals.
 
+	// reset memory high-water trackers for this cycle. Baseline = current resting
+	// footprint: stack at stack0 (nothing pushed yet) and heap at the lowest
+	// static-rooted object (or heap_tail if the heap is empty).
+	mem_stack_hi = stack0;
+	mem_heap_lo = (heap_newobj_id > 1) ? heap_obj[heap_newobj_id - 1].pointer : heap_tail;
+
 	// start running.
 	iterations = iteration;
 	vm_push_stack(entry_method_id, -1, 0);
@@ -3339,6 +3364,48 @@ uchar* vm_get_lower_memory()
 int vm_get_lower_memory_size()
 {
 	return lowerUploadSz;
+}
+
+// Telemetry: bytes currently occupied by the heap. The heap grows downward from
+// heap_tail; the lowest live object pointer is the head. Returns 0 if no object.
+int vm_get_heap_used()
+{
+	if (heap_newobj_id <= 1) return 0;
+	uchar* head = heap_obj[heap_newobj_id - 1].pointer;
+	if (head == NULL || head > heap_tail) return 0;
+	return (int)(heap_tail - head);
+}
+
+// Telemetry: number of live heap objects (objects/arrays/strings). id 0 is the
+// null sentinel, so the count is heap_newobj_id - 1.
+int vm_get_heap_obj_count()
+{
+	return heap_newobj_id > 0 ? heap_newobj_id - 1 : 0;
+}
+
+// Telemetry: total VM working buffer size (bytes) = program + statics + stack + heap.
+int vm_get_mem_capacity()
+{
+	if (mem0 == NULL || heap_tail == NULL) return 0;
+	return (int)(heap_tail - mem0);
+}
+
+// Telemetry: conservative peak usage during the last cycle (bytes). Combines the
+// worst stack extent and the worst heap extent seen this cycle:
+//   used = (mem_stack_hi - mem0) + (heap_tail - mem_heap_lo)
+// i.e. program+statics+peak-stack + peak-heap. The two maxima may occur at
+// different instants, so this is an upper bound (safe for an overflow warning).
+int vm_get_mem_peak_used()
+{
+	if (mem0 == NULL || heap_tail == NULL || mem_stack_hi == NULL || mem_heap_lo == NULL)
+		return 0;
+	int stack_part = (int)(mem_stack_hi - mem0);
+	int heap_part = (int)(heap_tail - mem_heap_lo);
+	int used = stack_part + heap_part;
+	int cap = (int)(heap_tail - mem0);
+	if (used < 0) used = 0;
+	if (used > cap) used = cap; // clamp (overlap would mean overflow already asserted)
+	return used;
 }
 
 void vm_put_buffer(uchar* buffer, int size, uchar type, int aux0, int aux1)

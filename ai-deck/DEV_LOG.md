@@ -5124,3 +5124,99 @@
 ### 注意
 - 【发现】定位「网页可见」中文用 regex：属性值 `="[^"]*[\u4e00-\u9fff]`、模板文本 `>[^<>]*[\u4e00-\u9fff]`、字符串字面量 `'…中文…'`/`` `…中文…` ``；排除掉只在 `//`、`/* */`、`<!-- -->` 注释里的中文（不显示，未改）。AddNodeDialog 等文件的中文其实全是注释，UI 早已英文。
 - 【注意】重新打包发布后这些英文提示才会进 `wwwroot`；本轮已重建前端产物。
+
+---
+
+## 2026-06-09 01:30 UTC+8 — 回退 CCM 优化（保留 telemetry）+ 备好前后端给用户自测 + 基准测试程序
+
+### 背景 / 用户意图
+- 用户叫停 CCM 优化路线：模拟节点跑在 PC 上、无 CCM 概念，`lastCycles`=0，**不能用于性能测试**。
+- 用户要：① 一个能跑在物理节点上的测试程序；② 把上一轮的 CCM 改动**回退**（telemetry 保留）；③ 用户自己编译 upg(2.1) 并自测。
+- 后续又追加：**upg 不用我编**，只要把**前后端弄好**告诉他即可，他自己跑测试。
+
+### 做了哪些事
+1) **回退 CCM 改动（保留 telemetry）**
+   - `MCUSerialBridge/mcu/appl/include/appl/control.h`：`PROGRAM_BUFFER_MAX_SIZE` 从 `48*1024` 退回 `20*1024`，注释退回原版。
+   - `MCUSerialBridge/mcu/appl/source/control.c`：`program_buffer_storage` 去掉 `CCM_RAM`，退回普通 SRAM 静态数组。
+   - `MCURuntime/mcu_runtime.c`：直接 `git checkout HEAD --` 整文件回退（清掉 `MCU_FASTMEM` 宏修复 + 所有 `MCU_FASTMEM` 标注），然后**只重新插回** telemetry 两个函数 `vm_get_heap_used()` / `vm_get_heap_obj_count()`（放在 `vm_get_lower_memory_size()` 之后）。`mcu_runtime.h` 的两个声明本就属 telemetry，保留。
+   - 结论：固件源码现在 = **baseline（无 CCM）+ telemetry**。用户从当前源码编 upg 即得 v2.1 基线固件。
+
+2) **基准测试程序**（给物理节点跑）：`ai-deck/test_programs/BenchLogic.cs`（+ `desc.md`）
+   - 故意狂打 CCM 要加速的热点：`int[256]` 数组元素读写（走 heap_obj 表）、`Mix()` 方法调用（栈帧）、static 字段 `_buf/_state`。
+   - 每 cycle 工作量固定（由 UpperIO `rounds` 调，默认 40 → 40×256 内循环），所以 **`lastCycles` 稳定可比**；`checksum`(LowerIO) 对同一 iteration 在两套固件上**必须一致** → 证明 CCM 没改变行为。
+   - 用法：网页上传为 asset → Save → Build → Program 到节点 → Start → 看 CPU Load 图 / telemetry 的 `lastCycles`；之后刷 CCM 版固件同 `rounds` 再跑对比。
+
+3) **备好前后端（用户自测用）**
+   - c_core 原生 DLL：`scons -j8`（MCUSerialBridge）→ `build/mcu_serial_bridge.dll` 已是最新（含 0x72 `CommandUploadLowerIoAndVmStats` 分发 + `msb_register_vm_stats_callback` 导出，二进制 grep 命中）。**手动同步**到 `build/runtimes/win-x64/native/mcu_serial_bridge.dll`（CoralinkerSDK.csproj 实际引用此路径）。
+   - 后端：`dotnet build CoralinkerHost.csproj -c Release` → 0 error（仅既有可空性警告）。Host 输出目录的 `runtimes/win-x64/native/mcu_serial_bridge.dll` 为最新（01:05）。
+   - 前端：`npm run build`（vue-tsc+vite）→ 14s 通过，产物出到 `wwwroot/`；bundle 里能 grep 到 `vmstats`（CpuLoadChart telemetry 代码已打进去）。
+
+### 接下来要做 / 给用户
+- 用户自行编译 baseline upg（建议从 `MCUSerialBridge` 跑）：
+  `scons BUILD_MCU=1 PDN=CORAL-NODE-V2.1 ENABLE_DIVER_RUNTIME=1 upg`
+  产物在 `MCUSerialBridge/build/*.upg`。
+- 【注意】upg 的 Tag 字段来自 `git describe --tags --abbrev=0`；当前**仓库无任何 tag**，所以上次 upg 文件名里 Tag 为空（`..._66025b5__时间.upg`）。要让固件版本显示 **2.1**，编 upg 前先 `git tag 2.1`（或带助记词 `2.1-tlm`，≤8 字节）再 `scons ... upg`。
+- 流程：刷 v2.1(baseline) → Program `BenchLogic` → 记录 `lastCycles`；再刷 CCM 版(v2.2) → 同 `rounds` 跑 → 对比周期数；`checksum` 两版同 iteration 应一致。
+
+### 重要发现 / 注意
+- 【技能】只回退「某一类改动」而保留同文件里的另一类改动：对**混了两类改动的文件**（mcu_runtime.c 同时有 CCM 标注 + telemetry 函数），最干净的做法是 `git checkout HEAD -- <file>` 整体回到基线，再用 StrReplace 把要保留的那部分**重新插回**，比一处处手撕 `MCU_FASTMEM` 更不易残留。
+- 【发现】固件版本助记词落点：upg 头里有 Tag(8B)/Commit(8B)/BuildTime(24B)/PDN(16B)。Commit=`git rev-parse --short HEAD`（**不含未提交改动**，所以靠 commit 区分调试版本不可靠），Tag=最近 git tag。要可靠区分「在跑哪一版」，用 **git tag 承载 version+助记词**（如 `2.1-tlm`/`2.2-ccm`），probe 时即可见。
+- 【注意】CoralinkerSDK.csproj 引用的原生 DLL 路径是 `MCUSerialBridge/build/runtimes/win-x64/native/`，而 scons c_core 只产出到 `MCUSerialBridge/build/`。每次重编 c_core 必须手动 `Copy-Item` 同步，否则后端会带**旧** DLL（无 0x72/vm_stats 导出），真机 telemetry 收不到。
+- 【注意】模拟节点不经过原生 DLL，其 `vmstats` 由 SimNodeHost 直接发 JSON，`lastCycles=0`（只有 PC wall-clock μs）。**性能对比必须用物理节点**——这正是本轮叫停模拟节点路线的原因。
+
+---
+
+## 2026-06-09 01:58 UTC+8 — Memory Load 遥测（high-water mark）+ CPU Load 改用 DWT（micros 兜底）+ 双 gauge UI
+
+### 背景 / 用户意图
+- 用户看到 telemetry 卡片只有 CPU，且 `micros` 精度只有 1ms（亚毫秒反应不出来）；想同时看 CPU Load 和 Memory Load。
+- 先确认了 VM 内存模型：每 cycle 结束 **栈完全回退≈0**，**堆是 mark-sweep（按 statics 为根保活，不是清零）**——所以 cycle 末的 heap_used 只是「静止 statics 足迹」（如 BenchLogic 的 `static int[256]`=1KiB），看不到 cycle 内的瞬时峰值。结论：内存值得统计，但要统计**cycle 内峰值 high-water mark**（峰值栈 + 峰值堆 vs 缓冲区总量），这才是会撑爆 20KiB 单缓冲区的真正风险量。
+- 用户指示：Do it；上传 micros+interval+cpuHz，若 DWT 结果与 micros 显著不一致就退回 micros；Memory 遥测**不能太影响性能和代码一致性**。
+
+### 做了哪些事（端到端）
+1) **runtime 高水位追踪（`MCURuntime/mcu_runtime.c`，零侵入热路径）**
+   - 新增全局 `uchar* mem_stack_hi`（本 cycle 栈到过的最高地址）、`uchar* mem_heap_lo`（堆到过的最低地址）。
+   - `vm_run()` 入口（push entry frame 前）重置：`mem_stack_hi=stack0`、`mem_heap_lo = heap_newobj_id>1 ? heap_obj[last].pointer : heap_tail`（基线含静止 statics 足迹）。
+   - **栈**：只在 `vm_push_stack` 算出 `evaluation_st_ptr`/`max_stack` 后，更新一次 `frame_top = evaluation_st_ptr + max_stack*STACK_STRIDE`（每次方法调用 1 次比较，**不进 opcode 循环**）。
+   - **堆**：只在 3 个分配器 `newobj/newstr/newarr` 算出 `my_ptr` 后各加一行 `if(my_ptr<mem_heap_lo)mem_heap_lo=my_ptr;`（仅 `new` 时）。
+   - 新增访问器 `vm_get_mem_capacity()`(=heap_tail-mem0=缓冲区总量) / `vm_get_mem_peak_used()`(=（mem_stack_hi-mem0)+(heap_tail-mem_heap_lo)，保守上界，clamp 到 cap)。`.h` 同步声明。
+2) **协议**（`msb_protocol.h`）：`VmStatsC` 加 `u32 mem_capacity`+`u32 mem_peak_used`，**28B→36B**，`STATIC_ASSERT` 同步改 36。
+3) **固件**（`upload.c`）：`upload_lower_io_and_vm_stats` 填 `mem_capacity`/`mem_peak_used`（HAS_DIVER_RUNTIME 下调访问器，否则 0）。
+4) **c_core**（`msb_thread.c`）：0x72 解析全程用 `sizeof(VmStatsC)`，结构体长大**自动适配**，仅需重编。
+5) **wrapper**（`MCUSerialBridgeCLR.cs`）：`VmStats` 加 `MemCapacity`/`MemPeakUsed`；新增 `EffectiveMicros`（优先 `cycles*1e6/CpuHz`，与 `LastMicros` 偏差 > max(2000us, micros*50%) 才退回 micros）；`LoadPercent` 改用 `EffectiveMicros`；新增 `MemLoadPercent=100*peak/cap`。
+6) **SDK**：`VmStatsSample` record 加 3 字段（MemCapacity/MemPeakUsed/MemLoadPercent），`VmStatsHistory.Add` 映射；`SimulatedMcuNode` 解析 `memCapacity`/`memPeakUsed`；`CoralinkerSimNodeHost/Program.cs` 存 `_memorySize` 并在 vmstats JSON 里发 `memCapacity=_memorySize`、`memPeakUsed=0`（模拟节点无真实峰值）。
+7) **Host**（`ApiRoutes.cs`）：`/vmstats` JSON 加 `memCapacity`/`memPeakUsed`/`memLoadPercent`。
+8) **前端**：`runtime.ts` 的 `VmStatsSample` 加 3 字段；`CpuLoadChart.vue` 重写成**上下两个 sparkline**——CPU LOAD（蓝，自动量程≥100%）+ MEM LOAD（紫，固定 0~100%），底部 stats 显示 `cycles / micros / memPeakUsed/memCapacity`。
+
+### 验证（仅编译，真机由用户自测）
+- c_core `scons -j8` 重编成功（msb_thread/bridge 重新编译，证明吃到了 36B 结构体）；DLL 已 `Copy-Item` 同步到 `build/runtimes/win-x64/native/`。
+- 后端 `dotnet build -c Release` → 0 error；Host 输出 `runtimes/win-x64/native/mcu_serial_bridge.dll` 时间戳为最新（01:57）。
+- 前端 `npm run build`（vue-tsc 类型检查通过，证明新加字段类型对齐）；bundle grep 到 `memLoadPercent`。
+
+### 接下来要做 / 给用户
+- 用户需**重新编固件 upg 并刷机**（这批协议改了 `VmStatsC` 36B + runtime 新访问器），否则旧固件发 28B 包、新 c_core 按 36B 解析会长度对不上被丢弃（`mem_packet->data_len` 校验不过 → 整包跳过，telemetry 收不到）。
+- 用户当前正运行的旧 Host（`dotnet run` Debug, pid 18712）是旧版；要看新 UI/字段需重启用新构建（Release 产物已就绪）。
+- BenchLogic 跑起来后：MEM LOAD 会显示「程序+statics+峰值栈+峰值堆」占 20KiB 的比例；`rounds` 调大主要增加 CPU，不太增内存（buf 是固定 static）。
+
+### 重要发现 / 注意
+- 【发现】VM 是单缓冲区 [mem0..heap_tail)：低地址 program+statics，stack 从 stack0 往上长，heap 从 heap_tail 往下长，中间空隙 = 余量。撑爆 = stack 顶撞上 heap 头。故 Memory Load 的分母是**整块缓冲区**，分子是**cycle 内同时占用峰值**。
+- 【技能】高水位埋点要选「值真正变化的唯一地点」：栈只在 `vm_push_stack` 长（用 frame 的 `max_stack` 预留上界，无需逐 opcode 跟踪 eval 指针），堆只在 3 个分配器长。这样**完全不碰 opcode switch 主循环**，性能影响可忽略、代码一致性好。
+- 【注意】`mem_peak_used` 是**保守上界**：峰值栈与峰值堆可能不同时发生，二者相加可能略高于真实瞬时峰值——对「会不会溢出」的预警来说偏保守是安全的。
+- 【注意】`VmStatsC` 改成 36B 是 telemetry 包的**隐式 ABI**（固件↔c_core↔wrapper 三方必须同长）。这是本会话新增的 0x72，无历史包袱；但固件与上位机必须**同批次**部署。
+- 【发现】`dotnet run`（默认 Debug→bin/Debug）与 `dotnet build -c Release`（bin/Release）输出目录不同，所以用户开着 Host 自测时我仍能编 Release 不被文件占用锁住。
+
+---
+
+## 2026-06-09 02:12 UTC+8 — CPU/Mem 负载图改成固定 15s 时间窗 + 数字右对齐布局
+
+### 做了哪些事
+- **布局**（用户要求）：每行从左到右 = 标题 · cycles · 时间 · 占用率%，把原来底部的「cycles / us」挪到百分比**前面**。所有数字用固定宽度列（`num-cyc`62/`num-time`50/`num-mem`76/`num-pct`38 px）+ `text-align:right` + `tabular-nums`，使 1ms↔100ms、1%↔100%、1M↔100M 右边缘不跳动。时间显示改 ms（DWT cycles 换算优先，micros 兜底；≥100ms 无小数，否则 1 位）。
+- **固定 15s 时间窗**（用户要求 last 15s）：`CpuLoadChart.vue` x 轴从「按 index 等分」改成「按 timestamp 映射」。窗口锚定到**最新样本时间**（右边缘=now，避免浏览器/服务器时钟偏差），`[tMax-15000ms .. tMax]`。poll 合并后按时间裁剪（保留窗口内 + 4000 硬上限）。每 5s 一条竖向虚线网格，标题旁显示「15s」。
+- **SDK 缓冲扩容**：`DIVERSession` 每节点 `VmStatsHistory` 从 240 → **1024**。原因：BenchLogic 50ms/轮 → 20样本/秒，15s 需 300 样本，旧 240 只够 12s。1024 条 50ms 下覆盖 ~51s，10ms 下也有 ~10s。
+
+### 验证
+- 后端 `dotnet build -c Release` 0 error；前端 `npm run build` vue-tsc 通过（修了 `noUncheckedIndexedAccess` 下索引访问可空：`samples[n-1]!`、`merged[len-1]!`）。
+
+### 注意
+- 【注意】这次只改了 SDK(后端) + 前端，**没动协议/固件**。用户要看 15s 窗口需用新 Release 重启 Host + 刷新页面；固件仍是上一条记录里的 36B telemetry 版（需自行编 upg 刷机）。
+- 【发现】时间窗锚定「最新样本时间」而非浏览器 `Date.now()`：数据在流时每秒右移（滚动），停了就冻结在最后状态——对遥测可接受，且免去两端时钟不同步导致的曲线偏移。

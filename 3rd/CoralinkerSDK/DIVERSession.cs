@@ -245,6 +245,13 @@ internal class NodeEntry : IDisposable
     /// <summary>最后一次运行的统计数据（Stop后保留，用于显示TX/RX计数）</summary>
     public RuntimeStats? LastStats { get; set; }
 
+    // === VM 运行遥测（每轮 vm_run 的 CPU 负载/堆占用）===
+    /// <summary>最近一次 VM 运行遥测</summary>
+    public VmStats? LastVmStats { get; set; }
+    /// <summary>VM 运行遥测滚动历史（用于绘制 CPU 负载曲线）。
+    /// 1024 条：即使 10ms/轮也能覆盖 ~10s；50ms/轮覆盖 ~51s，足够前端 15s 时间窗。</summary>
+    public VmStatsHistory VmStatsHistory { get; } = new(1024);
+
     // === 日志 ===
     public NodeLogBuffer LogBuffer { get; } = new(10000);
 
@@ -283,6 +290,96 @@ internal sealed record FieldFlowRelation(
     string[] ReaderIds,
     string[] WriterIds
 );
+
+/// <summary>VM 运行遥测查询结果</summary>
+public sealed record VmStatsQueryResult(
+    string Uuid,
+    long LatestSeq,
+    VmStatsSample? Latest,
+    VmStatsSample[] Samples
+);
+
+/// <summary>VM 运行遥测的单个采样点</summary>
+public sealed record VmStatsSample(
+    long Seq,
+    DateTime Timestamp,
+    uint Iteration,
+    uint LastCycles,
+    uint LastMicros,
+    uint IntervalUs,
+    uint CpuHz,
+    uint HeapUsed,
+    ushort HeapObjs,
+    double LoadPercent,
+    uint MemCapacity,
+    uint MemPeakUsed,
+    double MemLoadPercent
+);
+
+/// <summary>VM 运行遥测滚动历史（线程安全的环形缓冲，用于绘制 CPU 负载曲线）</summary>
+public sealed class VmStatsHistory
+{
+    private readonly object _lock = new();
+    private readonly List<VmStatsSample> _samples = new();
+    private readonly int _maxSamples;
+    private long _seq = 0;
+
+    public VmStatsHistory(int maxSamples)
+    {
+        _maxSamples = maxSamples;
+    }
+
+    /// <summary>最近一次采样（无数据时为 null）。</summary>
+    public VmStatsSample? Latest
+    {
+        get { lock (_lock) { return _samples.Count > 0 ? _samples[^1] : null; } }
+    }
+
+    public VmStatsSample Add(VmStats stats)
+    {
+        lock (_lock)
+        {
+            var sample = new VmStatsSample(
+                ++_seq,
+                DateTime.Now,
+                stats.Iteration,
+                stats.LastCycles,
+                stats.LastMicros,
+                stats.IntervalUs,
+                stats.CpuHz,
+                stats.HeapUsed,
+                stats.HeapObjs,
+                stats.LoadPercent,
+                stats.MemCapacity,
+                stats.MemPeakUsed,
+                stats.MemLoadPercent
+            );
+            _samples.Add(sample);
+            if (_samples.Count > _maxSamples)
+            {
+                _samples.RemoveRange(0, _samples.Count - _maxSamples);
+            }
+            return sample;
+        }
+    }
+
+    /// <summary>返回 seq 大于 afterSeq 的采样（afterSeq 为 null 时返回最近 maxCount 条）。</summary>
+    public (long LatestSeq, VmStatsSample[] Samples) Query(long? afterSeq, int maxCount)
+    {
+        lock (_lock)
+        {
+            var latestSeq = _seq;
+            if (_samples.Count == 0)
+            {
+                return (latestSeq, Array.Empty<VmStatsSample>());
+            }
+            IEnumerable<VmStatsSample> filtered = afterSeq.HasValue
+                ? _samples.Where(s => s.Seq > afterSeq.Value)
+                : _samples.TakeLast(maxCount);
+            return (latestSeq, filtered.Take(maxCount).ToArray());
+        }
+    }
+}
 
 /// <summary>节点日志缓冲区</summary>
 internal class NodeLogBuffer
@@ -1247,6 +1344,7 @@ public sealed class DIVERSession : IDisposable
             // 注册回调
             handle.OnLowerIOReceived += data => HandleLowerIO(entry.UUID, data);
             handle.OnConsoleOutput += (msg, mcuTs) => HandleConsoleOutput(entry.UUID, msg, mcuTs);
+            handle.OnVmStats += stats => HandleVmStats(entry.UUID, stats);
             handle.OnFatalError += payload => HandleFatalError(entry.UUID, payload);
             handle.OnError += message => HandleTransportError(entry.UUID, message);
 
@@ -1869,6 +1967,23 @@ public sealed class DIVERSession : IDisposable
     }
 
     /// <summary>
+    /// 获取节点 VM 运行遥测（CPU 负载/堆占用）。
+    /// </summary>
+    /// <param name="uuid">节点 UUID</param>
+    /// <param name="afterSeq">获取 seq 大于此值的采样；null 表示获取最近 maxCount 条</param>
+    /// <param name="maxCount">最大返回采样数</param>
+    public VmStatsQueryResult? GetNodeVmStats(string uuid, long? afterSeq = null, int maxCount = 240)
+    {
+        if (!_nodes.TryGetValue(uuid, out var entry))
+        {
+            return null;
+        }
+
+        var (latestSeq, samples) = entry.VmStatsHistory.Query(afterSeq, maxCount);
+        return new VmStatsQueryResult(uuid, latestSeq, entry.VmStatsHistory.Latest, samples);
+    }
+
+    /// <summary>
     /// 清空所有日志
     /// </summary>
     public void ClearAllLogs()
@@ -2064,6 +2179,15 @@ public sealed class DIVERSession : IDisposable
             return;
 
         LogToNode(entry, message, mcuTimestampMs);
+    }
+
+    private void HandleVmStats(string uuid, VmStats stats)
+    {
+        if (!_nodes.TryGetValue(uuid, out var entry))
+            return;
+
+        entry.LastVmStats = stats;
+        entry.VmStatsHistory.Add(stats);
     }
 
     private void HandleTransportError(string uuid, string message)

@@ -90,3 +90,22 @@ void upload_console_writeline_fatal();
  * @return 实际追加的数据长度
  */
 uint32_t upload_console_writeline_append(const void* data, uint32_t length);
+
+/*
+ * @brief 合并上报 LowerIO + 单轮 VM 运行遥测（CommandUploadLowerIoAndVmStats）
+ * 在每个 vm_loop 迭代结束时调用一次，将本轮 LowerIO 输出变量与 vm_run() 的
+ * CPU 周期/耗时、循环周期、主频、堆占用合并为一个包发送，减少包数量。
+ * @param lower_io      LowerIO 数据指针（可为 NULL，data_len 记为 0）
+ * @param lower_io_len  LowerIO 数据长度
+ * @param iteration     循环计数
+ * @param last_cycles   本轮 vm_run() 的 DWT 周期数
+ * @param last_micros   本轮 vm_run() 的耗时（微秒）
+ * @param interval_us   配置的循环周期（微秒）
+ */
+void upload_lower_io_and_vm_stats(
+        const uint8_t* lower_io,
+        uint32_t lower_io_len,
+        uint32_t iteration,
+        uint32_t last_cycles,
+        uint32_t last_micros,
+        uint32_t interval_us);

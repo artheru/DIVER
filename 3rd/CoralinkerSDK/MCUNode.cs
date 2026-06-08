@@ -88,6 +88,9 @@ public class MCUNode : IRuntimeNode
     /// <summary>控制台输出事件 (message, mcuTimestampMs)</summary>
     internal event Action<string, uint>? OnConsoleOutput;
 
+    /// <summary>VM 运行遥测事件（每轮 vm_run 的 CPU 负载/堆占用）</summary>
+    internal event Action<VmStats>? OnVmStats;
+
     /// <summary>致命错误事件（MCU HardFault 或 ASSERT 失败）</summary>
     internal event Action<ErrorPayload>? OnFatalError;
 
@@ -253,6 +256,7 @@ public class MCUNode : IRuntimeNode
             _bridge.RegisterConsoleWriteLineCallback(
                 (msg, mcuTs) => OnConsoleOutput?.Invoke(msg, mcuTs)
             );
+            _bridge.RegisterVmStatsCallback(stats => OnVmStats?.Invoke(stats));
             _bridge.RegisterFatalErrorCallback(payload => OnFatalError?.Invoke(payload));
             _bridge.RegisterErrorCallback(message => OnError?.Invoke(message));
             LastError = null;
@@ -743,6 +747,12 @@ public class MCUNode : IRuntimeNode
     {
         add => OnConsoleOutput += value;
         remove => OnConsoleOutput -= value;
+    }
+
+    event Action<VmStats>? IRuntimeNode.OnVmStats
+    {
+        add => OnVmStats += value;
+        remove => OnVmStats -= value;
     }
 
     event Action<ErrorPayload>? IRuntimeNode.OnFatalError

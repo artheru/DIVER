@@ -20,6 +20,7 @@ public interface IRuntimeNode : IDisposable
 
     event Action<byte[]>? OnLowerIOReceived;
     event Action<string, uint>? OnConsoleOutput;
+    event Action<VmStats>? OnVmStats;
     event Action<ErrorPayload>? OnFatalError;
     event Action<string>? OnError;
 

@@ -11,6 +11,7 @@ internal static class Program
     private static CancellationTokenSource? _runCts;
     private static Task? _runTask;
     private static int _scanIntervalMs = 100;
+    private static int _memorySize = 0;
 
     private static readonly McuRuntimeNative.BytesCallback LowerCallback = OnLower;
     private static readonly McuRuntimeNative.TextCallback ConsoleCallback = OnConsole;
@@ -98,6 +99,7 @@ internal static class Program
         {
             McuRuntimeNative.SetCallbacks(LowerCallback, ConsoleCallback, SnapshotCallback, StreamCallback, EventCallback, FatalCallback);
             interval = McuRuntimeNative.LoadProgram(program, program.Length, memorySize);
+            _memorySize = memorySize;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         {
@@ -144,6 +146,7 @@ internal static class Program
             var ct = _runCts.Token;
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             var nextDueMs = 0L;
+            uint iteration = 0;
             while (!ct.IsCancellationRequested)
             {
                 var remainingMs = nextDueMs - stopwatch.ElapsedMilliseconds;
@@ -155,7 +158,27 @@ internal static class Program
                 var timestampMs = unchecked((uint)Math.Max(0, nextDueMs));
                 try
                 {
+                    // Measure wall-clock cost of this iteration so the host can chart
+                    // a (simulated) CPU load. The sim has no DWT cycle counter, so
+                    // cycles/cpuHz are reported as 0; only microseconds are real.
+                    var startTicks = System.Diagnostics.Stopwatch.GetTimestamp();
                     McuRuntimeNative.Step(timestampMs);
+                    var elapsedTicks = System.Diagnostics.Stopwatch.GetTimestamp() - startTicks;
+                    var micros = (uint)(elapsedTicks * 1_000_000L / System.Diagnostics.Stopwatch.Frequency);
+                    WriteEvent("vmstats", new
+                    {
+                        iteration,
+                        lastCycles = 0u,
+                        lastMicros = micros,
+                        intervalUs = (uint)(_scanIntervalMs * 1000),
+                        cpuHz = 0u,
+                        heapUsed = 0u,
+                        memCapacity = (uint)(_memorySize > 0 ? _memorySize : 0),
+                        memPeakUsed = 0u,
+                        heapObjs = 0u,
+                        mcuTimestampMs = timestampMs
+                    });
+                    iteration++;
                 }
                 catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
                 {

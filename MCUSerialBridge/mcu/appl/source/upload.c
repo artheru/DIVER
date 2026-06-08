@@ -3,6 +3,7 @@
 #include "appl/control.h"
 #include "appl/fatal_error.h"
 #include "appl/packet.h"
+#include "chip/system.h"
 #include "hal/dcan.h"
 #include "hal/systick.h"
 #include "msb_protocol.h"
@@ -294,6 +295,66 @@ void upload_console_writeline()
 
     // After sending, clear the buffer by setting the length to 0
     upload_console_writeline_buffer_length = 0;
+}
+
+void upload_lower_io_and_vm_stats(
+        const uint8_t* lower_io,
+        uint32_t lower_io_len,
+        uint32_t iteration,
+        uint32_t last_cycles,
+        uint32_t last_micros,
+        uint32_t interval_us)
+{
+    uint32_t ts = (uint32_t)(g_hal_timestamp_us / 1000);
+
+    PayloadHeader header = {
+            .command = CommandUploadLowerIoAndVmStats,
+            .sequence = 0,
+            .error_code = 0,
+            .timestamp_ms = ts,
+    };
+
+    if (lower_io == NULL) {
+        lower_io_len = 0;
+    }
+    if (lower_io_len > PACKET_MAX_DATALEN) {
+        lower_io_len = PACKET_MAX_DATALEN;
+    }
+
+    // Payload layout: [VmStatsC][MemoryExchangePacket(len + bytes)]
+    uint8_t other_data[sizeof(VmStatsC) + sizeof(MemoryExchangePacket) +
+                       PACKET_MAX_DATALEN];
+
+    VmStatsC* stats = (VmStatsC*)other_data;
+    stats->iteration = iteration;
+    stats->last_cycles = last_cycles;
+    stats->last_micros = last_micros;
+    stats->interval_us = interval_us;
+    stats->cpu_hz = SystemCoreClock;
+#if defined(HAS_DIVER_RUNTIME) && HAS_DIVER_RUNTIME == 1
+    stats->heap_used = (uint32_t)vm_get_heap_used();
+    stats->mem_capacity = (uint32_t)vm_get_mem_capacity();
+    stats->mem_peak_used = (uint32_t)vm_get_mem_peak_used();
+    stats->heap_objs = (uint16_t)vm_get_heap_obj_count();
+#else
+    stats->heap_used = 0;
+    stats->mem_capacity = 0;
+    stats->mem_peak_used = 0;
+    stats->heap_objs = 0;
+#endif
+    stats->reserved = 0;
+
+    MemoryExchangePacket* lower =
+            (MemoryExchangePacket*)(other_data + sizeof(VmStatsC));
+    lower->data_len = (uint16_t)lower_io_len;
+    if (lower_io_len > 0) {
+        memcpy(lower->data, lower_io, lower_io_len);
+    }
+
+    packet_send(
+            &header,
+            other_data,
+            sizeof(VmStatsC) + sizeof(MemoryExchangePacket) + lower_io_len);
 }
 
 void upload_console_writeline_fatal()

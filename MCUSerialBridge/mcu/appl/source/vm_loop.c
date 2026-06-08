@@ -3,6 +3,8 @@
 #include "appl/control.h"
 #include "appl/upload.h"
 #include "bsp/digital_io.h"
+#include "chip/system.h"
+#include "hal/systick.h"
 #include "mcu_runtime.h"
 #include "util/async.h"
 #include "util/console.h"
@@ -50,6 +52,12 @@ static void vm_loop()
         uint32_t upperio_len = 0;
         bool has_upperio = control_vm_get_upper_io(&upperio_data, &upperio_len);
 
+        // Measure CPU cost of this vm_run() iteration: DWT cycle counter
+        // (zero-overhead, enabled in init_systick) for exact cycles, plus the
+        // microsecond wall clock for a human-friendly load figure.
+        uint32_t run_cycles_start = DWT->CYCCNT;
+        uint64_t run_us_start = g_hal_timestamp_us;
+
         if (has_upperio) {
             // 有新数据，传递给 VM 运行时
             vm_put_upper_memory((uchar*)upperio_data, (int)upperio_len);
@@ -63,13 +71,24 @@ static void vm_loop()
             vm_run(vm_iteration_count++);
         }
 
+        uint32_t run_cycles = DWT->CYCCNT - run_cycles_start;
+        uint32_t run_us = (uint32_t)(g_hal_timestamp_us - run_us_start);
+
         // Always flush ports after each iteration.
         control_vm_flush_ports();
 
-        // Upload LowerIO to host
+        // Upload LowerIO + this iteration's VM telemetry to host in a single
+        // packet (combined CommandUploadLowerIoAndVmStats) to reduce packet
+        // count; the host protocol layer splits them back apart.
         uint8_t* lowerio = vm_get_lower_memory();
         int lowerio_size = vm_get_lower_memory_size();
-        control_upload_memory_lower_io(lowerio, lowerio_size);
+        upload_lower_io_and_vm_stats(
+                lowerio,
+                (uint32_t)(lowerio_size < 0 ? 0 : lowerio_size),
+                (uint32_t)(vm_iteration_count - 1),
+                run_cycles,
+                run_us,
+                (uint32_t)vm_interval_period_us);
 
         // Call upload console writeline to actually upload the console
         // writeline data to the host.

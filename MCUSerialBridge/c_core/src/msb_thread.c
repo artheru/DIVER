@@ -515,6 +515,44 @@ DWORD WINAPI parse_thread_func(LPVOID param)
                             payload_header->timestamp_ms,
                             handle->console_writeline_callback_ctx);
                 }
+            } else if (command == CommandUploadLowerIoAndVmStats) {
+                // Combined LowerIO + VM Stats (MCU -> PC, per-iteration).
+                // Payload layout: [VmStatsC][MemoryExchangePacket(len + bytes)].
+                // We split it back into the two original callbacks so upper
+                // layers keep seeing separate LowerIO and VmStats events.
+                if (len < sizeof(PayloadHeader) + sizeof(VmStatsC) +
+                                  sizeof(MemoryExchangePacket)) {
+                    continue;  // 数据太短
+                }
+
+                VmStatsC* vm_stats =
+                        (VmStatsC*)((uint8_t*)local_buf + sizeof(PayloadHeader));
+
+                MemoryExchangePacket* mem_packet =
+                        (MemoryExchangePacket*)((uint8_t*)local_buf +
+                                                sizeof(PayloadHeader) +
+                                                sizeof(VmStatsC));
+                if (mem_packet->data_len !=
+                    len - sizeof(PayloadHeader) - sizeof(VmStatsC) -
+                            sizeof(MemoryExchangePacket)) {
+                    continue;  // Length mismatch
+                }
+
+                // Fire VmStats first, then LowerIO (so the latest telemetry is
+                // available before output variables are processed).
+                if (handle->vm_stats_callback) {
+                    handle->vm_stats_callback(
+                            vm_stats,
+                            payload_header->timestamp_ms,
+                            handle->vm_stats_callback_ctx);
+                }
+
+                if (handle->memory_lower_io_callback && mem_packet->data_len > 0) {
+                    handle->memory_lower_io_callback(
+                            mem_packet->data,
+                            mem_packet->data_len,
+                            handle->memory_lower_io_callback_ctx);
+                }
             } else if (command == CommandError) {
                 // Fatal Error (MCU -> PC, MCU 致命错误上报)
                 // MCU 会连续发送多次（防止丢包），需要时间去重（5秒内不重复触发）

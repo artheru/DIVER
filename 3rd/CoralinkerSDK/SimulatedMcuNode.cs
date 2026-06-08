@@ -55,6 +55,7 @@ internal sealed class SimulatedMcuNode : IRuntimeNode
 
     public event Action<byte[]>? OnLowerIOReceived;
     public event Action<string, uint>? OnConsoleOutput;
+    public event Action<VmStats>? OnVmStats;
     public event Action<ErrorPayload>? OnFatalError;
     public event Action<string>? OnError;
 
@@ -503,6 +504,21 @@ internal sealed class SimulatedMcuNode : IRuntimeNode
                     consoleMessage,
                     root.TryGetProperty("mcuTimestampMs", out var ts) ? ts.GetUInt32() : 0
                 );
+                break;
+            case "vmstats":
+                OnVmStats?.Invoke(new VmStats
+                {
+                    Iteration = root.TryGetProperty("iteration", out var it) ? it.GetUInt32() : 0,
+                    LastCycles = root.TryGetProperty("lastCycles", out var lc) ? lc.GetUInt32() : 0,
+                    LastMicros = root.TryGetProperty("lastMicros", out var lm) ? lm.GetUInt32() : 0,
+                    IntervalUs = root.TryGetProperty("intervalUs", out var iv) ? iv.GetUInt32() : 0,
+                    CpuHz = root.TryGetProperty("cpuHz", out var ch) ? ch.GetUInt32() : 0,
+                    HeapUsed = root.TryGetProperty("heapUsed", out var hu) ? hu.GetUInt32() : 0,
+                    MemCapacity = root.TryGetProperty("memCapacity", out var mc) ? mc.GetUInt32() : 0,
+                    MemPeakUsed = root.TryGetProperty("memPeakUsed", out var mp) ? mp.GetUInt32() : 0,
+                    HeapObjs = root.TryGetProperty("heapObjs", out var ho) ? (ushort)ho.GetUInt32() : (ushort)0,
+                    Reserved = 0,
+                });
                 break;
             case "snapshot":
                 HandleSnapshotEvent(root);

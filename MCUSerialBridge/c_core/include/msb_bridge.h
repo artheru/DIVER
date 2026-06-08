@@ -415,6 +415,33 @@ DLL_EXPORT MCUSerialBridgeError msb_register_console_writeline_callback(
         void* user_ctx);
 
 /**
+ * @brief VM 运行遥测回调函数类型定义
+ *
+ * 当 MCU 在每个 vm_loop 迭代后上报 VmStatsC (CommandUploadVmStats) 时调用。
+ *
+ * @param stats 指向本轮 VmStatsC 数据（仅在回调内有效）
+ * @param timestamp_ms MCU 时间戳（毫秒）
+ * @param user_ctx 用户注册的上下文参数
+ */
+typedef void (*msb_on_vm_stats_callback_function_t)(
+        const VmStatsC* stats,
+        uint32_t timestamp_ms,
+        void* user_ctx);
+
+/**
+ * @brief 注册 VM 运行遥测回调函数
+ *
+ * @param handle MCU 句柄
+ * @param callback 用户提供的回调函数指针
+ * @param user_ctx 用户上下文参数
+ * @return MCUSerialBridgeError 错误码
+ */
+DLL_EXPORT MCUSerialBridgeError msb_register_vm_stats_callback(
+        msb_handle* handle,
+        msb_on_vm_stats_callback_function_t callback,
+        void* user_ctx);
+
+/**
  * @brief 致命错误回调函数类型定义
  *
  * 当 MCU 上报致命错误 (CommandError 0xFF) 时，会调用该回调函数。
@@ -587,6 +614,10 @@ typedef struct MCUSerialBridgeAPI {
     MCUSerialBridgeError (*msb_register_console_writeline_callback)(
             msb_handle*,
             msb_on_console_writeline_callback_function_t,
+            void*);
+    MCUSerialBridgeError (*msb_register_vm_stats_callback)(
+            msb_handle*,
+            msb_on_vm_stats_callback_function_t,
             void*);
     MCUSerialBridgeError (*msb_register_fatal_error_callback)(
             msb_handle*,

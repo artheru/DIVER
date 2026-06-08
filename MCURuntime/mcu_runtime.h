@@ -119,6 +119,12 @@ void vm_put_upper_memory(uchar* buffer, int size);
 uchar* vm_get_lower_memory();
 int vm_get_lower_memory_size();
 
+// Telemetry accessors (used for per-node CPU/memory load reporting).
+int vm_get_heap_used();      // bytes currently occupied by the heap (resting)
+int vm_get_heap_obj_count(); // number of live heap objects
+int vm_get_mem_capacity();   // total VM buffer size (bytes)
+int vm_get_mem_peak_used();  // in-cycle high-water mark (bytes): stack + heap peak
+
 // MCU - device interface.
 // snap_shot buffer layout:
 // {layout}|{payload}
