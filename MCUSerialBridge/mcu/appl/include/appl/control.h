@@ -25,8 +25,10 @@ extern volatile uint8_t g_wire_tap_flags[PACKET_MAX_PORTS_NUM];
 extern uint8_t* g_program_buffer;
 extern uint32_t g_program_length;
 
-/** @brief 程序缓冲区总大小（用于 VM 内存分配） */
-#define PROGRAM_BUFFER_MAX_SIZE (20 * 1024)
+/** @brief 程序缓冲区总大小（用于 VM 内存分配）
+ *  CCM 优化：缓冲区放入 CCM RAM（见 control.c），容量从 20KiB 扩到 48KiB。
+ *  CCM 总量 64KiB，本缓冲 48KiB + heap_obj 8KiB + 其余热变量 ≈ 57KiB，留有余量。 */
+#define PROGRAM_BUFFER_MAX_SIZE (48 * 1024)
 
 /*
 下列所有命令返回的错误码都会直接被交互层（packet）直接同步地返回给PC

@@ -72,7 +72,10 @@ volatile uint8_t g_wire_tap_flags[PACKET_MAX_PORTS_NUM] = {0};
 volatile PortStatsC g_port_stats[PACKET_MAX_PORTS_NUM] = {0};
 
 // DIVER 程序缓冲区 (PROGRAM_BUFFER_MAX_SIZE defined in control.h)
-static uint8_t program_buffer_storage[PROGRAM_BUFFER_MAX_SIZE];
+// CCM 优化：整个 VM 工作内存放入 CCM RAM（零等待、与总线矩阵隔离），
+// 解释器对该缓冲的高频读写在 CCM 上更快。缓冲区在加载程序时由 memset 清零，
+// 不依赖 startup 的 .data 拷贝，因此放入未被 startup 初始化的 .ccmram 是安全的。
+CCM_RAM static uint8_t program_buffer_storage[PROGRAM_BUFFER_MAX_SIZE];
 uint8_t* g_program_buffer = program_buffer_storage;
 uint32_t g_program_length = 0;
 static uint32_t g_program_receiving_offset = 0;

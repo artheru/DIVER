@@ -5220,3 +5220,75 @@
 ### 注意
 - 【注意】这次只改了 SDK(后端) + 前端，**没动协议/固件**。用户要看 15s 窗口需用新 Release 重启 Host + 刷新页面；固件仍是上一条记录里的 36B telemetry 版（需自行编 upg 刷机）。
 - 【发现】时间窗锚定「最新样本时间」而非浏览器 `Date.now()`：数据在流时每秒右移（滚动），停了就冻结在最后状态——对遥测可接受，且免去两端时钟不同步导致的曲线偏移。
+
+---
+
+## 2026-06-09 02:25 UTC+8 — 重新加回 CCM_RAM 优化（在 telemetry 版之上），待用户重测性能
+
+### 接下来要做 / 给用户
+- 用户自行编固件 upg + 刷机后重测：对比基线（v2.1 无 CCM）vs 本次 CCM 版的 cycles。BenchLogic 同一程序、同 rounds 下看 CPU LOAD 的 cycles 列下降幅度即为加速比。
+- 【建议】打 tag 助记词：基线已是 `2.1`，本次建议 `2.2-ccm`（单助记词 `ccm`），方便确认刷的是 CCM 版。本次**不需要 bump ABI**（见下「注意」）。
+
+### 做了哪些事（全部在 MCU 固件侧，上位机/前端不变）
+- **修复 `MCU_FASTMEM` 宏**（`mcu_runtime.c` 顶部）：原定义是坏的 `attribute((section(".ccmram")))`（漏了 `__attribute__`，等于无效→静默没进 CCM）。改成带条件守卫的正确写法：仅当 `defined(CCMRAM_SIZE_KB) && CCMRAM_SIZE_KB>0` 时展开为 `__attribute__((section(".ccmram")))`，否则空（PC/sim 构建无影响）。
+- **热点全局移入 CCM**（`mcu_runtime.c`）：`cur_il_offset`、`methods_table`、`method_detail_pointer`、`stack_ptr[32]`、`stack0`、`new_stack_depth`、`cart_IO_stored[]`、`program_desc_ptr/code_ptr/virt_ptr/statics_desc_ptr/statics_val_ptr`、`instanceable_class_layout_ptr`(结构体)、`instanceable_class_per_layout_ptr`、`cartIO_layout_ptr`、`mem0`、`heap_tail`、`heap_newobj_id`、`heap_obj[1024]`（8KiB，最大头），以及本会话新增的 telemetry 高水位 `mem_stack_hi`/`mem_heap_lo`。
+- **VM 工作缓冲扩容 + 进 CCM**：`control.h` `PROGRAM_BUFFER_MAX_SIZE` 20KiB→48KiB；`control.c` `program_buffer_storage` 加 `CCM_RAM`。
+
+### 验证（静态推理，无法本地跑 arm-gcc）
+- CCM 预算 64KiB：48KiB(buffer) + 8KiB(heap_obj) + cart_IO_stored 128B + stack_ptr 128B + 各指针/标量 <100B + 既有 `upload_console_writeline_buffer`(CCM_RAM, ~PACKET_MAX_DATALEN) ≈ **57KiB < 64KiB**，留有余量。若超出链接器会直接报错。
+- `mempool pool[32KiB]`（`mempool.c`）**未**带 CCM_RAM，仍在主 RAM，不占 CCM 预算——已确认，否则 57+32 会爆。
+- `CCMRAM_SIZE_KB=64`/`USE_CCM_RAM=True` 来自 `bsp_config.py`(CORAL-NODE-V2.1) + `embedded.py` 注入 `env`；`mcu_runtime_env = env.Clone()`（SConscript:110，在 unilib 注入之后），故 `mcu_runtime.c` 一定拿到该宏定义，守卫成立、CCM 生效。
+
+### 重要发现 / 注意
+- 【注意】**CCM 不被 startup 拷贝/清零**（`flash.ld.in` 有 `_siccmram` 符号但启动汇编未引用 → 既不拷 .data 初值也不 zero-fill）。因此放入 CCM 的变量**绝不能依赖初值**。已逐一核对：`heap_newobj_id=1`/`mem0`/`heap_tail` 在 `vm_set_program`(1064/1067/1113) 赋值；`new_stack_depth` 在 vm_run 设置；`cart_IO_stored` 每周期 `reset_cart_IO_stored()`(3204) memset；`heap_obj[i]` 写后才读（首次分配 id==1 走 heap_tail 分支不读数组）——**全部先写后读，安全**。
+- 【注意】本次**不 bump ABI**：只改了内存放置 + 缓冲容量，没动字节码 layout / opcode / 执行方式。注意 48KiB 是单机内存上限提升，不是跨节点兼容性问题。
+- 【技能】给「热」变量加 CCM 要选 STM32F4 的 CCM RAM（Core-Coupled，零等待、与 DMA/总线矩阵隔离），把解释器最高频读写的表/指针/标量放进去即可提速；但务必配合「先写后读」核查，因为 CCM 无 startup 初始化。
+- 【发现】坏宏 `attribute((...))` 在 GCC 下不是语法错误（被当成无名声明/被忽略），所以之前「以为开了 CCM」其实没生效——这类静默失效要靠看 `.map`/`objdump` 段分布或 `arm-none-eabi-size` 才能发现。
+
+---
+
+## 2026-06-09 02:33 UTC+8 — CCM 固件跑飞 HardFault：根因=CCM 不可取指 / native blob 在 CCM 执行
+
+### 现象
+- 刷入 CCM 版固件跑 BenchLogic → HardFault。VM 故障面板：`Method: DiverBench.BenchLogic..cctor()`，`Telemetry.cs:46`，`CFSR=0x00000100`，PC=`0x08017DE7`，寄存器里 R2/R12=`0x1000036E/0x100003A5`（**CCM 区 0x10000000**）。
+
+### 诊断（关键技能）
+- 【技能】`CFSR=0x100` → BFSR bit0 = **IBUSERR（取指总线错误）**，说明 CPU 去取指令时失败，而不是数据访问。
+- 【技能】用 `arm-none-eabi-addr2line -f -i -p -e build/firmware.elf 0x08017DE7` 直接把故障 PC 反解到源码 → **`native_try_execute at mcu_runtime.c:916`**，即 `fn(arg_buffer)` 调用 native 函数指针的那行。一步定位，省去猜测。
+- 用户原以为「没启用 native」，实测程序里确实带了 `native_arch_id==1` 的 raw ARM blob（DIVER 编译器为某方法发了 native 代码）。
+
+### 根因
+- 【发现】**STM32F405 的 CCM RAM（0x10000000）只接到 CPU 的 D-bus，不接 I-bus → 无法从 CCM 取指令执行**（也不可被 DMA 访问）。native blob 内嵌在「程序缓冲区」里，原来缓冲在主 SRAM 可就地执行；我把缓冲移进 CCM 后，`func_entry = native_exec_blob + offset` 落在 CCM，`fn(...)` 一调用就 IBUSERR。
+- 注意：CCM 存「数据」完全没问题（栈/堆/heap_obj/指针表照常用 D-bus 读写），**唯独不能放要被执行的 native 代码**。
+
+### 修复（`mcu_runtime.c`，保留 CCM 数据加速）
+- 仿照 `_WIN32` 路径（VirtualAlloc+PAGE_EXECUTE 把 blob 拷到可执行内存），给 MCU 新增 `#elif defined(IS_MCU)` 分支：`parse_native_chunk` 里把 native blob 从程序缓冲（CCM）`malloc` 一块普通 SRAM（堆在主 RAM，I-bus 可取指）并 `memcpy` 过去，按 `native_alignment` 对齐，加 `dsb/isb`（Cortex-M4 无 I-cache，仅需保证写序先于取指），`native_exec_blob` 指向 SRAM 副本。
+- 新增 `native_exec_blob_raw` 记录 malloc 原始基址；`release_native_metadata` 加 `#elif defined(IS_MCU)` 分支 `free(native_exec_blob_raw)`。
+- 失败兜底：malloc 失败 → `native_exec_blob=NULL` → `native_try_execute` 走 `goto cleanup` 退回解释执行，**不崩**。
+
+### 给用户
+- 重编固件 upg + 刷机重测。这次 CCM 数据加速保留（栈/堆/缓冲读写在 CCM），native 方法从 SRAM 副本执行，二者兼得。
+- 【建议】tag 助记词 `2.3-ccmfix`（或在 `2.2-ccm` 基础上 `ccmfix`）。
+
+### 注意
+- 【注意】blob 可被任意重定位执行的前提是它**位置无关（相对跳转）**——`_WIN32` 路径早就拷到任意地址跑，且 MCU 原来就地址随缓冲落点而变，已证明 PIC，故拷到 malloc 地址安全。
+- 【注意】native 函数运行时访问的 VM 堆对象在 CCM 里 → 那是**数据**访问，走 D-bus 完全正常；只有「取指」不能在 CCM。
+
+---
+
+## 2026-06-09 02:44 UTC+8 — native blob 改用 mempool_malloc + 编译 size 余量盘点
+
+### 改动（按用户要求）
+- native blob 重定位的目标内存从 newlib `malloc` 改为用户自己的 `mempool_malloc`（`mcu_runtime.c` IS_MCU 分支 + `#include "util/mempool.h"`）。去掉 `native_exec_blob_raw`/`free` 路径。
+- 理由：`mempool_malloc` 是 bump 分配器（`allocated_size` 只增、无 free）。用户确认**每次 Load 前会发 Reset（`control_on_reset`→`hal_nvic_reset`→`NVIC_SystemReset` 整机复位）**，复位后 `allocated_size`(.bss) 归零、外设重新 boot 分配，所以 per-load 分配天然无泄漏，不需要 free。
+- 兜底：`mempool_malloc` 满返回 0 → `native_exec_blob=NULL` → `native_try_execute` 退回解释执行，不崩。
+- 时机澄清：`parse_native_chunk` 在 `vm_set_program()` 里调用，**每次下载程序一次**，不是每周期；所以不是「每周期 malloc」。
+
+### 编译 size 余量（`arm-none-eabi-size -A -x build/firmware.elf`，CCM 版）
+- **CCM（`.ccmram` @0x10000000，共 64KiB）**：已用 `0xDD4C`=55.3KiB → **剩 ≈8.7KiB**。
+- **主 SRAM（@0x20000000，共 128KiB）**：`.bss`=83.7KiB（含 32KiB `pool[]`）+ `.data`≈1.1KiB + heap_stack 预留，静态到 `0x20015968` → **到栈顶剩 ≈41.6KiB**（newlib 堆+主栈增长区）。程序缓冲 48KiB 挪去 CCM 后主 RAM 反而宽裕。
+- native blob 拷进 `pool[]`（在 .bss/主 SRAM，I-bus 可执行 ✓）；blob 实测一般几百 B~几 KB，mempool 32KiB 够用。
+
+### 注意
+- 【发现】`init_nvic()`(nvic.c:12) 里 `RCC->AHB1ENR |= RCC_AHB1ENR_CCMDATARAMEN` 使能了 CCM 数据 RAM 时钟——这是 CCM **数据**可访问的前提（否则连读写都 BusFault）。但使能也只给 D-bus，**取指照样不行**。
+- 【注意】runtime 里其余 `malloc/free`（native 元数据 663-666、每次 native 调用的 `arg_buffer` 886）仍走 newlib，且都有配对 free，未动；只把「需可执行」的 blob 换成 mempool。

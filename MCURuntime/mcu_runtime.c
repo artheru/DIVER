@@ -4,13 +4,24 @@
 #else
 #include "appl/vm.h"
 #include "util/console.h"
+#include "util/mempool.h" // mempool_malloc: SRAM relocation target for native blob
 // #include "appl/co.h"
 #undef _DEBUG
 #define INLINE __attribute__((always_inline)) static inline
 #endif
 
+// MCU_FASTMEM places hot globals in CCM RAM (Core-Coupled Memory): zero
+// wait-state and isolated from DMA/bus-matrix contention, so the interpreter's
+// most-touched tables/scalars run faster there. Only enabled when the target
+// actually has a CCM region (CCMRAM_SIZE_KB > 0). NOTE: CCM is NOT initialized
+// by startup, so anything placed here must be runtime-assigned before first
+// read — true for all vars tagged below (set in vm_set_program / vm_run).
 #ifdef IS_MCU
-#define MCU_FASTMEM attribute((section(".ccmram")))
+#if defined(CCMRAM_SIZE_KB) && (CCMRAM_SIZE_KB > 0)
+#define MCU_FASTMEM __attribute__((section(".ccmram")))
+#else
+#define MCU_FASTMEM
+#endif
 #else
 #define MCU_FASTMEM
 #endif
@@ -41,7 +52,7 @@
 //hint: all structs are 1 bytes aligned.
 #pragma pack(push, 1)
 
-int cur_il_offset;
+MCU_FASTMEM int cur_il_offset;
 
 // Native CCoder integration metadata
 static uchar* native_blob_ptr = NULL;
@@ -160,8 +171,8 @@ struct method_index
 	int meta_offset;
 	int code_offset;
 };
-struct method_index* methods_table;
-uchar* method_detail_pointer;
+MCU_FASTMEM struct method_index* methods_table;
+MCU_FASTMEM uchar* method_detail_pointer;
 
 #define STACK_STRIDE 8
 struct stack_frame_header
@@ -170,25 +181,25 @@ struct stack_frame_header
 	uchar* PC, * entry_il, * evaluation_pointer, * args, * vars, * evaluation_st_ptr;
 	int max_stack;
 };
-struct stack_frame_header* stack_ptr[32]; // maximum 32 depth.
-struct stack_frame_header* stack0;
-int new_stack_depth = 0;
+MCU_FASTMEM struct stack_frame_header* stack_ptr[32]; // maximum 32 depth.
+MCU_FASTMEM struct stack_frame_header* stack0;
+MCU_FASTMEM int new_stack_depth = 0;
 
 int il_cnt = 0;
 
 #define maximum_IO_N 1024
-unsigned int cart_IO_stored[maximum_IO_N / 32]; // 32*32bit, 1024 slot for cart_IO.
+MCU_FASTMEM unsigned int cart_IO_stored[maximum_IO_N / 32]; // 32*32bit, 1024 slot for cart_IO.
 
 #define SET_CART_IO_TOUCHED(io_id) (cart_IO_stored[(io_id) / 32] |= (1U << ((io_id) % 32)))
 
-uchar* program_desc_ptr, * code_ptr, * virt_ptr, * statics_desc_ptr, * statics_val_ptr;
-struct
+MCU_FASTMEM uchar* program_desc_ptr, * code_ptr, * virt_ptr, * statics_desc_ptr, * statics_val_ptr;
+MCU_FASTMEM struct
 {
 	unsigned short tot_size;
 	uchar n_of_fields;
 	int layout_offset;
 } *instanceable_class_layout_ptr;
-uchar* instanceable_class_per_layout_ptr;
+MCU_FASTMEM uchar* instanceable_class_per_layout_ptr;
 
 // cartIO layout entry: offset (4B) + flags (1B) = 5 bytes per field, packed
 // flags: 0x01=UpperIO (Host->MCU), 0x02=LowerIO (MCU->Host), 0x00=Mutual (bidirectional)
@@ -198,7 +209,7 @@ struct cartIO_entry {
 	uchar flags;
 };
 #pragma pack(pop)
-struct cartIO_entry* cartIO_layout_ptr;
+MCU_FASTMEM struct cartIO_entry* cartIO_layout_ptr;
 
 struct per_field
 {
@@ -207,9 +218,9 @@ struct per_field
 	short aux;
 };
 
-uchar* mem0;
-uchar* heap_tail;
-int heap_newobj_id = 1;
+MCU_FASTMEM uchar* mem0;
+MCU_FASTMEM uchar* heap_tail;
+MCU_FASTMEM int heap_newobj_id = 1;
 
 // ---- Memory high-water telemetry (per vm_run cycle) ----
 // The whole VM lives in one buffer [mem0 .. heap_tail). The stack grows up from
@@ -217,9 +228,9 @@ int heap_newobj_id = 1;
 // reached during a cycle so we can report a (conservative) peak usage without
 // touching the hot opcode loop: mem_stack_hi is updated once per method call,
 // mem_heap_lo once per allocation. Reset at the top of vm_run().
-uchar* mem_stack_hi; // highest stack address reached this cycle
-uchar* mem_heap_lo;  // lowest heap address reached this cycle
-struct heap_obj_slot
+MCU_FASTMEM uchar* mem_stack_hi; // highest stack address reached this cycle
+MCU_FASTMEM uchar* mem_heap_lo;  // lowest heap address reached this cycle
+MCU_FASTMEM struct heap_obj_slot
 {
 	uchar* pointer;
 	short new_id; // only used on cleanup.
@@ -583,6 +594,8 @@ static void release_native_metadata(void)
         VirtualFree(native_exec_blob, 0, MEM_RELEASE);
     }
 #endif
+    // On MCU the blob is relocated into mempool (no per-object free; the pool is
+    // reset before each program load), so nothing to free here — just drop refs.
     native_exec_blob = NULL;
     native_exec_blob_owned = 0;
     native_blob_ptr = NULL;
@@ -731,6 +744,40 @@ static void parse_native_chunk(uchar* chunk_ptr, int chunk_size)
 		native_exec_blob = NULL;
 		native_exec_blob_owned = 0;
 	}
+#elif defined(IS_MCU)
+	// STM32F4 CCM RAM (where the VM program buffer may live, see control.c) is
+	// connected ONLY to the CPU D-bus — instructions cannot be fetched from it.
+	// The raw ARM blob is embedded in the program buffer, so executing it
+	// in-place would HardFault (IBUSERR) when the buffer is in CCM. Relocate the
+	// blob into mempool, which lives in main SRAM (I-bus accessible / executable).
+	// This runs once per program load, and the mempool is reset before each load,
+	// so a plain per-load allocation is correct (no individual free needed).
+	if (native_arch_id == 1 && native_blob_size > 0)
+	{
+		int align = native_alignment > 0 ? native_alignment : 4;
+		uchar* raw = (uchar*)mempool_malloc((uint32_t)native_blob_size + (uint32_t)align);
+		if (raw)
+		{
+			uint32_t aligned = ((uint32_t)raw + (uint32_t)(align - 1)) & ~((uint32_t)align - 1);
+			native_exec_blob = (uchar*)aligned;
+			memcpy(native_exec_blob, native_blob_ptr, (size_t)native_blob_size);
+			// Cortex-M4 has no instruction cache; only need to order the data
+			// writes before any subsequent instruction fetch from the blob.
+			__asm volatile("dsb 0xF" ::: "memory");
+			__asm volatile("isb 0xF" ::: "memory");
+		}
+		else
+		{
+			// mempool full → leave native disabled; native_try_execute() will
+			// fall back to interpreting the method (no crash).
+			native_exec_blob = NULL;
+		}
+	}
+	else
+	{
+		native_exec_blob = NULL;
+	}
+	native_exec_blob_owned = 0; // mempool-backed; never freed per-object
 #else
 	if (native_arch_id == 1)
 		native_exec_blob = native_blob_ptr;
