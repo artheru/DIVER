@@ -9,43 +9,43 @@ import type { ObjectDictionaryEntry } from './dictionary'
 /** CiA 402 设备配置对象 (0x6000 区域) */
 export const CiA402Objects: ObjectDictionaryEntry[] = [
   // 控制和状态
-  { index: 0x6040, name: 'Controlword', dataType: 'U16', access: 'RW', description: '控制字' },
-  { index: 0x6041, name: 'Statusword', dataType: 'U16', access: 'RO', description: '状态字' },
+  { index: 0x6040, name: 'Controlword', dataType: 'U16', access: 'RW', description: 'Control word' },
+  { index: 0x6041, name: 'Statusword', dataType: 'U16', access: 'RO', description: 'Status word' },
   
   // 运行模式
-  { index: 0x6060, name: 'Modes of Operation', dataType: 'I8', access: 'RW', description: '运行模式设置' },
-  { index: 0x6061, name: 'Modes of Operation Display', dataType: 'I8', access: 'RO', description: '当前运行模式' },
+  { index: 0x6060, name: 'Modes of Operation', dataType: 'I8', access: 'RW', description: 'Mode of operation setting' },
+  { index: 0x6061, name: 'Modes of Operation Display', dataType: 'I8', access: 'RO', description: 'Current mode of operation' },
   
   // 位置相关
-  { index: 0x6062, name: 'Position Demand Value', dataType: 'I32', access: 'RO', description: '位置需求值' },
+  { index: 0x6062, name: 'Position Demand Value', dataType: 'I32', access: 'RO', description: 'Position demand value' },
   { index: 0x6063, name: 'Position Actual Internal Value', dataType: 'I32', access: 'RO' },
-  { index: 0x6064, name: 'Position Actual Value', dataType: 'I32', access: 'RO', description: '实际位置' },
+  { index: 0x6064, name: 'Position Actual Value', dataType: 'I32', access: 'RO', description: 'Actual position' },
   { index: 0x6065, name: 'Following Error Window', dataType: 'U32', access: 'RW' },
   { index: 0x6066, name: 'Following Error Time Out', dataType: 'U16', access: 'RW' },
   { index: 0x6067, name: 'Position Window', dataType: 'U32', access: 'RW' },
   { index: 0x6068, name: 'Position Window Time', dataType: 'U16', access: 'RW' },
   
   // 速度相关
-  { index: 0x606B, name: 'Velocity Demand Value', dataType: 'I32', access: 'RO', description: '速度需求值' },
-  { index: 0x606C, name: 'Velocity Actual Value', dataType: 'I32', access: 'RO', description: '实际速度' },
+  { index: 0x606B, name: 'Velocity Demand Value', dataType: 'I32', access: 'RO', description: 'Velocity demand value' },
+  { index: 0x606C, name: 'Velocity Actual Value', dataType: 'I32', access: 'RO', description: 'Actual velocity' },
   { index: 0x606D, name: 'Velocity Window', dataType: 'U16', access: 'RW' },
   { index: 0x606E, name: 'Velocity Window Time', dataType: 'U16', access: 'RW' },
   { index: 0x606F, name: 'Velocity Threshold', dataType: 'U16', access: 'RW' },
   { index: 0x6070, name: 'Velocity Threshold Time', dataType: 'U16', access: 'RW' },
   
   // 扭矩相关
-  { index: 0x6071, name: 'Target Torque', dataType: 'I16', access: 'RW', description: '目标扭矩' },
+  { index: 0x6071, name: 'Target Torque', dataType: 'I16', access: 'RW', description: 'Target torque' },
   { index: 0x6072, name: 'Max Torque', dataType: 'U16', access: 'RW' },
   { index: 0x6073, name: 'Max Current', dataType: 'U16', access: 'RW' },
   { index: 0x6074, name: 'Torque Demand Value', dataType: 'I16', access: 'RO' },
   { index: 0x6075, name: 'Motor Rated Current', dataType: 'U32', access: 'RW' },
   { index: 0x6076, name: 'Motor Rated Torque', dataType: 'U32', access: 'RW' },
-  { index: 0x6077, name: 'Torque Actual Value', dataType: 'I16', access: 'RO', description: '实际扭矩' },
+  { index: 0x6077, name: 'Torque Actual Value', dataType: 'I16', access: 'RO', description: 'Actual torque' },
   { index: 0x6078, name: 'Current Actual Value', dataType: 'I16', access: 'RO' },
   { index: 0x6079, name: 'DC Link Circuit Voltage', dataType: 'U32', access: 'RO' },
   
   // 目标值
-  { index: 0x607A, name: 'Target Position', dataType: 'I32', access: 'RW', description: '目标位置' },
+  { index: 0x607A, name: 'Target Position', dataType: 'I32', access: 'RW', description: 'Target position' },
   { index: 0x607B, name: 'Position Range Limit', dataType: 'I32[]', access: 'RW' },
   { index: 0x607C, name: 'Home Offset', dataType: 'I32', access: 'RW' },
   { index: 0x607D, name: 'Software Position Limit', dataType: 'I32[]', access: 'RW' },
@@ -54,15 +54,15 @@ export const CiA402Objects: ObjectDictionaryEntry[] = [
   // 速度设置
   { index: 0x607F, name: 'Max Profile Velocity', dataType: 'U32', access: 'RW' },
   { index: 0x6080, name: 'Max Motor Speed', dataType: 'U32', access: 'RW' },
-  { index: 0x6081, name: 'Profile Velocity', dataType: 'U32', access: 'RW', description: '轮廓速度' },
+  { index: 0x6081, name: 'Profile Velocity', dataType: 'U32', access: 'RW', description: 'Profile velocity' },
   { index: 0x6082, name: 'End Velocity', dataType: 'U32', access: 'RW' },
-  { index: 0x6083, name: 'Profile Acceleration', dataType: 'U32', access: 'RW', description: '轮廓加速度' },
-  { index: 0x6084, name: 'Profile Deceleration', dataType: 'U32', access: 'RW', description: '轮廓减速度' },
+  { index: 0x6083, name: 'Profile Acceleration', dataType: 'U32', access: 'RW', description: 'Profile acceleration' },
+  { index: 0x6084, name: 'Profile Deceleration', dataType: 'U32', access: 'RW', description: 'Profile deceleration' },
   { index: 0x6085, name: 'Quick Stop Deceleration', dataType: 'U32', access: 'RW' },
   { index: 0x6086, name: 'Motion Profile Type', dataType: 'I16', access: 'RW' },
   
   // 回原点
-  { index: 0x6098, name: 'Homing Method', dataType: 'I8', access: 'RW', description: '回原点方法' },
+  { index: 0x6098, name: 'Homing Method', dataType: 'I8', access: 'RW', description: 'Homing method' },
   { index: 0x6099, name: 'Homing Speeds', dataType: 'U32[]', access: 'RW' },
   { index: 0x609A, name: 'Homing Acceleration', dataType: 'U32', access: 'RW' },
   
@@ -73,14 +73,14 @@ export const CiA402Objects: ObjectDictionaryEntry[] = [
   { index: 0x6092, name: 'Feed Constant', dataType: 'U32[]', access: 'RW' },
   
   // 目标速度（速度模式）
-  { index: 0x60FF, name: 'Target Velocity', dataType: 'I32', access: 'RW', description: '目标速度' },
+  { index: 0x60FF, name: 'Target Velocity', dataType: 'I32', access: 'RW', description: 'Target velocity' },
   
   // 支持的驱动模式
   { index: 0x6502, name: 'Supported Drive Modes', dataType: 'U32', access: 'RO' },
   
   // 数字输入输出
-  { index: 0x60FD, name: 'Digital Inputs', dataType: 'U32', access: 'RO', description: '数字输入' },
-  { index: 0x60FE, name: 'Digital Outputs', dataType: 'U32[]', access: 'RW', description: '数字输出' },
+  { index: 0x60FD, name: 'Digital Inputs', dataType: 'U32', access: 'RO', description: 'Digital inputs' },
+  { index: 0x60FE, name: 'Digital Outputs', dataType: 'U32[]', access: 'RW', description: 'Digital outputs' },
 ]
 
 /** 运行模式定义 */

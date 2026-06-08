@@ -456,6 +456,17 @@ probe/add 请求：
 { "mcuUri": "COM3" }
 ```
 
+probe/add/node-info 响应除 `version`、`layout` 外，还包含 `abi`（MCU 内置 DIVER 运行时的程序二进制 ABI，SemVer `X.Y.Z`）：
+
+```json
+{
+  "ok": true,
+  "abi": { "hasDiverRuntime": true, "major": 2, "minor": 0, "patch": 0, "semVer": "2.0.0" }
+}
+```
+
+`hasDiverRuntime=false`（或无 `abi`）表示较旧、不上报 ABI 的固件。主版本不匹配的程序无法在该 MCU 运行，详见 [07-node-management.md](07-node-management.md) 的「DIVER ABI 版本」。
+
 configure 请求：
 
 ```json

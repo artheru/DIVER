@@ -35,7 +35,7 @@
           <button 
             class="wiretap-btn" 
             :class="{ active: getWireTapTx(idx) }"
-            :title="getWireTapTx(idx) ? '停止监听 TX' : '监听 TX 数据'"
+            :title="getWireTapTx(idx) ? 'Stop monitoring TX' : 'Monitor TX data'"
             :disabled="!canToggleWireTap"
             @click.stop="toggleWireTap(idx, 'tx', !getWireTapTx(idx))"
           >
@@ -49,7 +49,7 @@
           <button 
             class="wiretap-btn" 
             :class="{ active: getWireTapRx(idx) }"
-            :title="getWireTapRx(idx) ? '停止监听 RX' : '监听 RX 数据'"
+            :title="getWireTapRx(idx) ? 'Stop monitoring RX' : 'Monitor RX data'"
             :disabled="!canToggleWireTap"
             @click.stop="toggleWireTap(idx, 'rx', !getWireTapRx(idx))"
           >

@@ -164,7 +164,7 @@
               </div>
 
               <div v-if="remoteChanged" class="head-warning">
-                <span>后端已有新的保存版本。</span>
+                <span>The backend already has a newer saved version.</span>
                 <button @click="showHistoryPanel = true">View Diff</button>
                 <button @click="reloadLatest">Reload Latest</button>
                 <button @click="historyStore.markCurrentHeadKnown()">Dismiss</button>
@@ -295,20 +295,21 @@
       >
         <div class="agent-dialog">
           <section class="agent-section">
-            <h4>Agent编程</h4>
+            <h4>Agent Programming</h4>
             <p>
-              外部 Agent 应优先读取 Markdown 文档入口，再通过 Host HTTP API 完成文件同步、提交、
-              编译、添加/配置节点、编程、启动、变量读取、日志和错误监控。
+              External agents should first read the Markdown documentation entry point, then use the
+              Host HTTP API to perform file sync, commit, build, add/configure nodes, program, start,
+              read variables, and monitor logs and errors.
             </p>
           </section>
 
           <section class="agent-section">
-            <h4>对人类接口文档地址</h4>
+            <h4>Human-Facing API Docs URL</h4>
             <a :href="humanDocsUrl" target="_blank" rel="noreferrer">{{ humanDocsUrl }}</a>
           </section>
 
           <section class="agent-section">
-            <h4>Agent文档地址和建议Prompt</h4>
+            <h4>Agent Docs URL & Suggested Prompt</h4>
             <a :href="agentDocsUrl" target="_blank" rel="noreferrer">{{ agentDocsUrl }}</a>
             <pre class="agent-prompt">{{ agentSuggestedPrompt }}</pre>
           </section>
@@ -348,6 +349,14 @@
                 <span>Commit</span><code>{{ formatVersionValue(aboutInfo?.backend.commit) }}</code>
                 <span>Build</span><code>{{ formatDateTime(aboutInfo?.backend.buildTime) }}</code>
                 <span>Layout</span><code>{{ formatVersionValue(aboutInfo?.backend.layout) }}</code>
+              </div>
+            </section>
+
+            <section class="about-section">
+              <h4>DIVER Compiler</h4>
+              <div class="about-grid">
+                <span>Program ABI</span><code>{{ aboutInfo?.diverAbi ? `v${aboutInfo.diverAbi.semVer}` : '-' }}</code>
+                <span>Magic</span><code>{{ aboutInfo?.diverAbi ? formatAbiMagic(aboutInfo.diverAbi.magic) : '-' }}</code>
               </div>
             </section>
 
@@ -697,7 +706,7 @@ async function handleSaveTab(tabId: string) {
     }
   } catch (error) {
     const msg = String(error)
-    if (msg.includes('Remote HEAD changed') && confirm('后端已有新的保存版本。是否覆盖保存当前内容？')) {
+    if (msg.includes('Remote HEAD changed') && confirm('The backend already has a newer saved version. Overwrite and save the current content?')) {
       try {
         const success = await filesStore.saveTab(tabId, { force: true })
         if (success) uiStore.success('Saved', 'File saved with overwrite')
@@ -940,6 +949,12 @@ function formatVersionValue(value?: string | null) {
 
 function formatDateTime(value?: string | null) {
   return value ? new Date(value).toLocaleString() : '-'
+}
+
+function formatAbiMagic(magic?: number | null) {
+  if (magic === undefined || magic === null) return '-'
+  // 'DIVR' (0x52564944) -> show as hex; >>>0 keeps it unsigned.
+  return `0x${(magic >>> 0).toString(16).toUpperCase().padStart(8, '0')}`
 }
 
 /**

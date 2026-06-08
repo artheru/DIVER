@@ -2,6 +2,53 @@
 
 ## 最近一次支持
 
+- 时间：2026-06-08 22:10 UTC+8
+- 事项：重新发布 Host 新版本，并生成新的 `CORAL-NODE-V2.1` UPG 供实际硬件测试。
+- 用户要求：
+  - 另一个 Agent 已解决 NPE。
+  - 重新打包 Host 新版本。
+  - 打包新的 2.1 UPG。
+- 已执行：
+  - 检查没有 `CoralinkerHost`、`CoralinkerSimNodeHost`、`scons` 相关进程占用。
+  - 第一次执行 Host 发布失败：
+    - 原因：之前本地验证时手动复制了 `3rd/CoralinkerSimNodeHost/bin/Release/net8.0/runtimes`。
+    - `dotnet publish` 同时收集 `CoralinkerSimNodeHost/build/runtimes` 和 `bin/Release/.../runtimes`，触发 `NETSDK1152` 重复发布文件。
+    - 已删除该临时验证目录后重新发布。
+  - 成功执行：
+    - `powershell -ExecutionPolicy Bypass -File .\publish-host.ps1`
+    - 工作目录：`3rd/CoralinkerHost`
+  - 成功执行：
+    - `scons BUILD_MCU=1 PDN=CORAL-NODE-V2.1 ENABLE_DIVER_RUNTIME=1 -j 12 debug=1 upg`
+    - 工作目录：`MCUSerialBridge`
+- 输出：
+  - Host 发布包：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_66025b5_20260608-220511`
+  - UPG：
+    - `MCUSerialBridge/build/MCUSerialBridge_CORAL-NODE-V2.1_66025b5__20260608_220615.upg`
+- 验证：
+  - Host 包：
+    - `.\start-host.ps1 -CheckOnly` 通过。
+    - 根目录包含 `README.md`、`publish-info.json`、`start-host.*`、`app/`、`setup/`、`meta/`。
+    - `app/res/compiler/nuget-packages` 下 `.nuspec` 数量为 22。
+    - `app/simnode/runtimes` 下包含 3 个 SimNode native runtime 产物：
+      - Windows x64
+      - Linux x64
+      - Linux ARM64
+  - UPG：
+    - `BUILD_TIME = 2026-06-08 22:06:15`
+    - `COMMIT = 66025b5`
+    - `LENGTH = 222768`
+    - `ADDRESS = 0x00010000`
+    - `CRC32 CODE = 0x4ABB2EE2`
+    - 文件大小：`223056` bytes
+    - SHA256：`1B34B0E4D122F4793107A62318C2BF1CE78CD1CD018C45566732E5CFB73BF4C0`
+- 注意：
+  - Host 发布和 MCU 构建仍有既有 warning：
+    - Vite chunk size / dynamic import warning。
+    - dotnet nullable / Windows API platform warning。
+    - ARM linker `_read/_write/...`、RWX segment warning。
+  - 以上 warning 未阻塞产物生成或完整性检查。
+
 - 时间：2026-06-08 20:20 UTC+8
 - 事项：修复 Virtual SimNode 遇到 MCU runtime `Null reference` 时网页不弹 fatal error、节点静默停止的问题。
 - 问题：

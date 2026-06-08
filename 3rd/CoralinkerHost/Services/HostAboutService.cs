@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
+using MCUSerialBridgeCLR;
 
 namespace CoralinkerHost.Services;
 
@@ -57,8 +58,27 @@ public sealed class HostAboutService
             Layout: _paths.RunLayout.ToString()
         );
 
-        _cached = new HostAboutSnapshot(backend, frontend);
+        _cached = new HostAboutSnapshot(backend, frontend, BuildDiverAbi());
         return _cached;
+    }
+
+    /// <summary>
+    /// 本 Host 内置编译器 / 运行时所对应的 DIVER 程序二进制 ABI（SemVer X.Y.Z）。
+    /// 取自 <see cref="AbiInfo.CurrentAbiVersion"/>，须与 MCURuntime/mcu_runtime.h 同步。
+    /// </summary>
+    private static DiverAbiInfo BuildDiverAbi()
+    {
+        var ver = AbiInfo.CurrentAbiVersion;
+        int major = (int)((ver >> 16) & 0xFF);
+        int minor = (int)((ver >> 8) & 0xFF);
+        int patch = (int)(ver & 0xFF);
+        return new DiverAbiInfo(
+            Magic: AbiInfo.DiverMagic,
+            AbiVersion: ver,
+            Major: major,
+            Minor: minor,
+            Patch: patch,
+            SemVer: $"{major}.{minor}.{patch}");
     }
 
     private PublishInfoDocument? TryReadPublishInfo()
@@ -235,4 +255,16 @@ public sealed record HostVersionInfo(
     string? Version,
     string? Layout);
 
-public sealed record HostAboutSnapshot(HostVersionInfo Backend, HostVersionInfo Frontend);
+public sealed record HostAboutSnapshot(
+    HostVersionInfo Backend,
+    HostVersionInfo Frontend,
+    DiverAbiInfo DiverAbi);
+
+/// <summary>Host 内置编译器/运行时的 DIVER 程序二进制 ABI（SemVer X.Y.Z）</summary>
+public sealed record DiverAbiInfo(
+    uint Magic,
+    uint AbiVersion,
+    int Major,
+    int Minor,
+    int Patch,
+    string SemVer);

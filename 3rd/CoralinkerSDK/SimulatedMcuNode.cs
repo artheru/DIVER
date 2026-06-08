@@ -33,6 +33,7 @@ internal sealed class SimulatedMcuNode : IRuntimeNode
         McuUri = mcuUri;
         Version = CreateVersionInfo();
         Layout = CreateLayoutInfo();
+        Abi = CreateAbiInfo();
         PortConfigs = CreateDefaultPortConfigs();
         State = CreateState(MCURunState.Idle, configured: false, programmed: false);
         Stats = CreateStats();
@@ -44,6 +45,7 @@ internal sealed class SimulatedMcuNode : IRuntimeNode
     public bool IsRunning { get; private set; }
     public VersionInfo? Version { get; private set; }
     public LayoutInfo? Layout { get; private set; }
+    public AbiInfo? Abi { get; private set; }
     public MCUState? State { get; private set; }
     public RuntimeStats? Stats { get; private set; }
     public string? LastError { get; private set; }
@@ -64,6 +66,18 @@ internal sealed class SimulatedMcuNode : IRuntimeNode
             GitTag = "sim",
             GitCommit = "local",
             BuildTime = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss")
+        };
+    }
+
+    /// <summary>
+    /// 模拟节点上报的 DIVER 运行时 ABI（与 MCURuntime/mcu_runtime.h 同步）。
+    /// </summary>
+    public static AbiInfo CreateAbiInfo()
+    {
+        return new AbiInfo
+        {
+            Magic = AbiInfo.DiverMagic,
+            AbiVersion = AbiInfo.CurrentAbiVersion
         };
     }
 

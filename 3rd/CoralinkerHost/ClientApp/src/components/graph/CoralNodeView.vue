@@ -90,6 +90,7 @@
             size="small"
             placeholder="Select Logic"
             class="logic-select"
+            clearable
             @update:value="updateLogicName"
           />
           <span v-else class="config-value">{{ data.logicName || 'Not Set' }}</span>
@@ -154,11 +155,11 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { NSelect, useDialog } from 'naive-ui'
+import { NSelect, useDialog, useMessage } from 'naive-ui'
 import { useRuntimeStore, useFilesStore, useProjectStore } from '@/stores'
 import { storeToRefs } from 'pinia'
 import * as deviceApi from '@/api/device'
-import { getLogicList, programNode, configureNode, removeNode, probeNode } from '@/api/device'
+import { getLogicList, programNode, unprogramNode, configureNode, removeNode, probeNode } from '@/api/device'
 import type { PortConfig, RuntimeStats, LogicInfo, LayoutInfo, VersionInfo } from '@/types'
 import PortConfigEdit from './PortConfigEdit.vue'
 import PortView from './PortView.vue'
@@ -188,10 +189,11 @@ const props = defineProps<{
 
 // vue-flow hook
 import { useVueFlow } from '@vue-flow/core'
-const { updateNodeData, removeNodes } = useVueFlow()
+const { updateNodeData, removeNodes, getNodes } = useVueFlow()
 
-// Dialog
+// Dialog / Message
 const dialog = useDialog()
+const message = useMessage()
 
 // Runtime store
 const runtimeStore = useRuntimeStore()
@@ -324,9 +326,28 @@ const hasPortsToShow = computed(() => portConfigs.value.length > 0)
 // 是否有 IO
 const hasIO = computed(() => digitalInputCount.value > 0 || digitalOutputCount.value > 0)
 
-// Logic 下拉选项
-const logicOptions = computed(() => 
-  logicList.value.map(l => ({ label: l.name, value: l.name }))
+// 其它节点已占用的 Logic -> 该节点名（一个 Logic 只能编程到一个节点，否则 LowerIO 字段冲突）
+const usedLogicsByOthers = computed(() => {
+  const map = new Map<string, string>()
+  for (const n of getNodes.value) {
+    if (n.id === props.id) continue
+    if (n.type !== 'coral-node') continue
+    const ln = ((n.data?.logicName as string) || '').trim()
+    if (ln) map.set(ln, (n.data?.nodeName as string) || n.id)
+  }
+  return map
+})
+
+// Logic 下拉选项：已被其它节点占用的禁用并标注，避免选了却无法 Program 且无提示
+const logicOptions = computed(() =>
+  logicList.value.map(l => {
+    const usedBy = usedLogicsByOthers.value.get(l.name)
+    return {
+      label: usedBy ? `${l.name} (in use by ${usedBy})` : l.name,
+      value: l.name,
+      disabled: !!usedBy
+    }
+  })
 )
 
 // 获取该节点的 LowerIO 变量
@@ -456,19 +477,38 @@ async function updateNodeName() {
   }
 }
 
-async function updateLogicName(newLogic: string) {
-  console.log(`[CoralNode] updateLogicName called: uuid=${props.id}, logicName=${newLogic}`)
-  
+async function updateLogicName(newLogic: string | null) {
+  const prevLogic = props.data.logicName || ''
+  const logic = (newLogic || '').trim()
+  console.log(`[CoralNode] updateLogicName called: uuid=${props.id}, logicName='${logic}' (prev='${prevLogic}')`)
+
+  // 取消选择（回退到空状态）：清除已编程逻辑并释放占用的 Logic
+  if (!logic) {
+    updateNodeData(props.id, { logicName: '' })
+    try {
+      await unprogramNode(props.id)
+      updateNodeData(props.id, { isProgrammed: false, buildInfo: null })
+      await runtimeStore.refreshVariables()
+      await runtimeStore.refreshFieldMetas()
+      await projectStore.saveProject({ silent: true })
+      console.log(`[CoralNode] Cleared logic on ${props.id} (released)`)
+    } catch (error) {
+      console.error(`[CoralNode] Error clearing logic on ${props.id}:`, error)
+      message.error(`Failed to clear logic: ${String(error)}`)
+    }
+    return
+  }
+
   // 先更新本地 UI
-  updateNodeData(props.id, { logicName: newLogic })
-  
+  updateNodeData(props.id, { logicName: logic })
+
   // 调用后端 API 编程节点
-  console.log(`[CoralNode] Calling programNode API: uuid=${props.id}, logicName=${newLogic}`)
+  console.log(`[CoralNode] Calling programNode API: uuid=${props.id}, logicName=${logic}`)
   try {
-    const result = await programNode(props.id, newLogic)
+    const result = await programNode(props.id, logic)
     console.log(`[CoralNode] programNode API response:`, JSON.stringify(result))
     if (result.ok) {
-      console.log(`[CoralNode] Programmed ${props.id} with ${newLogic}, size: ${result.programSize}`)
+      console.log(`[CoralNode] Programmed ${props.id} with ${logic}, size: ${result.programSize}`)
       // 更新 isProgrammed 状态
       const latest = await deviceApi.getNodeInfo(props.id)
       updateNodeData(props.id, { isProgrammed: true, buildInfo: latest.node?.buildInfo || null })
@@ -479,12 +519,17 @@ async function updateLogicName(newLogic: string) {
       await projectStore.saveProject({ silent: true })
     } else {
       console.error(`[CoralNode] Failed to program ${props.id}:`, result)
-      // 如果失败，清除 isProgrammed 状态
-      updateNodeData(props.id, { isProgrammed: false })
+      // 如果失败，回退选择并清除 isProgrammed 状态
+      localLogicName.value = prevLogic
+      updateNodeData(props.id, { logicName: prevLogic, isProgrammed: false })
     }
   } catch (error) {
+    // 后端在冲突/产物缺失等情况返回 4xx，axios 拦截器已把 error 字段转成 Error.message
     console.error(`[CoralNode] Error programming ${props.id}:`, error)
-    updateNodeData(props.id, { isProgrammed: false })
+    message.error(String(error))
+    // 回退选择，避免界面显示一个其实没生效的 Logic
+    localLogicName.value = prevLogic
+    updateNodeData(props.id, { logicName: prevLogic, isProgrammed: false })
   }
 }
 

@@ -8,7 +8,26 @@ namespace CoralinkerSDK;
 #region Data Transfer Objects
 
 /// <summary>节点探测结果</summary>
-public record NodeProbeResult(VersionInfo Version, LayoutInfo Layout);
+public record NodeProbeResult(VersionInfo Version, LayoutInfo Layout, AbiInfo? Abi);
+
+/// <summary>添加节点的结果状态</summary>
+public enum AddNodeStatus
+{
+    /// <summary>成功添加</summary>
+    Ok,
+    /// <summary>探测失败（无法与 MCU 通信）</summary>
+    ProbeFailed,
+    /// <summary>该 MCU 已添加（相同 mcuUri 已存在）</summary>
+    AlreadyExists,
+    /// <summary>固件 DIVER ABI 太旧/不兼容，拒绝添加</summary>
+    IncompatibleFirmware
+}
+
+/// <summary>添加节点的结果（带原因，便于上位机给出明确提示）</summary>
+public record AddNodeOutcome(AddNodeStatus Status, string? Uuid, string? Message)
+{
+    public bool Success => Status == AddNodeStatus.Ok && Uuid != null;
+}
 
 /// <summary>节点设置（可修改部分）</summary>
 public record NodeSettings
@@ -60,7 +79,19 @@ public record NodeFullInfo(
     string? LogicName, // 程序名称，用于前端匹配
     CartFieldSnapshot[] CartFields,
     JsonObject? BuildInfo,
-    JsonObject? ExtraInfo
+    JsonObject? ExtraInfo,
+    AbiInfoSnapshot? Abi = null
+);
+
+/// <summary>DIVER 运行时 ABI 快照（SemVer X.Y.Z）</summary>
+public record AbiInfoSnapshot(
+    uint Magic,
+    uint AbiVersion,
+    int Major,
+    int Minor,
+    int Patch,
+    string SemVer,
+    bool HasDiverRuntime
 );
 
 /// <summary>版本信息快照</summary>
@@ -188,6 +219,8 @@ internal class NodeEntry : IDisposable
     public string McuUri { get; set; } = "";
     public VersionInfo? Version { get; set; }
     public LayoutInfo? Layout { get; set; }
+    /// <summary>MCU 内置 DIVER 运行时 ABI（旧固件/未上报时为 null）</summary>
+    public AbiInfo? Abi { get; set; }
     /// <summary>导入时恢复的 Layout 快照（当 Layout 为 null 时使用）</summary>
     public LayoutInfoSnapshot? ImportedLayoutSnapshot { get; set; }
 
@@ -457,7 +490,8 @@ public sealed class DIVERSession : IDisposable
         {
             return new NodeProbeResult(
                 SimulatedMcuNode.CreateVersionInfo(),
-                SimulatedMcuNode.CreateLayoutInfo()
+                SimulatedMcuNode.CreateLayoutInfo(),
+                SimulatedMcuNode.CreateAbiInfo()
             );
         }
 
@@ -500,7 +534,19 @@ public sealed class DIVERSession : IDisposable
                 layout = default;
             }
 
-            return new NodeProbeResult(version, layout);
+            // Get DIVER runtime ABI (旧固件不支持 CommandGetAbi -> Proto_UnknownCommand，留空即可)
+            AbiInfo? abi = null;
+            err = bridge.GetAbi(out var abiVal, 500);
+            if (err == MCUSerialBridgeError.OK)
+            {
+                abi = abiVal;
+            }
+            else
+            {
+                Console.WriteLine($"[DIVERSession] Probe GetAbi failed: {err.ToDescription()} - legacy firmware without ABI report");
+            }
+
+            return new NodeProbeResult(version, layout, abi);
         }
         catch (Exception ex)
         {
@@ -518,7 +564,7 @@ public sealed class DIVERSession : IDisposable
     /// </summary>
     /// <param name="mcuUri">MCU 连接地址</param>
     /// <returns>生成的 UUID 或 null</returns>
-    public string? AddNode(string mcuUri)
+    public AddNodeOutcome AddNode(string mcuUri)
     {
         EnsureIdle("AddNode");
 
@@ -530,14 +576,30 @@ public sealed class DIVERSession : IDisposable
         )
         {
             Console.WriteLine($"[DIVERSession] Node with mcuUri '{mcuUri}' already exists");
-            return null;
+            return new AddNodeOutcome(
+                AddNodeStatus.AlreadyExists,
+                null,
+                "This node is already added (a node with the same MCU address exists). No need to add it again."
+            );
         }
 
         // Probe
         var probeResult = ProbeNode(mcuUri);
         if (probeResult == null)
         {
-            return null;
+            return new AddNodeOutcome(
+                AddNodeStatus.ProbeFailed,
+                null,
+                "Probe failed: cannot communicate with the MCU. Check the connection, power, wiring, and whether another process owns the device."
+            );
+        }
+
+        // ABI 闸门：拒绝旧/不兼容固件（新版程序下发到旧 runtime 会跑飞）。
+        var abiError = CheckFirmwareAbi(probeResult.Abi);
+        if (abiError != null)
+        {
+            Console.WriteLine($"[DIVERSession] Refuse to add '{mcuUri}': {abiError}");
+            return new AddNodeOutcome(AddNodeStatus.IncompatibleFirmware, null, abiError);
         }
 
         // 生成 UUID 和名称
@@ -555,13 +617,39 @@ public sealed class DIVERSession : IDisposable
             NodeName = nodeName,
             Version = probeResult.Version,
             Layout = probeResult.Layout,
+            Abi = probeResult.Abi,
             PortConfigs = portConfigs,
         };
 
         _nodes[uuid] = entry;
         Console.WriteLine($"[DIVERSession] Added node {nodeName} ({uuid}) at {mcuUri}");
 
-        return uuid;
+        return new AddNodeOutcome(AddNodeStatus.Ok, uuid, null);
+    }
+
+    /// <summary>
+    /// 校验 MCU 上报的 DIVER 运行时 ABI 是否能运行本机编译器产出的程序。
+    /// 返回 null 表示兼容；否则返回拒绝原因（用于阻止添加旧/不兼容固件）。
+    /// 规则与 mcu_runtime.c 一致：magic 相同、major 相同、runtime.minor >= program.minor。
+    /// </summary>
+    private static string? CheckFirmwareAbi(AbiInfo? abi)
+    {
+        if (abi == null || !abi.Value.HasDiverRuntime)
+        {
+            return "Firmware does not report a DIVER runtime ABI (legacy firmware) and cannot run new programs. Please upgrade the firmware before adding this node.";
+        }
+
+        var a = abi.Value;
+        int hostMajor = (int)((AbiInfo.CurrentAbiVersion >> 16) & 0xFF);
+        int hostMinor = (int)((AbiInfo.CurrentAbiVersion >> 8) & 0xFF);
+        int hostPatch = (int)(AbiInfo.CurrentAbiVersion & 0xFF);
+
+        if (a.Major != hostMajor || a.Minor < hostMinor)
+        {
+            return $"Firmware DIVER ABI v{a.SemVer} is incompatible with the host compiler v{hostMajor}.{hostMinor}.{hostPatch} (firmware too old). Please upgrade the firmware before adding this node.";
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -582,6 +670,7 @@ public sealed class DIVERSession : IDisposable
             NodeName = displayName,
             Version = SimulatedMcuNode.CreateVersionInfo(),
             Layout = SimulatedMcuNode.CreateLayoutInfo(),
+            Abi = SimulatedMcuNode.CreateAbiInfo(),
             PortConfigs = SimulatedMcuNode.CreateDefaultPortConfigs()
         };
 
@@ -871,6 +960,30 @@ public sealed class DIVERSession : IDisposable
     }
 
     /// <summary>
+    /// 清除节点已编程的逻辑，回到「未编程（空）」状态，并释放其占用的 Logic，
+    /// 使该 Logic 可被其它节点选用。
+    /// </summary>
+    public bool UnprogramNode(string uuid)
+    {
+        EnsureIdle("UnprogramNode");
+
+        if (!_nodes.TryGetValue(uuid, out var entry))
+        {
+            return false;
+        }
+
+        entry.ProgramBytes = Array.Empty<byte>();
+        entry.MetaJson = null;
+        entry.LogicName = null;
+        entry.BuildInfo = null;
+        entry.CartFields = Array.Empty<CartFieldInfo>();
+        PruneUndeclaredVariables();
+
+        Console.WriteLine($"[DIVERSession] Unprogrammed node {entry.NodeName} (logic released)");
+        return true;
+    }
+
+    /// <summary>
     /// 获取单个节点状态和统计
     /// </summary>
     public NodeStateSnapshot? GetNodeState(string uuid)
@@ -1145,6 +1258,7 @@ public sealed class DIVERSession : IDisposable
 
             entry.Version = handle.Version;
             entry.Layout = handle.Layout;
+            entry.Abi = handle.Abi;
 
             // Configure
             if (!handle.Configure())
@@ -2547,7 +2661,24 @@ public sealed class DIVERSession : IDisposable
                 ))
                 .ToArray(),
             entry.BuildInfo,
-            entry.ExtraInfo
+            entry.ExtraInfo,
+            BuildAbiSnapshot(entry.Abi)
+        );
+    }
+
+    private static AbiInfoSnapshot? BuildAbiSnapshot(AbiInfo? abi)
+    {
+        if (abi == null)
+            return null;
+        var a = abi.Value;
+        return new AbiInfoSnapshot(
+            a.Magic,
+            a.AbiVersion,
+            a.Major,
+            a.Minor,
+            a.Patch,
+            a.SemVer,
+            a.HasDiverRuntime
         );
     }
 

@@ -4753,6 +4753,91 @@
   - SimNode runtime fatal 已与真实 MCU fatal 路径更一致：用户弹窗显示 runtime 错误本身，并保留 IL Offset 供前端跳源代码。
   - 进程退出监控仍保留作为 native 崩溃或 helper 异常退出的兜底。
 
+## 2026-06-08 22:10 UTC+8 — 生成 Host 发布包和 CORAL-NODE-V2.1 UPG
+
+- 用户需求：
+  - 另一个 Agent 已解决 NPE。
+  - 重新打包 Host 新版本。
+  - 打包一个新的 `CORAL-NODE-V2.1` UPG，用于实际硬件测试。
+- 执行前检查：
+  - 检查 `CoralinkerHost`、`CoralinkerSimNodeHost`、`scons` 相关进程。
+  - 未发现占用进程。
+  - 确认目录存在：
+    - `3rd/CoralinkerHost`
+    - `MCUSerialBridge`
+- Host 发布：
+  - 首次执行：
+    - `powershell -ExecutionPolicy Bypass -File ".\publish-host.ps1"`
+    - 工作目录：`3rd/CoralinkerHost`
+  - 结果：
+    - 失败于 `NETSDK1152`。
+  - 原因：
+    - 之前本地 SimNode fatal 验证时，手动把 `3rd/CoralinkerSimNodeHost/build/runtimes` 同步到了 `3rd/CoralinkerSimNodeHost/bin/Release/net8.0/runtimes`。
+    - `dotnet publish` 同时从 `build/runtimes` 和 `bin/Release/.../runtimes` 收集相同相对路径的 native runtime：
+      - `sim_node_runtime.dll`
+      - `libsim_node_runtime.so`
+    - 因此触发重复发布文件错误。
+  - 处理：
+    - 删除临时验证目录：
+      - `3rd/CoralinkerSimNodeHost/bin/Release/net8.0/runtimes`
+  - 第二次执行：
+    - `powershell -ExecutionPolicy Bypass -File ".\publish-host.ps1"`
+  - 成功输出：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_66025b5_20260608-220511`
+  - 发布信息：
+    - `Commit: 66025b5`
+    - `Tag: 66025b5-dirty`
+    - `Publish time: 2026-06-08T22:05:11.5081610+08:00`
+    - `Skip native build: False`
+- Host 包验证：
+  - 执行：
+    - `powershell -ExecutionPolicy Bypass -File ".\start-host.ps1" -CheckOnly`
+    - 工作目录：`3rd/CoralinkerHost/Publish/CoralinkerHost_66025b5_20260608-220511`
+  - 结果：
+    - `.NET runtime and SDK` 检查通过。
+    - `Git` 检查通过。
+    - required package files 检查通过。
+    - package integrity 检查通过。
+    - 输出 `Startup checks passed.`
+  - 包内容：
+    - 根目录：`README.md`、`publish-info.json`、`start-host.bat`、`start-host.ps1`、`start-host.sh`、`app/`、`setup/`、`meta/`
+    - `publish-info.json` 大小：4568 bytes。
+    - `meta/package-manifest.sha256` 大小：128130 bytes。
+    - `app/CoralinkerHost.dll` 大小：470016 bytes。
+    - `app/res/compiler/nuget-packages` 下 `.nuspec` 数量：22。
+    - `app/simnode/runtimes` 中 SimNode native runtime 数量：3（win-x64、linux-x64、linux-arm64）。
+- V2.1 UPG 构建：
+  - 执行：
+    - `scons BUILD_MCU=1 PDN=CORAL-NODE-V2.1 ENABLE_DIVER_RUNTIME=1 -j 12 debug=1 upg`
+    - 工作目录：`MCUSerialBridge`
+  - 结果：
+    - 构建成功。
+    - `firmware.elf/.hex/.bin` 重新生成。
+    - UPG 输出：
+      - `MCUSerialBridge/build/MCUSerialBridge_CORAL-NODE-V2.1_66025b5__20260608_220615.upg`
+  - 构建元数据：
+    - `PDN = CORAL-NODE-V2.1`
+    - `COMMIT = 66025b5`
+    - `BUILD_TIME = 2026-06-08 22:06:15`
+    - `LENGTH = 222768`
+    - `ADDRESS = 0x00010000`
+    - `CRC32 CODE = 0x4ABB2EE2`
+  - 固件尺寸：
+    - `firmware.elf`: `text=220548`, `data=2204`, `bss=114196`, `dec=336948`, `hex=52434`
+    - `firmware.hex`: `222752` bytes reported by `arm-none-eabi-size`
+  - UPG 文件：
+    - 文件大小：223056 bytes。
+    - LastWriteTime：2026-06-08 22:06:15。
+    - SHA256：`1B34B0E4D122F4793107A62318C2BF1CE78CD1CD018C45566732E5CFB73BF4C0`
+- 注意：
+  - Host 发布过程中仍有既有 Vite warning：
+    - SignalR pure annotation comment。
+    - `device.ts` dynamic/static import chunk warning。
+    - chunk size warning。
+  - dotnet build 仍有既有 nullable/platform warning。
+  - MCU 链接仍有既有 `_close/_fstat/_getpid/_isatty/_kill/_lseek/_read/_write` stub warning 和 RWX segment warning。
+  - 以上 warning 均未阻塞发布、完整性检查或 UPG 生成。
+
 ---
 
 ## 2026-06-08 20:29 — crash_code.cs `Null reference` 根因定位
@@ -4771,3 +4856,271 @@
   - 方案 A：去掉 `static`，把 `Snapshots` 改成实例字段，让初始化落到 `.ctor`。
   - 方案 B：不用查表，`Operation` 内直接按 `step` 拼出 4 字节 snapshot。
 - 本轮仅做根因分析与日志记录，未改用户逻辑代码、runtime、编译器。
+
+---
+
+## 2026-06-08 20:55 — 实现 `.cctor`（静态构造函数）支持，彻底修复静态字段初始化器
+
+### 接下来要做
+- （可选）真机 MCU 固件（MCUSerialBridge，`ENABLE_DIVER_RUNTIME=1`）重新编译并下发，使硬件端也获得 `.cctor` 能力（本轮已改的是共享的 `MCURuntime/mcu_runtime.c`，固件与 SimNode 都编它）。
+- （可选）把 `ai-deck/crash_code.cs` 原样跑一遍真机/SimNode 端到端复测。
+
+### 做了哪些事
+- 不改用户写法，直接在编译器 + runtime 实现 `.cctor`，让 `private static readonly byte[][] X = new byte[][]{...}` 这种静态字段初始化器在 MCU 上真正执行。
+- 编译器 `DiverCompiler/Processor.cs`：
+  - 在 `isRoot` 处理完实例 `.ctor` 后，新增静态构造函数发现逻辑：先处理逻辑类自身的 `.cctor`，再对“被引用到的静态字段所属类型”做定点迭代（处理一个 `.cctor` 可能引出更多静态字段），把所有相关 `.cctor` 编进方法表。
+  - 新增 `.cctor` 方法号表 chunk：`[count 2B][method_id 2B]*count`，追加到 DLL 末尾（native_chunk 之后、statics 值区之前）。
+  - meta 头从 9 个 int 扩到 10 个：在 `native_chunk_size` 与 `this_clsID` 之间插入 `cctor_chunk_size`；`.diver` map 的 `headerLen` 同步从 `9*4` 改成 `10*4`。
+  - 版本助记词：`ModuleWeaver` `ver` 从 `v0.36e` → `v0.37-cctor`。
+- runtime `MCURuntime/mcu_runtime.c`（固件 + SimNode 共用同一文件）：
+  - `vm_set_program` 多读一个 `cctor_chunk_sz`，算出 `cctor_ptr`；`statics_val_ptr` 顺延。
+  - `parse_statics()` 之后、跑实例 `.ctor`(`init_method_id`) 之前，循环跑每个 `.cctor`：静态方法无 `this`，用 `vm_push_stack(cm, -1, &caller_eptr)`（注意必须传 `-1` 而非 `0`，否则局部变量初始化循环 `new_obj_id>=0?1:0` 会跳过第 0 个 var）。每个 `.cctor` 跑完调一次 `clean_up()`。
+  - 更新内存布局/`meta_data` 注释。
+- 验证（`DiverTest` 本机端到端：重编 `DiverCompiler` → Fody 织入 → `cl.exe` 编 `mcu_runtime.c` → 进程内跑真 runtime）：
+  - 临时在 `TestLogic` 加 `static readonly byte[][] Snapshots`（含 4 条内层 `byte[]`）+ `static readonly int Magic=0xABCD`，`Operation` 读 `Snapshots[step]`，跑 10 轮；测完已还原 `TestLogic.cs`。
+  - 结果：DIVER 与“纯 .NET”输出逐字节一致：step0 b1=7/b2=0、step1 56/17、step2 192/34、step3 0/51、`magic=43981`；10 轮无任何 `Null reference`/fault。
+- 重新编译 SimNode 三平台 native：`win-x64`/`linux-x64`/`linux-arm64` 的 `*sim_node_runtime*` 均已更新。
+
+### 重要发现/技能
+- 【发现】runtime 早就把“静态字段”当 GC root：`clean_up()` 会遍历 `statics_val_ptr` 标记并修正引用 id（含堆对象内部互引，如锯齿数组外层指向内层）。所以 `.cctor` 里 new 出来的数组只要写进静态字段就能跨迭代存活，不需要额外改 GC。
+- 【发现】runtime 早有 `init_method_id`（实例 `.ctor`）的“启动期跑一次”机制（`vm_set_program` 里用临时 root_frame + 深度 1 调用），`.cctor` 完全复用此模式即可——唯一区别是静态方法 `new_obj_id` 传 `-1`。
+- 【注意】`.cctor` 必须在实例 `.ctor` / 首个 `Operation` 之前执行（.NET 语义：类型初始化器先于任何实例/静态访问）。本实现顺序：`parse_statics` → 跑所有 `.cctor` → 跑实例 `.ctor` → 进入迭代。
+- 【注意】`vm_push_stack` 里局部变量初始化起始下标用的是 `new_obj_id>=0?1:0`（注意是 `>=0`），静态方法若误传 `0` 会漏初始化第 0 个局部变量；务必传负值。
+- 【注意】meta 头是定长 10×int，后面 chunk 顺序固定，新增 chunk 只能放在末尾（statics 值区之前），且 `.diver` map 的 `headerLen`/`methodDetailBase` 要同步，否则故障定位行号会整体错位。
+- 【发现】`DiverTest` 是最快的本机闭环：能同时重编译器、织入、编 runtime、进程内跑，强烈建议后续 runtime/编译器改动都先在这里复测。
+- 【注意】`DiverTest` 跑时 native 转译（`code.c`）对实例 `.ctor` 的 `this` 字段写入会报 `C2036 void* unknown size`，这是既有问题、与本次无关：失败后整体回退到字节码解释执行（即真实 MCU 路径），功能不受影响。
+
+---
+
+## 2026-06-08 21:30 UTC+8 — ABI 版本号改为 SemVer X.Y.Z（4 字节打包），落实到全项目
+
+### 接下来要做
+- （可选）真机 MCU 固件（MCUSerialBridge，`ENABLE_DIVER_RUNTIME=1`）重编下发，使硬件端也带上 ABI gate（本轮改的是共享 `MCURuntime/mcu_runtime.c` + `.h`，固件与 SimNode 共用）。
+- （可选）Host 下发端按 MCU 上报的 runtime ABI 预校验，拒绝下发不兼容程序，保护「尚未刷过 gate 固件」的旧机（见 `DIVER_ABI_VERSIONING.md` 末节）。
+
+### 做了哪些事
+- 按用户要求，把 ABI 版本从「单整数」改成 SemVer 风格 `X.Y.Z`，打包进 4 字节：`abi_version = 0x00_XX_YY_ZZ`（最高字节恒为 0，X/Y/Z 各 1 字节）。
+  - `X` 主版本：不兼容变更（二进制 Layout 变化、执行方式大变）。主版本不同→拒绝运行。
+  - `Y` 次版本：新增 BuiltIn / OpCode 等附加能力。规则 `runtime.minor >= program.minor` 才能跑。
+  - `Z` 修订号：仅 Bug 修复，双向兼容。
+  - 兼容判定（runtime 强制）：`magic 相同 且 major 相同 且 runtime.minor >= program.minor`。
+  - 本次（magic/version 前缀 + cctor 表 + 静态构造执行）属于 Layout 变化，故定为 **2.0.0**（legacy 无 gate 概念上算 "1.x"）。
+- `MCURuntime/mcu_runtime.h`（权威定义）：
+  - 新增 `DIVER_ABI_MAKE(x,y,z)` 打包宏 + `DIVER_ABI_MAJOR/MINOR/PATCH(v)` 解包宏。
+  - `#define DIVER_ABI_VERSION DIVER_ABI_MAKE(2,0,0)`；补全完整版本规则注释 + history。
+- `MCURuntime/mcu_runtime.c` `vm_set_program` ABI gate：
+  - 读 `magic`/`abi`，按 SemVer 规则判定 `magic_ok / major_ok / minor_ok`（注意用 `int` 不用 `bool`——该 .c 按 C 编译，无 `<stdbool.h>`）。
+  - 不兼容时 `report_error` 输出形如 `program v2.1.0 / runtime v2.0.0 ... (runtime too old for program minor)`，并 `return -1` 拒绝加载。
+- `DiverCompiler/Processor.cs`（与 runtime 保持同步）：
+  - `MakeAbiVersion(x,y,z)` + `DiverAbiVersion = MakeAbiVersion(2,0,0)`；补全 SemVer 规则注释。
+  - 编译期 `WriteWarning` 打印 `DIVER ABI vX.Y.Z, magic=0x...`，便于核对织入产物版本。
+  - 版本助记词 `ModuleWeaver.ver`：`v0.38-abi` → `v0.39-semver`。
+- 新增项目级文档 `DIVER_ABI_VERSIONING.md`（仓库根）：完整描述 header/ABI gate 布局、X.Y.Z 含义、兼容规则、版本权威位置（runtime 头文件）与 history，并提示旧固件需靠 Host 端预校验保护。
+
+### 验证（DiverTest 本机闭环，全部通过）
+- 正例：program 2.0.0 vs runtime 2.0.0 → 正常跑满 10 轮，无 fault。
+- 反例：program 0.0.2(旧整数) vs runtime 2.0.0 → 拒绝，提示 `major mismatch`。
+- 反例：program 2.1.0 vs runtime 2.0.0 → 拒绝，提示 `runtime too old for program minor`。
+- 正例：program 2.0.5 vs runtime 2.0.0 → 正常跑（patch 差异双向兼容）。
+
+### 重要发现/技能
+- 【注意】`mcu_runtime.c` 按 **C**（非 C++）编译，没有自动 `bool`。新增逻辑一律用 `int` 表示布尔，否则 `cl.exe` 报 `C2065 "bool" 未声明`。
+- 【注意】改了 `DiverCompiler/Processor.cs` 后，`dotnet run` 默认增量编译会跳过 `DiverTest` 的 C# 重编译，于是 **不会重新织入**，跑的还是上次织入的旧程序（旧 ABI）。必须 `dotnet build -c Debug --no-incremental` 强制重织，再 `dotnet run --no-build` 才能看到新 ABI。这是这次「runtime 已是 2.0.0 但 program 仍报 0.0.2」误判的根因。
+- 【技能】net48 老式 `DiverCompiler.csproj` 用 VS 自带 `MSBuild.exe`（`...\2022\Community\MSBuild\Current\Bin\MSBuild.exe`）`-t:Rebuild` 单独重编最稳；PostBuildEvent 会 `xcopy` 到 `..\DiverTest\`。`dotnet` SDK 路径也能编，但必须配合 `--no-incremental` 触发 DiverTest 重织。
+- 【发现】SemVer 兼容是**非对称**的：major 必须严格相等；minor 只要 `runtime >= program`（runtime 是超集即可）；patch 完全不参与判定。这条规则同时写进了 runtime、compiler、`DIVER_ABI_VERSIONING.md` 三处，改其一务必三处同步。
+
+---
+
+## 2026-06-08 21:55 UTC+8 — 新增 CommandGetAbi(0x08)：Probe 时上报 DIVER 运行时 ABI
+
+### 接下来要做
+- （可选）真机：刷入本轮重编的 V2.1 固件后，用 `node probe` 验证 `abi.semVer=2.0.0`；旧固件应回 `hasDiverRuntime=false`（Proto_UnknownCommand）。
+- （建议）Host 下发程序前用 probe 拿到的 `abi` 做兼容预校验（major 不等/ minor 过新直接拒绝下发），保护旧机；本轮只打通了「上报」，尚未做「下发前拦截」。
+
+### 背景
+- 上一轮加了 DIVER 程序二进制 ABI（SemVer X.Y.Z）+ runtime 启动期 ABI gate。但 ProbeMCU 只回报 Git Tag/Commit/BuildTime（`VersionInfoC`），**没有 ABI 回报**，Host 无从在下发前判断兼容性。本轮新增一条串口命令把 ABI 报上来。
+
+### 做了哪些事（端到端贯穿所有相关层）
+- 协议 `MCUSerialBridge/c_core/include/msb_protocol.h`：
+  - 新增 `CommandGetAbi = 0x08`（响应 0x88）。
+  - 新增 `AbiInfoC { u32 magic; u32 abi_version; }` + `STATIC_ASSERT(==8)`；含完整 SemVer 注释。
+- 固件 `MCUSerialBridge/mcu/appl/source/packet.c`：
+  - `#include "mcu_runtime.h"`（`HAS_DIVER_RUNTIME` 守卫）。
+  - `case CommandGetAbi`：填 `DIVER_PROGRAM_MAGIC` / `DIVER_ABI_VERSION`（无 DIVER 运行时则填 0）回传。
+- C core `msb_bridge.c/.h`：新增 `msb_get_abi()`，并加入函数指针表 `MCUSerialBridgeAPI`（`mcu_serial_bridge_get_api` 填充）。
+- C# wrapper `MCUSerialBridgeCLR.cs`：新增 `AbiInfo` 结构（含 `HasDiverRuntime/Major/Minor/Patch/SemVer` 辅助）+ `msb_get_abi` DllImport + `GetAbi()` 方法。
+- SDK：
+  - `IRuntimeNode` 加 `AbiInfo? Abi`。
+  - `MCUNode.Connect()` 在 GetLayout 后 `GetAbi`（旧固件 Proto_UnknownCommand → 留空）。
+  - `SimulatedMcuNode` 加 `Abi` 属性 + `CreateAbiInfo()`（硬编码 2.0.0，与 runtime 同步）。
+  - `DIVERSession`：`NodeProbeResult` 加 `Abi`；`ProbeNode`（真机+模拟）填充；`NodeEntry` 存 `Abi`；`AddNode`/add-simulated/`StartNode` 贯穿；`NodeFullInfo` 加 `AbiInfoSnapshot`（`BuildAbiSnapshot`）。
+- Host `ApiRoutes.cs`：`/api/node/probe`、`/api/node/add`、`/api/node/add-simulated` 响应加 `abi`。
+- 前端 `types/index.ts`：新增 `AbiInfo`，并加到 `NodeProbeResult/NodeFullInfo/AddNodeResult`；`AddNodeDialog.vue` 探测结果显示 `DIVER ABI: vX.Y.Z`（旧固件显示 N/A）。CLI `coral_agent.py` 原样 print_json，无需改。
+- 教程 `3rd/CoralinkerKitDocs`：`07-node-management.md` 新增「DIVER ABI 版本」小节 + 探测说明；`10-agent-api.md` 补 probe 响应 `abi` 字段说明。
+- 版本：DIVER ABI 仍 2.0.0（本轮只加通信命令，未改程序二进制布局，故不动 ABI 号；但属于「新增命令」，是串口协议的加法）。
+
+### 验证（三套工具链全绿）
+- C# Host（含 SDK + wrapper）：`dotnet build CoralinkerHost.csproj -c Release --no-restore` 成功，仅既有 warning。
+- 原生 PC 端 DLL：`scons -j12 build/mcu_serial_bridge.dll` 成功（`msb_bridge.c` 编过、导出 `msb_get_abi`）。
+- ARM 固件：`scons PDN=CORAL-NODE-V2.1 BUILD_MCU=1 ENABLE_DIVER_RUNTIME=1` 成功，`packet.o` 带 `-DHAS_DIVER_RUNTIME=1 -I...\MCURuntime` 编过，产出 `firmware.elf/hex/bin`。
+
+### 重要发现/技能
+- 【发现】PC 端 native bridge DLL 与 ARM 固件**都**用 `c_core`，但固件特有的 `packet.c` 只在固件侧编；`mcu_runtime.h` 只在 `ENABLE_DIVER_RUNTIME` 时进 CPPPATH（SConscript 第 96~103 行）+ 定义 `HAS_DIVER_RUNTIME=1`，所以 packet.c 的 ABI 上报必须用该宏守卫，否则非 DIVER 固件编不过。
+- 【注意】旧固件不认识 `0x08`，固件 `default` 分支回 `MSB_Error_Proto_UnknownCommand`；上位机（`MCUNode`/`ProbeNode`）必须把它当「legacy 固件、无 ABI」而**不是**探测失败，否则会误判旧机不可用。
+- 【技能】本机快速验证 C 改动：`scons -j12 build/mcu_serial_bridge.dll`（PC DLL，用 MSVC `cl`，秒级）+ 完整固件 `scons PDN=... BUILD_MCU=1 ENABLE_DIVER_RUNTIME=1`（ARM GCC，几秒）。两者都不需要硬件即可验证编译。
+- 【注意】`AbiInfoC` 是新加的线协议结构，长度固定 8B；`STATIC_ASSERT` 守住，C# `AbiInfo` 用 `[StructLayout(Sequential)]` 两个 `uint` 对齐，Marshal 直接 out。
+- 【发现】函数指针表 `MCUSerialBridgeAPI` 里我把 `msb_get_abi` 插在 `mcu_get_layout` 与 `msb_configure` 之间——因为所有消费者都随头文件重编（C# 走直接 DllImport 不用表），中插安全；但若将来有跨版本二进制消费该表，应改为只在末尾追加。
+
+---
+
+## 2026-06-08 21:53 UTC+8 — 【注意】DEV_LOG 被并发 Agent 截断，已用 git 恢复
+
+- 现象：另一个 Agent 改写了 `ai-deck/DEV_LOG.md`，把 `20:24 SimNode fatal` 之后的内容整段删掉（`git diff` 显示相对 HEAD 仅 -19 行，即丢了已提交的 `20:29` 根因条目；我本轮未提交的 `20:55`/`21:30`/`21:55` 三条也一并消失）。
+- 恢复：`git checkout HEAD -- ai-deck/DEV_LOG.md` 拿回已提交基线（含 `20:29` 条目），再把 `20:55`/`21:30`/`21:55` 三条按对话记录原样补回。
+- 【技能】DEV_LOG「只增不减」，被并发改写时先 `git diff --stat -- <file>` 看增删行数，再 `git show HEAD:<file>` / `git checkout HEAD -- <file>` 恢复已提交部分，未提交部分从会话/转录补回，不要凭空重写。
+
+---
+
+## 2026-06-08 22:00 UTC+8 — 教程去掉对仓库根 `DIVER_ABI_VERSIONING.md` 的外链
+
+- 用户指出：`3rd/CoralinkerKitDocs` 打包分发后**无法访问外层源码**，所以教程里「详见仓库根 `DIVER_ABI_VERSIONING.md`」这种外链是死链。
+- 改了两处（KitDocs 必须自包含）：
+  - `07-node-management.md`「DIVER ABI 版本」：删掉对 `DIVER_ABI_VERSIONING.md` 的引用，改为内联说明 `abiVersion = 0x00_XX_YY_ZZ` 的 SemVer 打包格式，并补上运行时兼容判定规则（`magic 相同 且 主版本相同 且 运行时次版本 >= 程序次版本`），信息不丢。
+  - `10-agent-api.md`：把「详见 `07-node-management.md` 与仓库根 `DIVER_ABI_VERSIONING.md`」改为只指向同包内 `[07-node-management.md](07-node-management.md)`。
+- 校验：`rg DIVER_ABI_VERSIONING 3rd/CoralinkerKitDocs` 已无命中（剩余「仓库根」匹配是无关的临时文件存放规则）。
+- 【注意】`3rd/CoralinkerKitDocs` 是随 Kit 单独打包的文档集，里面只能互链同目录 `.md`，**严禁**引用仓库根 / 外层源码路径（如 `DIVER_ABI_VERSIONING.md`、`MCURuntime/*`）。需要的内容要内联进文档。
+
+---
+
+## 2026-06-08 22:30 UTC+8 — 【注意】cctor + ABI 核心改动被并发 Agent 回退，已重新实现并验证
+
+### 背景 / 现象
+- 用户用新发布包（`Publish/CoralinkerHost_66025b5_20260608-220511`）跑 crash_code 仍报错，且生成的 bin 头**没有 DIVR 和 ABI**。
+- 排查：`66025b5` 就是 git HEAD，我之前的 ABI/cctor 改动**从未提交**；更糟的是那个搞坏 DEV_LOG 的并发改动把两个**核心文件回退到了 HEAD**：
+  - `DiverCompiler/Processor.cs`（写 DIVR+ABI、生成 cctor 表）—— 零痕迹。
+  - `MCURuntime/mcu_runtime.c`（校验头、执行 .cctor）—— 零痕迹。
+  - 而 `mcu_runtime.h` / `ModuleWeaver.cs` / `CommandGetAbi` 那套外围改动还在 → 工作区半残（头文件声明了 ABI，但编译器不写、运行时不读）。
+- `git stash` / `reflog` / 备份均无法恢复（是未提交的工作区改动）。只能重做这两个文件。
+
+### 做了哪些事（重新实现，已端到端验证通过）
+- `MCURuntime/mcu_runtime.c` `vm_set_program`：
+  - 文件最前面加 ABI gate：先读 `magic`(4B)+`abi`(4B)，按 SemVer 判 `magic_ok/major_ok/minor_ok`（用 `int` 不用 `bool`，该 .c 按 C 编），不兼容则 `report_error`+`return -1`。
+  - meta 头多读 1 个 int `cctor_chunk_sz`（插在 `native_chunk_sz` 与 `this_clsid` 之间，共 10 个 int）。
+  - `statics_val_ptr = cctor_ptr + cctor_chunk_sz`（cctor_ptr 在 native_chunk 之后）。
+  - `parse_statics()` 之后、跑实例 `.ctor` 之前，循环跑每个 `.cctor`：复用 root_frame + `vm_push_stack(mid, -1, ...)`（静态方法传 `-1` 让局部变量从 0 初始化，因 var-init 循环用 `new_obj_id>=0?1:0`），每个跑完 `clean_up()`。
+  - 更新内存布局注释。
+- `DiverCompiler/Processor.cs`：
+  - 加 ABI 常量 `DiverProgramMagic=0x52564944` / `MakeAbiVersion` / `DiverAbiVersion=2.0.0`。
+  - `isRoot` 实例 `.ctor` 循环之后、`re_link:` 之前，加 `.cctor` 发现：先处理逻辑类自身 `.cctor`，再对 `referenced_typefield` 中**静态字段所属类型**做定点迭代（处理一个 `.cctor` 会引出更多静态字段），全部 `Process` 进方法表，方法号收集进 `cctorMethodKeys`。
+  - dll 字节流头部加 `magic`(4B)+`abi`(4B)；meta 头加 `cctor_chunk.Length`；末尾追加 cctor 表 `[count 2B][registry 2B]*count`。
+  - `.diver` map 的 `headerLen` 从 `9*4` 改成 `8 + 10*4`（8B 前缀 + 10 个 int），保证 `methodDetailBase` 与运行时 `ptr-mem0` 报错偏移对齐。
+- 【发现】发布用的运行时编译器是 `DiverCompilerPortable`（`AssemblyName=DiverCompiler`），它 `<Compile Include>` link 了 `..\DiverCompiler\Processor.cs` 等，所以改 `DiverCompiler/Processor.cs` 一处即可，发布会带上。
+- 【发现】`mcu_runtime.c` 在非 MCU(`#ifndef IS_MCU`) 直接 `#include "mcu_runtime.h"`；MCU 侧 `appl/vm.h` 第 4 行也 `#include "mcu_runtime.h"`，所以 ABI gate 宏在 PC/SimNode/固件三套构建都可用，无需额外加 include。
+
+### 验证（DiverTest 本机闭环，重新织入 + 编 mcu_runtime.c + 进程内跑真 runtime）
+- 临时在 `TestLogic` 加 `static readonly byte[][] Snapshots`（4 条内层）+ `static readonly int Magic=0xABCD`，`Operation` 读 `Snapshots[step]` 写进 3 个 LowerIO；测完已 `git checkout` 还原 `TestLogic.cs` 与 `DIVERInterface.cs`。
+- 编译期日志：`cctor table: 1 method(s) [8]`、`DIVER ABI v2.0.0, magic=0x52564944`。
+- 运行 10 轮无任何 `Null reference`/fault；`staticB1/B2` 逐轮稳定循环 7/0,56/17,192/34,0/51（192 经 byte→int 显示为 -64，是既有有符号字节展示问题，与 cctor 无关），`staticMagic=43981`。说明 .cctor 在加载期分配了锯齿数组、值正确、并跨迭代经 clean_up 存活。
+- 直接 dump 织入产物 `TestLogic.bin` 前 12B：`44 49 56 52 | 00 00 02 00 | 64 00 00 00` = 'DIVR' + ABI 2.0.0 + interval 100。**bin 头现在确有 DIVR + ABI。**
+- `DiverCompilerPortable`（发布用）`dotnet build -c Release` 成功（仅既有 CS0162 警告）。
+
+### 接下来要做 / 给用户
+- 用户需**重新打包发布**（重跑发布脚本），让 `res/compiler/DiverCompiler.dll` 用上新的 Processor，下发的 bin 才会带 DIVR+ABI 且支持 cctor。
+- 【强烈建议】尽快 `git commit` 这批改动（Processor.cs / mcu_runtime.c / .h / 协议 / SDK / 文档），避免再次被并发 Agent 回退后无法恢复。
+- 【注意】ABI 升到 2.0.0 是**不兼容**大版本：新 bin 不能跑在「未刷过 gate 固件」的旧 MCU 上（旧固件无 gate，会误解析新头）。刷过一次 gate-aware 固件后即自保护；Host 端下发前预校验（用 probe 的 `abi`）仍是 TODO。
+
+### 重要发现/技能
+- 【技能】核心改动务必及时 commit。本次教训：未提交的工作区改动被并发 Agent 回退后，stash/reflog 都救不回，只能靠 DEV_LOG + 源码理解重做。DEV_LOG 把设计写细（chunk 布局、偏移、`vm_push_stack` 的 `-1` 语义）这次救了命，得以 1:1 重建。
+- 【发现】重建时确认「半残状态」的判定法：`git status` 看哪些文件**没有**出现在 modified 列表里——`Processor.cs`/`mcu_runtime.c` 不在列表 = 已被回退到 HEAD；而 `.h`/外围文件在列表 = 改动还在。两者不一致即为被部分回退。
+- 【注意】runtime 报错偏移是 `cur_il_offset = ptr - mem0`（含 8B 前缀 + 10 int 头），所以 compiler 的 `.diver` map `headerLen` 必须同步成 `8 + 10*4`，否则故障定位行号整体错位。
+
+---
+
+## 2026-06-08 23:30 UTC+8 — 前端显示 ABI：重建被回退的 ABI 上报链（wrapper→SDK→Host→前端）+ About 显示编译器 ABI
+
+### 背景 / 现象
+- 用户反馈：Probe 模拟节点只显示 Product/Commit/BuildTime/Ports，**没有 ABI 版本**；网页 About 也只有 Front/Backend，**没有编译器版本**。
+- 排查（`git status` 比对法）：上一轮 `CommandGetAbi` 那批改动里，**只有 C 协议侧幸存**（`msb_protocol.h`/`msb_bridge.h`/`packet.c` 在 modified 列表里且含 abi）。被并发 Agent 回退到 HEAD 的有：
+  - `MCUSerialBridgeCLR.cs`（`AbiInfo`/`GetAbi`/DllImport）—— 注意它仍显示 "M"，但其实只是 CRLF 行尾差异，`numstat` 为空、abi 内容已没了。
+  - `msb_bridge.c`（`msb_get_abi` 实现 + API 表注册）—— 不在 modified 列表 = 被回退；而 `msb_bridge.h` 的声明+表字段还在 → 又一处「半残」。
+  - 全部 SDK 消费方（`IRuntimeNode`/`MCUNode`/`SimulatedMcuNode`/`DIVERSession`）、Host `ApiRoutes.cs`、前端 `types/index.ts`/`AddNodeDialog.vue` —— 全被回退。
+- 结论：上报链从 wrapper 往上整段没了，所以前端拿不到 abi。
+
+### 做了哪些事（端到端重建 + About 新增）
+- wrapper `MCUSerialBridge/wrapper/MCUSerialBridgeCLR.cs`：重加 `AbiInfo` 结构（`Magic/AbiVersion`+`HasDiverRuntime/Major/Minor/Patch/SemVer`，并加常量 `DiverMagic=0x52564944`、`CurrentAbiVersion=0x00020000`）、`msb_get_abi` DllImport、`GetAbi()` 方法。
+- C core `msb_bridge.c`：重加 `msb_get_abi()` 实现（`mcu_send_packet_and_wait(CommandGetAbi, ... sizeof(AbiInfoC))`）+ `api->msb_get_abi = msb_get_abi;` 注册（`.h` 声明/表字段本就幸存）。
+- SDK：
+  - `IRuntimeNode` 加 `AbiInfo? Abi`。
+  - `MCUNode`：加 `Abi` 属性，`Connect()` 在 GetLayout 后 `GetAbi`（旧固件 Proto_UnknownCommand → 留空），`Disconnect` 清空。
+  - `SimulatedMcuNode`：加 `Abi` + `CreateAbiInfo()`（用 `AbiInfo.DiverMagic`/`CurrentAbiVersion`）。
+  - `DIVERSession`：`NodeProbeResult` 加 `AbiInfo? Abi`；新增 `AbiInfoSnapshot` record；`NodeFullInfo` 加 `Abi`（默认 null）；`NodeEntry` 加 `Abi`；`ProbeNode`（真机 `bridge.GetAbi` + 模拟 `CreateAbiInfo`）/`AddNode`/`AddSimulatedNode`/`StartNode`/`BuildNodeFullInfo`(+`BuildAbiSnapshot`) 全程贯穿。
+- Host `ApiRoutes.cs`：`/api/node/probe` 响应加 `abi`（从 `result.Abi`）；`/api/node/add`、`/api/node/add-simulated` 加 `abi = info?.Abi`。
+- Host About `HostAboutService.cs`：`HostAboutSnapshot` 加 `DiverAbiInfo DiverAbi`（取 `AbiInfo.CurrentAbiVersion`，渲染 SemVer + magic），`/api/about` 自动带出。
+- 前端：`types/index.ts` 加 `AbiInfo`/`DiverAbiInfo`，并入 `NodeProbeResult`/`NodeFullInfo`/`AddNodeResult`/`HostAboutSnapshot`；`AddNodeDialog.vue` 探测结果加「DIVER ABI: vX.Y.Z」（旧固件显示 N/A）；`HomeView.vue` About 弹窗新增「DIVER Compiler」段（Program ABI + Magic），加 `formatAbiMagic`。
+
+### 验证
+- C# `dotnet build CoralinkerHost.csproj -c Release` → 0 error（仅既有 DiverTest 警告）。
+- 前端 `npm run build`（`vue-tsc -b && vite build`）→ 通过，产物已出到 `wwwroot/`（含 About/Probe 改动）。
+- 原生 `scons -j12 build/mcu_serial_bridge.dll` → 成功；DLL 导出表确含 `msb_get_abi`（二进制 grep 命中）。
+
+### 重要发现 / 注意
+- 【技能】判定「被回退/半残」最快的办法：`git status` 看文件在不在 modified 列表 + `git diff --numstat`（空=仅行尾差异，实际内容已回 HEAD）+ `git diff | grep abi` 看关键内容是否还在。三招组合定位出 wrapper/msb_bridge.c 被回退而其 .h 幸存的半残态。
+- 【注意】原生 DLL 有两份：`MCUSerialBridge/build/mcu_serial_bridge.dll`（scons 直接产出）与 `build/runtimes/win-x64/native/mcu_serial_bridge.dll`（**CoralinkerSDK.csproj 实际引用并 copy 的源**）。scons 只更新前者，后者需手动同步——否则重编/发布会把**旧** DLL（无 `msb_get_abi` 导出）拷进去，真机 `GetAbi` 会 EntryPointNotFound。本轮已手动 `Copy-Item` 同步。
+- 【发现】模拟节点 SimNode **不经过** native DLL/wrapper，`Abi` 由 `SimulatedMcuNode.CreateAbiInfo()` 直接硬编码上报；所以用户当前用模拟节点就能看到 ABI，无需原生 DLL。真机路径才依赖 wrapper+native。
+- 【注意】`AbiInfo.CurrentAbiVersion`（wrapper）现在是 Host/About 显示编译器 ABI 的来源，须与 `MCURuntime/mcu_runtime.h` 的 `DIVER_ABI_VERSION` 及 `DiverCompiler` 的 `DiverAbiVersion` 三处同步（共 4 处：runtime 头、compiler、wrapper、文档）。
+
+### 接下来要做 / 给用户
+- 重新打包发布后：模拟节点 Probe 应显示「DIVER ABI: v2.0.0」；About 弹窗应出现「DIVER Compiler → Program ABI v2.0.0 / Magic 0x52564944」。
+- 【强烈建议】尽快 `git commit` 这批 + 上一轮 cctor/ABI 改动，避免再次被并发 Agent 回退后无法恢复。
+- （仍 TODO）Host 下发前用 probe 的 `abi` 做兼容预校验拦截。
+
+---
+
+## 2026-06-09 00:10 UTC+8 — 三连修：拒绝旧固件添加 / Logic 单占用 UX / 重复添加明确提示
+
+### 接下来要做
+- （可选）真机验证：旧固件节点应在「添加」时被拒并提示升级；已添加节点重复添加应提示「已添加」。
+- （可选）把 Host 下发前 ABI 预校验也接到 Program 路径（目前在 AddNode 处拦截；Program 端旧逻辑仍依赖 runtime gate）。
+
+### 做了哪些事
+1) **阻止 Legacy / 不兼容固件被添加（用户任务 1）**——后端在 `AddNode` 加 ABI 闸门：
+   - `DIVERSession`：新增 `AddNodeStatus`{Ok/ProbeFailed/AlreadyExists/IncompatibleFirmware} + `AddNodeOutcome(Status,Uuid,Message)`；`AddNode` 返回类型从 `string?` 改为 `AddNodeOutcome`。
+   - 新增 `CheckFirmwareAbi(AbiInfo?)`：`abi==null||!HasDiverRuntime` → 旧固件拒绝；`major!=host || minor<host` → 不兼容拒绝（规则与 `mcu_runtime.c` 一致：magic 同、major 同、runtime.minor>=program.minor）。host 版本取 `AbiInfo.CurrentAbiVersion`(2.0.0)。
+   - 消息：「固件未上报 DIVER 运行时 ABI（旧固件）…请先升级固件后再添加」/「固件 DIVER ABI vX.Y.Z 与上位机编译器 v2.0.0 不兼容（固件过旧）…」。
+   - 模拟节点走 `AddSimulatedNode`，不过闸门，照常可用。
+2) **重复添加明确提示（用户任务 3）**——`AddNode` 的「相同 mcuUri 已存在」分支返回 `AlreadyExists` + 「该节点已添加…无需重复添加」；`RuntimeSessionService.AddNodeAsync` 改返回 `AddNodeOutcome`；`ApiRoutes /api/node/add` 失败时回 `{ok:false, error:outcome.Message, reason:Status}`（前端 AddNodeDialog 本就显示 `addResult.error`，于是不再是笼统「Probe Failed」）。
+3) **Logic 单占用前端 UX（用户任务 2）**——后端早已在 `/program` 拦截重复占用（返回 409 文案），问题在前端无提示、可错选：
+   - `CoralNodeView.vue`：用 `useVueFlow().getNodes` 计算 `usedLogicsByOthers`（排除自己、type==coral-node、取 data.logicName），`logicOptions` 对「被他人占用」的项 `disabled:true` 且 label 标注「(已被 X 占用)」。跨节点响应式：他节点 program/unprogram 改 data.logicName → getNodes 响应式 → 选项实时禁用/释放。
+   - n-select 加 `clearable`，`updateLogicName(newLogic|null)`：选空→调用新 `unprogramNode` 释放 Logic 回空态；program 失败（冲突/产物缺失，axios 拦截器把后端 error 文案转成 Error.message）→ `message.error` 提示 + 回退选择（localLogicName/updateNodeData 还原 prevLogic）。
+   - 节点删除即释放：后端 `RemoveNode` 删 entry → `/program` 用 `ExportNodes()` 实时判定，自动释放；前端 used 集合来自 vue-flow nodes，节点移除后自动重算。
+   - 允许空逻辑：新增 `DIVERSession.UnprogramNode(uuid)`（清 ProgramBytes/MetaJson/LogicName/BuildInfo/CartFields + PruneUndeclaredVariables）+ `RuntimeSessionService.UnprogramNodeAsync` + `POST /api/node/{uuid}/unprogram` + 前端 `unprogramNode` API。
+   - 同步更新 CLI `3rd/CoralinkerSDK/Program.cs` 的 `AddNode` 调用方（用 `addOutcome.Uuid/.Success/.Message`）。
+
+### 验证
+- `dotnet build CoralinkerHost.csproj -c Release` → 0 error（仅既有可空性警告）。
+- 前端 `npm run build`（vue-tsc + vite）→ 通过，产物出到 `wwwroot/`。
+
+### 重要发现 / 注意
+- 【发现】后端 `/program` **早就**有「一个 Logic 只能编程到一个节点（否则 LowerIO 字段冲突）」的硬校验（ApiRoutes ~586 行返回 409）。本次任务 2 主要是补前端 UX，让占用可见、可释放、可回空，而非新增后端约束。
+- 【发现】`axios` 响应拦截器（`api/index.ts`）会把后端 4xx 的 `data.error` 提取成 `Error.message` 并 reject——所以 `programNode` 冲突时前端走 `catch`，`String(error)` 即后端文案，可直接 `message.error` 展示。
+- 【注意】`AddNode` 改了返回类型（`string?`→`AddNodeOutcome`），共 3 个调用方：`RuntimeSessionService`、CLI `Program.cs`、（ApiRoutes 经 service）。改签名时务必全改，否则 CLI 编不过。
+- 【注意】ABI 闸门只在真机 `AddNode` 生效；模拟节点与「导入已保存工程」路径不过闸门（导入的是历史节点，不重新 probe）。如需对导入节点也校验，需在加载时补 probe+校验（暂未做）。
+
+---
+
+## 2026-06-09 00:35 UTC+8 — 所有网页可见提示改英文
+
+### 做了哪些事
+- 按用户要求把所有「网页可见」中文提示改成英文（仅可见 UI 文本/提示，不动代码注释/对象 key/console.log）。
+- 后端（经 API 透传到网页的提示）`DIVERSession.cs`：AddNode 的 AlreadyExists/ProbeFailed 文案、CheckFirmwareAbi 旧固件/不兼容文案全部英文化。
+- 前端：
+  - `CoralNodeView.vue`：Logic 选项「(in use by X)」、清除逻辑失败 message。
+  - `HomeView.vue`：远端新版本提示横幅、Agent 弹窗三个小标题+段落、覆盖保存 confirm 文案。
+  - `ControlWindow.vue`：添加控件菜单分组标题与各控件名（Joystick/Slider/Switch/Gauge/Lamp 及显示模式/方向 option）。
+  - `PortView.vue`：WireTap TX/RX 监听 title 提示。
+  - `protocol/canopen/dictionary.ts` + `cia402.ts`：对象字典 description（设备类型/错误寄存器/心跳/控制字状态字/位置速度扭矩目标值/回原点/数字 IO 等）全部英文化（CANopen 标准术语）。
+- 验证：`dotnet build CoralinkerHost.csproj -c Release` 0 error；前端 `npm run build`（vue-tsc+vite）通过，产物已出 `wwwroot/`。
+
+### 注意
+- 【发现】定位「网页可见」中文用 regex：属性值 `="[^"]*[\u4e00-\u9fff]`、模板文本 `>[^<>]*[\u4e00-\u9fff]`、字符串字面量 `'…中文…'`/`` `…中文…` ``；排除掉只在 `//`、`/* */`、`<!-- -->` 注释里的中文（不显示，未改）。AddNodeDialog 等文件的中文其实全是注释，UI 早已英文。
+- 【注意】重新打包发布后这些英文提示才会进 `wwwroot`；本轮已重建前端产物。

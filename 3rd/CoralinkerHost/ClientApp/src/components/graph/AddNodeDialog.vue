@@ -92,6 +92,10 @@
               <span class="label">Build Time:</span>
               <span class="value">{{ probeResult.version?.buildTime || '-' }}</span>
             </div>
+            <div class="result-info">
+              <span class="label">DIVER ABI:</span>
+              <span class="value">{{ probeResult.abi?.hasDiverRuntime ? `v${probeResult.abi.semVer}` : 'N/A (legacy firmware)' }}</span>
+            </div>
             <div class="result-info" v-if="probeResult.layout?.ports?.length">
               <span class="label">Ports:</span>
               <span class="value ports-list">
@@ -166,7 +170,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { NModal, NCard, NButton, NFormItem, NSelect, NRadioGroup, NRadioButton, NInput, NSpin } from 'naive-ui'
 import { getAvailablePorts, probeNode, addNode as apiAddNode, addSimulatedNode } from '@/api/device'
 import UpgradeDialog from './UpgradeDialog.vue'
-import type { LayoutInfo, VersionInfo } from '@/types'
+import type { LayoutInfo, VersionInfo, AbiInfo } from '@/types'
 
 // Props
 const props = defineProps<{
@@ -208,6 +212,7 @@ interface ProbeResultData {
   error?: string
   version?: VersionInfo
   layout?: LayoutInfo
+  abi?: AbiInfo
 }
 
 // 本地状态

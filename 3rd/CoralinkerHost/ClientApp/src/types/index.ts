@@ -148,6 +148,7 @@ export interface NodeFullInfo {
   nodeName: string
   version?: VersionInfo
   layout?: LayoutInfo
+  abi?: AbiInfo
   portConfigs: PortConfig[]
   hasProgram: boolean
   programSize: number
@@ -567,9 +568,42 @@ export interface HostVersionInfo {
   layout?: string | null
 }
 
+/**
+ * DIVER 程序二进制 ABI 信息（SemVer X.Y.Z，打包 0x00_XX_YY_ZZ）
+ */
+export interface AbiInfo {
+  /** 固件是否内置 DIVER 运行时（magic 命中 'DIVR'） */
+  hasDiverRuntime: boolean
+  /** DIVER 程序魔数 'DIVR' (0x52564944)，无 DIVER 运行时则为 0 */
+  magic: number
+  /** SemVer 打包值 0x00_XX_YY_ZZ */
+  abiVersion: number
+  /** 主版本 X（不兼容变更） */
+  major: number
+  /** 次版本 Y（新增 BuiltIn/OpCode） */
+  minor: number
+  /** 修订号 Z（Bug 修复） */
+  patch: number
+  /** X.Y.Z 字符串 */
+  semVer: string
+}
+
+/**
+ * Host 内置编译器/运行时的 DIVER ABI（About 显示用）
+ */
+export interface DiverAbiInfo {
+  magic: number
+  abiVersion: number
+  major: number
+  minor: number
+  patch: number
+  semVer: string
+}
+
 export interface HostAboutSnapshot {
   backend: HostVersionInfo
   frontend: HostVersionInfo
+  diverAbi?: DiverAbiInfo
 }
 
 /**
@@ -595,6 +629,7 @@ export interface NodeProbeResult {
   error?: string
   version?: VersionInfo
   layout?: LayoutInfo
+  abi?: AbiInfo
 }
 
 /**
@@ -608,6 +643,7 @@ export interface AddNodeResult {
   nodeName?: string
   version?: VersionInfo
   layout?: LayoutInfo
+  abi?: AbiInfo
 }
 
 /**

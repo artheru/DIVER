@@ -95,6 +95,14 @@ export async function programNode(uuid: string, logicName: string): Promise<{ ok
 }
 
 /**
+ * 清除节点已编程的逻辑，回到空状态并释放其占用的 Logic
+ * @param uuid 节点 UUID
+ */
+export async function unprogramNode(uuid: string): Promise<{ ok: boolean }> {
+  return post(`/api/node/${uuid}/unprogram`, {})
+}
+
+/**
  * 获取节点完整信息
  * @param uuid 节点 UUID
  */

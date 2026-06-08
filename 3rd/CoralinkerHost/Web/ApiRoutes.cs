@@ -457,7 +457,17 @@ public static class ApiRoutes
                         type = p.Type.ToString(),
                         name = p.Name
                     }).ToArray()
-                }
+                },
+                abi = result.Abi is { } a ? new
+                {
+                    hasDiverRuntime = a.HasDiverRuntime,
+                    magic = a.Magic,
+                    abiVersion = a.AbiVersion,
+                    major = a.Major,
+                    minor = a.Minor,
+                    patch = a.Patch,
+                    semVer = a.SemVer
+                } : null
             });
         });
 
@@ -467,27 +477,28 @@ public static class ApiRoutes
             if (payload == null || string.IsNullOrWhiteSpace(payload.McuUri))
                 return Results.BadRequest(new { ok = false, error = "Missing mcuUri" });
 
-            var uuid = await runtime.AddNodeAsync(payload.McuUri, ct);
-            if (uuid == null)
+            var outcome = await runtime.AddNodeAsync(payload.McuUri, ct);
+            if (!outcome.Success)
             {
                 return JsonHelper.Json(new
                 {
                     ok = false,
-                    error = "Add node failed",
-                    mcuUri = payload.McuUri,
-                    hint = "Call /api/node/probe first and verify the exact mcuUri. Use /api/node/add-simulated for simulated nodes."
+                    error = outcome.Message ?? "Add node failed",
+                    reason = outcome.Status.ToString(),
+                    mcuUri = payload.McuUri
                 });
             }
 
-            var info = DIVERSession.Instance.GetNodeInfo(uuid);
+            var info = DIVERSession.Instance.GetNodeInfo(outcome.Uuid!);
             return JsonHelper.Json(new
             {
                 ok = true,
-                uuid,
+                uuid = outcome.Uuid,
                 mcuUri = info?.McuUri,
                 nodeName = info?.NodeName,
                 version = info?.Version,
-                layout = info?.Layout
+                layout = info?.Layout,
+                abi = info?.Abi
             });
         });
 
@@ -503,7 +514,8 @@ public static class ApiRoutes
                 mcuUri = info?.McuUri,
                 nodeName = info?.NodeName,
                 version = info?.Version,
-                layout = info?.Layout
+                layout = info?.Layout,
+                abi = info?.Abi
             });
         });
 
@@ -613,6 +625,13 @@ public static class ApiRoutes
             var result = await runtime.ProgramNodeAsync(uuid, programBytes, metaJson, payload.LogicName, buildInfo, ct);
             Console.WriteLine($"[API /program] ProgramNodeAsync result={result}, size={programBytes.Length}");
             return JsonHelper.Json(new { ok = result, programSize = programBytes.Length });
+        });
+
+        // 清除节点已编程的逻辑，回到空状态并释放其占用的 Logic（供前端「取消选择 Logic」使用）。
+        app.MapPost("/api/node/{uuid}/unprogram", async (string uuid, RuntimeSessionService runtime, CancellationToken ct) =>
+        {
+            var ok = await runtime.UnprogramNodeAsync(uuid, ct);
+            return JsonHelper.Json(new { ok });
         });
 
         app.MapGet("/api/node/{uuid}", (string uuid) =>

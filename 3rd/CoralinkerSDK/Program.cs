@@ -215,9 +215,10 @@ class Program
             foreach (var nodeConfig in config.Nodes)
             {
                 Console.WriteLine($"  Adding {nodeConfig.McuUri}...");
-                var uuid = session.AddNode(nodeConfig.McuUri);
+                var addOutcome = session.AddNode(nodeConfig.McuUri);
+                var uuid = addOutcome.Uuid;
                 
-                if (uuid != null)
+                if (addOutcome.Success && uuid != null)
                 {
                     nodeUuids.Add(uuid);
                     var info = session.GetNodeInfo(uuid);
@@ -250,7 +251,7 @@ class Program
                 }
                 else
                 {
-                    Console.WriteLine($"    ✗ Failed to add node");
+                    Console.WriteLine($"    ✗ Failed to add node: {addOutcome.Message}");
                 }
             }
             

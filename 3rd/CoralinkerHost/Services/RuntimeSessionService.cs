@@ -111,22 +111,33 @@ public sealed class RuntimeSessionService
     /// <summary>
     /// 添加节点
     /// </summary>
-    public async Task<string?> AddNodeAsync(string mcuUri, CancellationToken ct)
+    public async Task<AddNodeOutcome> AddNodeAsync(string mcuUri, CancellationToken ct)
     {
         await _terminal.LineAsync($"[session] Adding node at {mcuUri}...", ct);
-        var uuid = _session.AddNode(mcuUri);
-        
-        if (uuid != null)
+        var outcome = _session.AddNode(mcuUri);
+
+        if (outcome.Success)
         {
-            var info = _session.GetNodeInfo(uuid);
-            await _terminal.LineAsync($"[session] ✓ Added {info?.NodeName ?? uuid}", ct);
+            var info = _session.GetNodeInfo(outcome.Uuid!);
+            await _terminal.LineAsync($"[session] ✓ Added {info?.NodeName ?? outcome.Uuid}", ct);
         }
         else
         {
-            await _terminal.LineAsync($"[session] ✗ Add node failed", ct);
+            await _terminal.LineAsync($"[session] ✗ Add node failed: {outcome.Message}", ct);
         }
-        
-        return uuid;
+
+        return outcome;
+    }
+
+    /// <summary>清除节点已编程逻辑，回到空状态并释放占用的 Logic。</summary>
+    public async Task<bool> UnprogramNodeAsync(string uuid, CancellationToken ct)
+    {
+        var ok = _session.UnprogramNode(uuid);
+        await _terminal.LineAsync(
+            ok ? $"[session] Cleared logic on {uuid}" : $"[session] ✗ Clear logic failed: {uuid}",
+            ct
+        );
+        return ok;
     }
 
     /// <summary>

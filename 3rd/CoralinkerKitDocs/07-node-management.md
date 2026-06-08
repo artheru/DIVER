@@ -6,7 +6,7 @@
 探测(Probe) -> 添加(Add) -> 配置(Configure) -> 编程(Program) -> 启动(Start) -> 运行(Running) -> 停止(Stop)
 ```
 
-- **探测**：DIVER 通过串口连接 MCU，读取版本和硬件布局。
+- **探测**：DIVER 通过串口连接 MCU，读取版本、硬件布局，以及 DIVER 运行时 ABI 版本。
 - **添加**：将节点纳入管理，自动初始化端口配置。
 - **配置**：设置端口参数（CAN 波特率、串口波特率等）。
 - **编程**：将编译好的逻辑字节码下发到节点。
@@ -81,6 +81,35 @@ python tools/agent_cli/coral_agent.py --host <HOST_URI> node add-simulated --nam
 Host 据此自动生成端口配置。端口 index 由 Layout 返回的顺序决定（从 0 开始），这就是逻辑代码中 `RunOnMCU.WriteCANMessage(port, ...)` 的 `port` 参数。
 
 不同硬件的 Layout 不同，端口数量和顺序因板而异。**不要硬编码端口 index 的含义**，以 Web 界面上的端口名称显示为准。
+
+## DIVER ABI 版本
+
+探测节点时，Host 还会向 MCU 发送 `GetAbi` 命令，读取 MCU 内置 DIVER 运行时的**程序二进制 ABI 版本**（SemVer `X.Y.Z`）。probe / add / node info 的响应里多出一个 `abi` 字段：
+
+```json
+{
+  "abi": {
+    "hasDiverRuntime": true,
+    "major": 2, "minor": 0, "patch": 0,
+    "semVer": "2.0.0",
+    "magic": 1381254467,
+    "abiVersion": 131072
+  }
+}
+```
+
+版本号是打包进 4 字节的 SemVer `X.Y.Z`（`abiVersion = 0x00_XX_YY_ZZ`，最高字节恒为 0），含义：
+
+- `X` 主版本：不兼容变更（二进制布局 / 执行方式）。**主版本不同的程序无法在该 MCU 上运行。**
+- `Y` 次版本：新增 BuiltIn / OpCode。程序所需次版本不能高于 MCU 运行时次版本。
+- `Z` 修订号：仅 Bug 修复，双向兼容。
+
+兼容判定（MCU 运行时强制）：`magic 相同` 且 `主版本相同` 且 `运行时次版本 >= 程序次版本` 时才允许运行，否则节点进入 `error` 并报 ABI 不匹配。
+
+注意：
+
+- `hasDiverRuntime=false` 或拿不到 `abi`，说明是**较旧的固件**（不认识 `GetAbi` 命令），此时无法据 ABI 预判兼容性；探测/添加本身不受影响。
+- 如果下发程序后节点立即进入 `error` 且报 ABI 不匹配，应升级 MCU 固件或用匹配的编译器重新编译逻辑。
 
 ## 端口配置
 

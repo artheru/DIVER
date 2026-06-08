@@ -65,28 +65,28 @@
 
       <!-- 添加控件菜单（只读模式下不显示） -->
       <div v-if="showAddWidgetMenu && !readonly" class="dropdown-menu add-widget-menu">
-        <div class="menu-section-title">可控控件</div>
+        <div class="menu-section-title">Controls</div>
         <button @click="addWidget('joystick')">
           <span class="menu-icon">✛</span>
-          <span>Joystick (双轴)</span>
+          <span>Joystick (2-axis)</span>
         </button>
         <button @click="addWidget('slider')">
           <span class="menu-icon">━</span>
-          <span>Slider (单轴)</span>
+          <span>Slider (1-axis)</span>
         </button>
         <button @click="addWidget('switch')">
           <span class="menu-icon">◉</span>
-          <span>Switch (开关)</span>
+          <span>Switch</span>
         </button>
         <div class="menu-divider"></div>
-        <div class="menu-section-title">只读显示</div>
+        <div class="menu-section-title">Read-only Displays</div>
         <button @click="addWidget('gauge')">
           <span class="menu-icon">📊</span>
-          <span>Gauge (数显/仪表)</span>
+          <span>Gauge (numeric/meter)</span>
         </button>
         <button @click="addWidget('lamp')">
           <span class="menu-icon">💡</span>
-          <span>Lamp (LED指示灯)</span>
+          <span>Lamp (LED indicator)</span>
         </button>
       </div>
 
@@ -510,11 +510,11 @@
                 <div class="config-row">
                   <label>Style</label>
                   <select v-model="editingWidget.config.style">
-                    <option value="number">Number (数值)</option>
-                    <option value="text">Text (文本)</option>
-                    <option value="bar-h">Bar Horizontal (水平进度条)</option>
-                    <option value="bar-v">Bar Vertical (垂直进度条)</option>
-                    <option value="gauge">Gauge (仪表盘)</option>
+                    <option value="number">Number</option>
+                    <option value="text">Text</option>
+                    <option value="bar-h">Bar Horizontal</option>
+                    <option value="bar-v">Bar Vertical</option>
+                    <option value="gauge">Gauge</option>
                   </select>
                 </div>
               </div>
@@ -573,8 +573,8 @@
                 <div class="config-row">
                   <label>Layout</label>
                   <select v-model="editingWidget.config.layout">
-                    <option value="horizontal">Horizontal (横排)</option>
-                    <option value="vertical">Vertical (竖排)</option>
+                    <option value="horizontal">Horizontal</option>
+                    <option value="vertical">Vertical</option>
                   </select>
                 </div>
                 <div class="config-row">

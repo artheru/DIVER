@@ -58,6 +58,9 @@ public class MCUNode : IRuntimeNode
     /// <summary>MCU 硬件布局信息</summary>
     public LayoutInfo? Layout { get; private set; }
 
+    /// <summary>MCU 内置 DIVER 运行时 ABI 信息（旧固件/未上报时为 null）</summary>
+    public AbiInfo? Abi { get; private set; }
+
     /// <summary>MCU 状态</summary>
     public MCUState? State { get; private set; }
 
@@ -157,6 +160,7 @@ public class MCUNode : IRuntimeNode
         Stats = null;
         Version = null;
         Layout = null;
+        Abi = null;
 
         lock (_bridgeCallLock)
         {
@@ -220,6 +224,20 @@ public class MCUNode : IRuntimeNode
                 // Layout not available (older firmware), continue without it
                 Console.WriteLine(
                     $"[MCUNode] GetLayout failed: {err.ToDescription()} - using default config"
+                );
+            }
+
+            // Get DIVER runtime ABI (older firmware doesn't support CommandGetAbi -> Proto_UnknownCommand)
+            err = _bridge.GetAbi(out var abi, DefaultTimeout);
+            if (err == MCUSerialBridgeError.OK)
+            {
+                Abi = abi;
+            }
+            else
+            {
+                // ABI not reported (legacy firmware) — not a probe failure, just no ABI info.
+                Console.WriteLine(
+                    $"[MCUNode] GetAbi failed: {err.ToDescription()} - legacy firmware without ABI report"
                 );
             }
 

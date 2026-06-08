@@ -10,6 +10,7 @@ public interface IRuntimeNode : IDisposable
     bool IsRunning { get; }
     VersionInfo? Version { get; }
     LayoutInfo? Layout { get; }
+    AbiInfo? Abi { get; }
     MCUState? State { get; }
     RuntimeStats? Stats { get; }
     string? LastError { get; }
