@@ -110,7 +110,16 @@ PB10–PB15 共 6 根线驱动 74HC595 / 74HC165 链：
 
 **输入/输出数量与位图约定**：
 - 输入移位寄存器：3 级级联，共 24 路，按 bit 0..23 顺序进入 input bitmap。
-- 输出移位寄存器：共 20 路，按 bit 0..19 顺序输出。
+- 输出移位寄存器：共 20 路，逻辑位与 74HC595 原始位的关系如下：
+  - 最末级（离 MCU 最远）D0..D7 -> OUT0..OUT7
+  - 中间级 D4..D7 -> OUT8..OUT11
+  - 最靠近 MCU 级 D0..D7 -> OUT12..OUT19
+  - 由于 74HC595 为 `D0=QA, D7=QH`，且 SPI2 配置为 `lsb_first=1`，所以每个字节发送前都要先做一次 bit reverse
+  - 按“逻辑字节”看接线关系：
+    - byte0: D0..D7 = OUT0..OUT7
+    - byte1: D4..D7 = OUT8..OUT11
+    - byte2: D0..D7 = OUT12..OUT19
+  - 实际发送到 SPI 的 `output_raw` 为上述 3 个逻辑字节分别 bit reverse 后拼接而成
 - 24V 检测：input bitmap bit 24。
 - F1 急停：input bitmap bit 25。
 - F2 触边：input bitmap bit 26。

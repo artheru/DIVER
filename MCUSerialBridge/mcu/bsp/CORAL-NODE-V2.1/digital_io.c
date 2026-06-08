@@ -1,6 +1,5 @@
 #include "bsp/digital_io.h"
 
-#include "chip/periph.h"
 #include "hal/delay.h"
 #include "hal/gpio.h"
 #include "hal/spi.h"
@@ -51,6 +50,50 @@ static GPIOHandle in_24v_detect;
 
 volatile uint32_t g_bsp_digital_inputs = 0;
 volatile uint32_t g_bsp_digital_outputs = 0;
+
+static inline uint32_t bsp_rbit_u32(uint32_t value)
+{
+    uint32_t result;
+    __asm volatile("rbit %0, %1" : "=r"(result) : "r"(value));
+    return result;
+}
+
+static uint32_t bsp_encode_outputs(uint32_t outputs)
+{
+    uint32_t logical_outputs = outputs & BSP_SHIFT_OUTPUT_MASK;
+    uint8_t byte0 = 0;
+    uint8_t byte1 = 0;
+    uint8_t byte2 = 0;
+
+    /* 3 级 74HC595 的实际接线不是按安装顺序连续映射：
+     *
+     * - 最末级（离 MCU 最远）D0..D7 -> OUT0..OUT7
+     * - 中间级 D4..D7            -> OUT8..OUT11
+     * - 最靠近 MCU 级 D0..D7      -> OUT12..OUT19
+     *
+     * 但实际芯片级联是 D0=QA, D7=QH，而 SPI2 使用 lsb_first=1。
+     * 这意味着每个字节内部“逻辑上的 D0..D7”在发送前需要做 bit reverse：
+     * 逻辑 bit0 最终会先移入，落到 QH；逻辑 bit7 最后移入，落到 QA。
+     *
+     * 因此编码过程分两步：
+     * 1. 先按接线关系组出 3 个“逻辑字节”
+     * 2. 将 3 个逻辑字节按 4 字节方式拼入 u32，高 24 位放有效数据，最低 8 位补 0
+     * 3. 对整个 u32 执行一次 rbit 指令
+     *
+     * 这样等价于“对每个字节分别 bit reverse”，但只需要一次原生 RBIT 指令，
+     * 且结果的低 24 位正好就是 SPI 要发送的 byte0/byte1/byte2。
+     */
+    byte0 = (uint8_t)(logical_outputs & 0x000000FFu);             // D0..D7 <- OUT0..OUT7
+    byte1 = (uint8_t)((logical_outputs & 0x00000F00u) >> 4);      // D4..D7 <- OUT8..OUT11
+    byte2 = (uint8_t)((logical_outputs & 0x000FF000u) >> 12);     // D0..D7 <- OUT12..OUT19
+
+    uint32_t packed_reversed_bytes =
+            ((uint32_t)byte0 << 24) |
+            ((uint32_t)byte1 << 16) |
+            ((uint32_t)byte2 << 8);
+
+    return bsp_rbit_u32(packed_reversed_bytes);
+}
 
 void bsp_init_digital_io()
 {
@@ -139,7 +182,7 @@ void bsp_init_digital_io()
 void bsp_digital_io_refresh()
 {
     uint32_t input_raw = 0;
-    uint32_t output_raw = g_bsp_digital_outputs & BSP_SHIFT_OUTPUT_MASK;
+    uint32_t output_raw = bsp_encode_outputs(g_bsp_digital_outputs);
 
     hal_gpio_set(in_load, 0);
     delay_ns(200);
