@@ -328,6 +328,42 @@ MCUSerialBridgeError mcu_get_layout(
     return ret;
 }
 
+MCUSerialBridgeError msb_get_abi(
+        msb_handle* handle,
+        AbiInfoC* abi,
+        uint32_t timeout_ms)
+{
+    DBG_PRINT("GetAbi called");
+
+    // -------------------------
+    // 参数检查
+    // -------------------------
+    if (!handle) {
+        return MSB_Error_Win_HandleNotFound;
+    }
+    if (!abi) {
+        return MSB_Error_Win_InvalidParam;
+    }
+
+    MCUSerialBridgeError ret = mcu_send_packet_and_wait(
+            handle,
+            CommandGetAbi,
+            0,
+            0,
+            (uint8_t*)abi,
+            sizeof(AbiInfoC),
+            timeout_ms);
+
+    if (ret == MSB_Error_OK) {
+        DBG_PRINT("GetAbi OK: magic=0x%08X abi=0x%08X", abi->magic, abi->abi_version);
+    } else {
+        // 旧固件不认识 CommandGetAbi -> MSB_Error_Proto_UnknownCommand，调用方据此判 legacy。
+        DBG_PRINT("GetAbi failed with error [0x%08X]", ret);
+    }
+
+    return ret;
+}
+
 MCUSerialBridgeError msb_configure(
         msb_handle* handle,
         uint32_t num_ports,
@@ -893,6 +929,7 @@ void mcu_serial_bridge_get_api(MCUSerialBridgeAPI* api)
     api->mcu_state = mcu_state;
     api->msb_version = msb_version;
     api->mcu_get_layout = mcu_get_layout;
+    api->msb_get_abi = msb_get_abi;
     api->msb_configure = msb_configure;
     api->msb_read_input = msb_read_input;
     api->msb_write_output = msb_write_output;

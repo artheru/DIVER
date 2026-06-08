@@ -14,7 +14,7 @@ public class ModuleWeaver : BaseModuleWeaver
 {  
     public override void Execute()
     {
-        const string ver = "v0.36e";
+        const string ver = "v0.39-semver";
 
         WriteWarning($"RunOnMCU Processor {ver}"); 
 

@@ -111,6 +111,53 @@ namespace MCUSerialBridgeCLR
     }
 
     /// <summary>
+    /// DIVER 运行时程序二进制 ABI 信息（CommandGetAbi 0x08 回报）
+    /// </summary>
+    /// <remarks>
+    /// SemVer 版本号打包为 0x00_XX_YY_ZZ：X 主版本=不兼容变更，Y 次版本=新增 BuiltIn/OpCode，
+    /// Z 修订号=Bug 修复。常量须与 MCURuntime/mcu_runtime.h 的 DIVER_PROGRAM_MAGIC /
+    /// DIVER_ABI_VERSION 同步。完整规则见仓库根 DIVER_ABI_VERSIONING.md。
+    /// </remarks>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct AbiInfo
+    {
+        /// <summary>DIVER 程序魔数 'DIVR' (0x52564944)，无 DIVER 运行时则为 0</summary>
+        public uint Magic;
+
+        /// <summary>DIVER ABI SemVer，打包 0x00_XX_YY_ZZ，无 DIVER 运行时则为 0</summary>
+        public uint AbiVersion;
+
+        /// <summary>DIVER 程序魔数常量 'DIVR'</summary>
+        public const uint DiverMagic = 0x52564944u;
+
+        /// <summary>本 Host/编译器构建所对应的 DIVER 程序 ABI（2.0.0），须与 mcu_runtime.h 同步</summary>
+        public const uint CurrentAbiVersion = (2u << 16) | (0u << 8) | 0u;
+
+        /// <summary>固件是否内置了 DIVER 运行时（magic 命中）</summary>
+        public bool HasDiverRuntime => Magic == DiverMagic;
+
+        /// <summary>主版本号 X（不兼容变更）</summary>
+        public int Major => (int)((AbiVersion >> 16) & 0xFF);
+
+        /// <summary>次版本号 Y（新增 BuiltIn/OpCode）</summary>
+        public int Minor => (int)((AbiVersion >> 8) & 0xFF);
+
+        /// <summary>修订号 Z（Bug 修复）</summary>
+        public int Patch => (int)(AbiVersion & 0xFF);
+
+        /// <summary>X.Y.Z 形式的版本字符串</summary>
+        public string SemVer => $"{Major}.{Minor}.{Patch}";
+
+        /// <summary>转换为可读字符串</summary>
+        public override string ToString()
+        {
+            return HasDiverRuntime
+                ? $"DIVER ABI v{SemVer} (magic=0x{Magic:X8})"
+                : "No DIVER runtime";
+        }
+    }
+
+    /// <summary>
     /// MCU 运行模式枚举
     /// </summary>
     public enum MCUMode : byte
@@ -833,6 +880,13 @@ namespace MCUSerialBridgeCLR
         );
 
         [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        public static extern MCUSerialBridgeError msb_get_abi(
+            IntPtr handle,
+            out AbiInfo abi,
+            uint timeout_ms
+        );
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
         public static extern MCUSerialBridgeError mcu_state(
             IntPtr handle,
             out MCUState state,
@@ -1101,6 +1155,19 @@ namespace MCUSerialBridgeCLR
                 return MCUSerialBridgeError.Win_HandleNotFound;
 
             return MCUSerialBridgeCoreAPI.mcu_get_layout(nativeHandle, out layout, timeout);
+        }
+
+        /// <summary>获取 MCU 内置 DIVER 运行时的程序二进制 ABI 信息</summary>
+        /// <param name="abi">输出 ABI 信息</param>
+        /// <param name="timeout">超时时间（ms）</param>
+        /// <returns>错误码。旧固件不支持本命令时返回 Proto_UnknownCommand，调用方应据此判定为旧固件。</returns>
+        public MCUSerialBridgeError GetAbi(out AbiInfo abi, uint timeout = 200)
+        {
+            abi = new AbiInfo();
+            if (nativeHandle == IntPtr.Zero)
+                return MCUSerialBridgeError.Win_HandleNotFound;
+
+            return MCUSerialBridgeCoreAPI.msb_get_abi(nativeHandle, out abi, timeout);
         }
 
         /// <summary>获取 MCU 当前状态</summary>

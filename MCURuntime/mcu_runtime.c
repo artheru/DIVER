@@ -115,9 +115,13 @@ static void parse_native_chunk(uchar* chunk_ptr, int chunk_size);
  * |running_pointer 4B|starting_pointer 4B|evaluation_pointer 4B|args_ptr 4B|vars_ptr 4B|arguments|vars|structs(value_type)|evaluation_stack ...evaluation_stack:(typeid|payload|pop_sz)|...
  * more note on evaluation_stack:(typeid|payload|pop_sz)|... pop_sz = typeid+payload length:1+get_type_length(id)
  *
- * meta_data: |operation interval(in us) 4B|entry_point offset 4B|
- *            |program_descriptor_size 4B|code_chunk_size 4B|statics_descriptor 4B|
- *            |this class-id(create on initialization) 4B|
+ * program binary (ABI 2.0.0+): |magic 4B='DIVR'(0x52564944)|abi_version 4B (0x00_XX_YY_ZZ)| then meta_data...
+ *   the runtime validates magic+abi (vm_set_program) before parsing; see mcu_runtime.h.
+ *
+ * meta_data (10 ints): |operation interval(in us) 4B|entry_point offset 4B|init(.ctor) method id 4B|
+ *            |program_descriptor_size 4B|code_chunk_size 4B|virt_chunk_size 4B|statics_descriptor_size 4B|
+ *            |native_chunk_size 4B|cctor_chunk_size 4B|this class-id(create on initialization) 4B|
+ * cctor_chunk: |count 2B|(.cctor method id 2B)*count|  (static constructors, run at load before .ctor)
  *
  * program_discriptor:
  *     cartIO number 2B|
@@ -1039,6 +1043,32 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
 	ladderlogic_this_refid = 0;
 	release_native_metadata();
 	uchar* ptr = mem0 = vm_memory;
+
+	// ===== DIVER program ABI gate =====
+	// Validate magic + ABI version BEFORE parsing anything else. An incompatible
+	// program was built for a different binary layout / instruction set; parsing
+	// it would read garbage offsets and crash / run wild. SemVer rule (see
+	// mcu_runtime.h): magic must match, major must match, runtime.minor >=
+	// program.minor. NOTE: this .c is compiled as C (no <stdbool.h>), so the
+	// "ok" flags are plain int, not bool.
+	unsigned int program_magic = (unsigned int)ReadInt;
+	unsigned int program_abi = (unsigned int)ReadInt;
+	unsigned int runtime_abi = (unsigned int)DIVER_ABI_VERSION;
+	int magic_ok = (program_magic == DIVER_PROGRAM_MAGIC);
+	int major_ok = (DIVER_ABI_MAJOR(program_abi) == DIVER_ABI_MAJOR(runtime_abi));
+	int minor_ok = (DIVER_ABI_MINOR(runtime_abi) >= DIVER_ABI_MINOR(program_abi));
+	if (!magic_ok || !major_ok || !minor_ok)
+	{
+		char abi_err[224] = { 0 };
+		snprintf(abi_err, sizeof(abi_err),
+			"DIVER ABI incompatible: program magic=0x%08X v%u.%u.%u, runtime magic=0x%08X v%u.%u.%u. Refuse to run (%s). Rebuild program or update firmware.",
+			program_magic, (unsigned)DIVER_ABI_MAJOR(program_abi), (unsigned)DIVER_ABI_MINOR(program_abi), (unsigned)DIVER_ABI_PATCH(program_abi),
+			(unsigned int)DIVER_PROGRAM_MAGIC, (unsigned)DIVER_ABI_MAJOR(runtime_abi), (unsigned)DIVER_ABI_MINOR(runtime_abi), (unsigned)DIVER_ABI_PATCH(runtime_abi),
+			!magic_ok ? "bad magic" : (!major_ok ? "major mismatch" : "runtime too old for program minor"));
+		report_error(0, (uchar*)abi_err, __LINE__);
+		return -1; // sentinel: program not loaded.
+	}
+
 	int interval = ReadInt;
 	entry_method_id = ReadInt;
 	init_method_id = ReadInt;
@@ -1047,6 +1077,7 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
 	int virt_chunk_sz = ReadInt;
 	int static_desc_sz = ReadInt;
 	int native_chunk_sz = ReadInt;
+	int cctor_chunk_sz = ReadInt; // .cctor method-id table (added in ABI 2.0.0)
 	ladderlogic_this_clsid = ReadInt;
 
 	program_desc_ptr = ptr;
@@ -1054,7 +1085,8 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
 	virt_ptr = code_ptr + code_chunk_sz;
 	statics_desc_ptr = virt_ptr + virt_chunk_sz;
 	uchar* native_ptr = statics_desc_ptr + static_desc_sz;
-	statics_val_ptr = native_ptr + native_chunk_sz;
+	uchar* cctor_ptr = native_ptr + native_chunk_sz;
+	statics_val_ptr = cctor_ptr + cctor_chunk_sz;
 
 	heap_tail = vm_memory + vm_memory_size;
 
@@ -1070,6 +1102,33 @@ int vm_set_program(uchar* vm_memory, int vm_memory_size)
 
 	// parse statics desc to get stack0 ptr.
 	parse_statics();
+
+	// ===== run static constructors (.cctor) =====
+	// .NET semantics: a type's static constructor runs before any instance/static
+	// access. Run every discovered .cctor (static methods, no `this`) here, before
+	// the instance .ctor and the first Operation. Static methods take new_obj_id<0
+	// so vm_push_stack initializes local var 0 (its var-init loop starts at
+	// new_obj_id>=0?1:0). clean_up() after each keeps statics (GC roots) alive.
+	{
+		uchar* cc = cctor_ptr;
+		short cctor_count = *(short*)cc; cc += 2;
+		for (int ci = 0; ci < cctor_count; ++ci)
+		{
+			short cctor_mid = *(short*)cc; cc += 2;
+			struct stack_frame_header* root_frame = (struct stack_frame_header*)stack0;
+			memset(root_frame, 0, sizeof(*root_frame));
+			root_frame->evaluation_pointer = (uchar*)(root_frame + 1);
+			root_frame->evaluation_st_ptr = root_frame->evaluation_pointer;
+			stack_ptr[0] = root_frame;
+			new_stack_depth = 1;
+			uchar* caller_eptr = root_frame->evaluation_pointer;
+			vm_push_stack(cctor_mid, -1, &caller_eptr);
+			new_stack_depth = 0;
+			stack_ptr[0] = NULL;
+			clean_up();
+		}
+	}
+
 	if (init_method_id >= 0) {
 		struct stack_frame_header* root_frame = (struct stack_frame_header*)stack0;
 		memset(root_frame, 0, sizeof(*root_frame));

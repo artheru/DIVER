@@ -126,6 +126,19 @@ typedef enum {
     CommandUpgrade = 0x07,
 
     /**
+     * @brief 获取 DIVER 运行时 ABI 版本 (PC → MCU)
+     *
+     * 查询 MCU 内置 DIVER 运行时的程序二进制 ABI（magic + SemVer 版本号），
+     * 供上位机在下发程序前判断兼容性（详见 AbiInfoC / DIVER_ABI_VERSIONING.md）。
+     * 响应命令：0x88（同 seq，携带 AbiInfoC 数据）。
+     *
+     * 兼容性说明：早于本命令的旧固件不认识 0x08，会返回
+     * MSB_Error_Proto_UnknownCommand；上位机应据此判定该节点为「无 ABI 上报的
+     * 旧固件」，而不是判定探测失败。
+     */
+    CommandGetAbi = 0x08,
+
+    /**
      * @brief 启动 MCU 运行 (PC → MCU)
      *
      * 上位机命令 MCU 开始执行（DIVER 模式运行程序，或透传模式开始转发）。
@@ -329,6 +342,32 @@ typedef struct {
     char Commit[8];     /**< Git Commit 简写 */
     char BuildTime[24]; /**< 编译时间字符串 */
 } VersionInfoC;
+
+/* ===============================
+ * DIVER ABI Info (CommandGetAbi 0x08)
+ * =============================== */
+
+/**
+ * @brief DIVER 运行时程序二进制 ABI 信息
+ *
+ * 描述 MCU 内置 DIVER 运行时所支持的程序二进制契约，供上位机在下发程序前做
+ * 兼容性预校验（避免把新布局的程序下发到旧 runtime 上「跑飞」）。
+ *
+ * - magic:       DIVER 程序魔数，应等于 0x52564944 ('DIVR')。
+ *                若固件未编入 DIVER 运行时，则为 0。
+ * - abi_version: SemVer 版本号，打包为 0x00_XX_YY_ZZ：
+ *                  X 主版本(byte2) = 不兼容变更（布局/执行方式）；
+ *                  Y 次版本(byte1) = 新增 BuiltIn/OpCode；
+ *                  Z 修订号(byte0) = Bug 修复。
+ *                兼容判定：magic 相同 且 major 相同 且 host.minor 容忍范围内。
+ *                完整规则见仓库根 DIVER_ABI_VERSIONING.md / MCURuntime/mcu_runtime.h。
+ */
+typedef struct {
+    u32 magic;       /**< DIVER 程序魔数 'DIVR' (0x52564944)，无 DIVER 运行时则为 0 */
+    u32 abi_version; /**< DIVER ABI SemVer，打包 0x00_XX_YY_ZZ，无 DIVER 运行时则为 0 */
+} AbiInfoC;
+
+STATIC_ASSERT(sizeof(AbiInfoC) == 8, "AbiInfoC size must be 8 bytes");
 
 /* ===============================
  * MCU State

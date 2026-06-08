@@ -10,6 +10,10 @@
 #include "util/console.h"
 #include "util/crc.h"
 
+#if defined(HAS_DIVER_RUNTIME) && HAS_DIVER_RUNTIME == 1
+#include "mcu_runtime.h"
+#endif
+
 
 typedef struct {
     bool in_use;   // 是否占用
@@ -155,6 +159,25 @@ void packet_parse(const void* data_void, uint32_t length, ...)
                     layout_info.digital_input_count,
                     layout_info.digital_output_count,
                     layout_info.port_count);
+            break;
+        }
+        case CommandGetAbi: {
+            // 上报 DIVER 运行时程序二进制 ABI（magic + SemVer），供上位机下发前预校验。
+            static AbiInfoC abi_info;
+#if defined(HAS_DIVER_RUNTIME) && HAS_DIVER_RUNTIME == 1
+            abi_info.magic = (u32)DIVER_PROGRAM_MAGIC;
+            abi_info.abi_version = (u32)DIVER_ABI_VERSION;
+#else
+            abi_info.magic = 0;
+            abi_info.abi_version = 0;
+#endif
+            ret = MSB_Error_OK;
+            return_buffer = (void*)&abi_info;
+            return_buffer_size = sizeof(abi_info);
+            console_printf_do(
+                    "CONTROL: GET ABI, magic=0x%08X abi=0x%08X\n",
+                    abi_info.magic,
+                    abi_info.abi_version);
             break;
         }
         case CommandUpgrade:

@@ -141,6 +141,22 @@ DLL_EXPORT MCUSerialBridgeError
 mcu_get_layout(msb_handle* handle, LayoutInfoC* layout, uint32_t timeout_ms);
 
 /**
+ * @brief 获取 MCU 内置 DIVER 运行时的程序二进制 ABI 信息
+ *
+ * 返回 magic + SemVer 版本号（AbiInfoC），供上位机在下发程序前做兼容性预校验。
+ *
+ * @param handle     MCU 句柄
+ * @param abi        输出 ABI 信息
+ * @param timeout_ms 超时时间（毫秒）
+ *
+ * @return MCUSerialBridgeError
+ *      错误码，MSB_Error_OK 表示成功。旧固件不支持本命令时返回
+ *      MSB_Error_Proto_UnknownCommand，调用方应据此判定为「无 ABI 上报的旧固件」。
+ */
+DLL_EXPORT MCUSerialBridgeError
+msb_get_abi(msb_handle* handle, AbiInfoC* abi, uint32_t timeout_ms);
+
+/**
  * @brief 配置MCU端口
  *
  * @param handle MCU句柄
@@ -522,6 +538,10 @@ typedef struct MCUSerialBridgeAPI {
     MCUSerialBridgeError (*mcu_get_layout)(
             msb_handle* handle,
             LayoutInfoC* layout,
+            uint32_t timeout_ms);
+    MCUSerialBridgeError (*msb_get_abi)(
+            msb_handle* handle,
+            AbiInfoC* abi,
             uint32_t timeout_ms);
     MCUSerialBridgeError (*msb_configure)(
             msb_handle*,

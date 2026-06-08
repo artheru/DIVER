@@ -104,6 +104,28 @@ internal partial class Processor
 
     internal shared_info SI = new();
 
+    // ===== DIVER program ABI (binary contract with MCURuntime/mcu_runtime.c) =====
+    // These MUST stay in sync with DIVER_PROGRAM_MAGIC / DIVER_ABI_VERSION in
+    // MCURuntime/mcu_runtime.h. Every compiled program starts with
+    // [magic 4B][abi_version 4B]; the runtime refuses to run on incompatibility.
+    //
+    // abi_version is SemVer X.Y.Z packed as 0x00_XX_YY_ZZ (top byte 0):
+    //   X major: incompatible change (binary layout / execution model). Different
+    //            major => runtime refuses.
+    //   Y minor: additive change (new built-ins / opcodes). Runtime minor must be
+    //            >= program minor.
+    //   Z patch: bug fixes only, always compatible.
+    // Bump exactly one component per change (layout=>X, new builtin=>Y, fix=>Z).
+    // See DIVER_ABI_VERSIONING.md at the repo root for the full rule.
+    public const uint DiverProgramMagic = 0x52564944; // bytes 'D','I','V','R'
+
+    public static uint MakeAbiVersion(int x, int y, int z) =>
+        ((uint)(x & 0xFF) << 16) | ((uint)(y & 0xFF) << 8) | (uint)(z & 0xFF);
+
+    // Current ABI version emitted by this compiler. 2.0.0 (layout change:
+    // magic/version prefix + cctor table + static constructor execution).
+    public static readonly uint DiverAbiVersion = MakeAbiVersion(2, 0, 0);
+
     private bool isRoot = false;
     public Processor()
     {
@@ -1110,6 +1132,46 @@ internal partial class Processor
                         throw new WeavingException($"Failed to process constructor {ctor.FullName}");
                 }
             }
+
+            // ===== static constructors (.cctor) =====
+            // .NET runs a type's static constructor (type initializer) before any
+            // static field of that type is accessed. DIVER used to ignore .cctor, so
+            // `static readonly T X = ...` initializers never ran and the field stayed
+            // null (NullReference at first use). Discover + compile every relevant
+            // .cctor; their method ids go into a trailing chunk the runtime executes
+            // at load (see MCURuntime/mcu_runtime.c vm_set_program).
+            var cctorMethodKeys = new List<string>();
+            var cctorDoneTypes = new HashSet<string>();
+            void TryProcessCctor(TypeDefinition td)
+            {
+                if (td == null || !cctorDoneTypes.Add(td.FullName)) return;
+                var cctor = td.Methods.FirstOrDefault(m => m.IsConstructor && m.IsStatic);
+                if (cctor == null) return;
+                var key = GetGenericResolvedName(cctor, null);
+                if (!SI.methods.ContainsKey(key))
+                {
+                    if (new Processor(this) { bmw = bmw }.Process(cctor) == null)
+                        throw new WeavingException($"Failed to process static constructor {cctor.FullName}");
+                }
+                if (!cctorMethodKeys.Contains(key)) cctorMethodKeys.Add(key);
+                bmw.WriteWarning($"cctor discovered: {td.FullName} -> {key}");
+            }
+            // logic class's own .cctor first, then fixed-point over types that own any
+            // referenced static field (compiling a .cctor can pull in more statics).
+            TryProcessCctor(method.DeclaringType.Resolve());
+            int cctorPrevCount;
+            do
+            {
+                cctorPrevCount = cctorDoneTypes.Count;
+                var ownerTypes = SI.referenced_typefield.Values
+                    .Select(v => v.fr)
+                    .Where(fr => fr != null && (fr.Resolve()?.IsStatic ?? false))
+                    .Select(fr => fr.DeclaringType?.Resolve())
+                    .Where(t => t != null)
+                    .GroupBy(t => t.FullName).Select(g => g.First())
+                    .ToList();
+                foreach (var ot in ownerTypes) TryProcessCctor(ot);
+            } while (cctorDoneTypes.Count != cctorPrevCount);
         re_link:
             
             //todo: flawed virtual call table.
@@ -1660,7 +1722,23 @@ internal partial class Processor
 
             bmw.WriteWarning($"entry point, this cls_id={this_clsID}");
 
+            // .cctor method-id table (ABI 2.0.0): [count 2B][registry id 2B]*count.
+            // The runtime runs each at load (before instance .ctor / first Operation).
+            var cctorIds = cctorMethodKeys
+                .Where(k => SI.methods.ContainsKey(k))
+                .Select(k => (short)SI.methods[k].registry)
+                .ToList();
+            byte[] cctor_chunk =
+            [
+                ..BitConverter.GetBytes((short)cctorIds.Count),
+                ..cctorIds.SelectMany(id => BitConverter.GetBytes(id))
+            ];
+            bmw.WriteWarning($"cctor table: {cctorIds.Count} method(s) [{string.Join(",", cctorIds)}]");
+            bmw.WriteWarning($"DIVER ABI v{(DiverAbiVersion >> 16) & 0xFF}.{(DiverAbiVersion >> 8) & 0xFF}.{DiverAbiVersion & 0xFF}, magic=0x{DiverProgramMagic:X8}");
+
             byte[] dll = [
+                ..BitConverter.GetBytes(DiverProgramMagic), // ABI gate: magic 'DIVR'
+                ..BitConverter.GetBytes(DiverAbiVersion),   // ABI gate: SemVer 0x00_XX_YY_ZZ
                 ..BitConverter.GetBytes(scanInterval), // operation interval
                 ..BitConverter.GetBytes(entry_offset), // entry method id
                 ..BitConverter.GetBytes(initMethodIndex), // ctor method id
@@ -1669,13 +1747,17 @@ internal partial class Processor
                 ..BitConverter.GetBytes(virts.Length), 
                 ..BitConverter.GetBytes(statics_descriptor.Length),
                 ..BitConverter.GetBytes(native_chunk.Length),
+                ..BitConverter.GetBytes(cctor_chunk.Length), // .cctor table size
                 ..BitConverter.GetBytes(this_clsID), // this.
-                ..program_desc, ..code_chunk, ..virts, ..statics_descriptor, ..native_chunk];
+                ..program_desc, ..code_chunk, ..virts, ..statics_descriptor, ..native_chunk, ..cctor_chunk];
 
             // Build .diver source and map
             try
             {
-                int headerLen = 9 * 4;
+                // header = 8B magic/abi prefix + 10 meta ints. methodDetailBase must
+                // mirror the runtime's program_desc_ptr (mem0 + this header), because
+                // the runtime reports fault offsets as (ptr - mem0).
+                int headerLen = 8 + 10 * 4;
                 int methodsN = all_methods.Length;
                 int methodDetailBase = headerLen + program_desc.Length + 2 + methodsN * 8;
 

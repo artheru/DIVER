@@ -5,6 +5,56 @@
 typedef unsigned char uchar;
 typedef unsigned short ushort;
 
+// ============================================================================
+// DIVER program ABI (binary contract between DiverCompiler and this runtime)
+// ----------------------------------------------------------------------------
+// Every compiled program binary starts with:  [magic 4B][abi_version 4B]
+// followed by the meta_data header (see memory layout comment in mcu_runtime.c).
+//
+// The runtime MUST validate magic+abi_version before doing anything else and
+// refuse to run (report_error + safe mode) when they are incompatible. This
+// prevents an old/new MCU from running a program built for a different binary
+// layout / instruction set and "running wild".
+//
+// ----- Versioning scheme: SemVer-style X.Y.Z packed into 4 bytes -----------
+//   abi_version = 0x00_XX_YY_ZZ  (top byte is always 0)
+//     X  major (byte 2): INCOMPATIBLE change. Binary layout change, execution
+//                        model change, anything an older runtime cannot parse.
+//                        Different major  => MUST refuse to run.
+//     Y  minor (byte 1): ADDITIVE change, e.g. new built-in methods / opcodes.
+//                        A program needs a runtime whose minor >= program minor.
+//                        runtime.minor <  program.minor => refuse (missing opcodes).
+//                        runtime.minor >= program.minor => OK (superset).
+//     Z  patch (byte 0): bug fixes only, fully compatible in both directions.
+//
+// Compatibility rule the runtime enforces (see vm_set_program):
+//     magic must match  AND  major must match  AND  runtime.minor >= program.minor
+//
+// When you change the runtime/compiler, bump exactly one component:
+//   - layout / execution change      -> bump X (reset Y,Z to 0)
+//   - new builtin / opcode           -> bump Y (reset Z to 0)
+//   - bug fix only                   -> bump Z
+// Keep this value in sync with DiverCompiler (DiverCompiler/Processor.cs:
+// DiverAbiVersion). See also DIVER_ABI_VERSIONING.md at the repo root.
+//
+// History:
+//   (legacy)  : NO magic/version prefix, 9-int meta header. Predates this check;
+//               cannot be detected by value. Conceptually "1.x".
+//   2.0.0     : magic+version prefix added; meta header gains the cctor-table
+//               chunk-size field + trailing .cctor method-id table; static
+//               constructors (.cctor) now run. LAYOUT CHANGE => major bump.
+// ============================================================================
+#define DIVER_PROGRAM_MAGIC 0x52564944u /* bytes 'D','I','V','R' (little-endian) */
+
+#define DIVER_ABI_MAKE(x, y, z) \
+    (((unsigned int)((x) & 0xFF) << 16) | ((unsigned int)((y) & 0xFF) << 8) | ((unsigned int)((z) & 0xFF)))
+#define DIVER_ABI_MAJOR(v) (((v) >> 16) & 0xFF)
+#define DIVER_ABI_MINOR(v) (((v) >> 8) & 0xFF)
+#define DIVER_ABI_PATCH(v) ((v) & 0xFF)
+
+// Current ABI version of this runtime. 2.0.0 (layout change: see history above).
+#define DIVER_ABI_VERSION DIVER_ABI_MAKE(2, 0, 0)
+
 /*
 
 ┓┏       •          ┓  
