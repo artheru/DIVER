@@ -10,7 +10,7 @@ info() {
   echo "[install-dotnet-sdk-ubuntu] $*"
 }
 
-[ "$(id -u 2>/dev/null || echo "")" = "0" ] || fail "This installer must run as root. Re-run with sudo or root user."
+[ "$(id -u 2>/dev/null || echo "")" = "0" ] || fail "This installer must run as root. Use: sudo bash setup/install-dotnet-sdk-ubuntu.sh"
 
 command -v apt-get >/dev/null 2>&1 || fail "apt-get was not found. This installer supports Ubuntu/Debian-style systems only."
 

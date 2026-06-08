@@ -203,6 +203,10 @@ public sealed class DiverBuildService
                           """;
         await File.WriteAllTextAsync(Path.Combine(projDir, "FodyWeavers.xml"), fodyWeavers, Encoding.UTF8, ct);
 
+        var logPath = Path.Combine(buildRoot, "build.log");
+        await using var logFs = new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+        await using var logSw = new StreamWriter(logFs, Encoding.UTF8) { AutoFlush = true };
+
         await _terminal.BuildLineAsync($"Preparing MSBuild process...", ct);
         
         // 先执行 restore，这样可以看到进度
@@ -227,18 +231,25 @@ public sealed class DiverBuildService
         {
             if (restoreProc != null)
             {
-                var restoreRing = new RingBuffer(50);
-                var restoreStdout = ConsumeAsync(restoreProc.StandardOutput, null, restoreRing, ct);
-                var restoreStderr = ConsumeAsync(restoreProc.StandardError, null, restoreRing, ct);
+                var restoreRing = new RingBuffer(200);
+                var restoreStdout = ConsumeAsync(restoreProc.StandardOutput, logSw, restoreRing, ct);
+                var restoreStderr = ConsumeAsync(restoreProc.StandardError, logSw, restoreRing, ct);
                 await Task.WhenAll(restoreStdout, restoreStderr);
                 await restoreProc.WaitForExitAsync(ct);
                 restoreExitCode = restoreProc.ExitCode;
+                if (restoreExitCode != 0)
+                {
+                    await _terminal.BuildLineAsync($"RESTORE FAILED with exit code {restoreExitCode}", ct);
+                    await WriteRestoreFailureHintAsync(restoreRing.Snapshot(), offlineNuGetPackagesDir, logPath, ct);
+                    throw new BuildFailedException(restoreExitCode, logPath, restoreRing.Snapshot());
+                }
             }
         }
         if (restoreExitCode != 0)
         {
             await _terminal.BuildLineAsync($"RESTORE FAILED with exit code {restoreExitCode}", ct);
-            throw new BuildFailedException(restoreExitCode, Path.Combine(buildRoot, "build.log"), Array.Empty<string>());
+            await _terminal.BuildLineAsync($"Failed to start or complete dotnet restore. See build log: {logPath}", ct);
+            throw new BuildFailedException(restoreExitCode, logPath, Array.Empty<string>());
         }
         
         await _terminal.BuildLineAsync($"---------- MSBuild Compile ----------", ct);
@@ -265,10 +276,6 @@ public sealed class DiverBuildService
         
         using var proc = Process.Start(psi);
         if (proc == null) throw new InvalidOperationException("Failed to start dotnet build.");
-
-        var logPath = Path.Combine(buildRoot, "build.log");
-        await using var logFs = new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.Read);
-        await using var logSw = new StreamWriter(logFs, Encoding.UTF8) { AutoFlush = true };
 
         var ring = new RingBuffer(200);
         var stdout = ConsumeAsync(proc.StandardOutput, logSw, ring, ct);
@@ -354,6 +361,30 @@ public sealed class DiverBuildService
     /// <summary>
     /// 消费 MSBuild 输出流，发送到 Build 日志面板
     /// </summary>
+    private async Task WriteRestoreFailureHintAsync(IReadOnlyList<string> tail, string packageSource, string logPath, CancellationToken ct)
+    {
+        var missingPackages = tail
+            .SelectMany(line => System.Text.RegularExpressions.Regex.Matches(line, @"Unable to find package\s+([A-Za-z0-9_.-]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                .Select(match => match.Groups[1].Value))
+            .Where(packageId => !string.IsNullOrWhiteSpace(packageId))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(packageId => packageId, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (missingPackages.Length > 0)
+        {
+            await _terminal.BuildLineAsync("Offline NuGet restore is missing package(s):", ct);
+            foreach (var packageId in missingPackages)
+            {
+                await _terminal.BuildLineAsync($"  - {packageId}", ct);
+            }
+            await _terminal.BuildLineAsync($"NuGet source used for this build: {packageSource}", ct);
+            await _terminal.BuildLineAsync("Fix: re-publish Host so res/compiler/nuget-packages contains the full package dependency closure, then redeploy the new package.", ct);
+        }
+
+        await _terminal.BuildLineAsync($"Restore output was written to: {logPath}", ct);
+    }
+
     private async Task ConsumeAsync(StreamReader reader, StreamWriter? log, RingBuffer ring, CancellationToken ct)
     {
         while (!reader.EndOfStream && !ct.IsCancellationRequested)

@@ -89,6 +89,118 @@
   - CRC32: `0xA36AA64B`
 - 生成后清理了 `mcu/bsp/CORAL-NODE-V2.1/` 下的 `.o` 与 `__pycache__` 中间产物。
 
+## 2026-06-08 18:47 UTC+8 — V2.1 digital_io 输出重排
+
+- 用户明确要求本轮只处理 `digital_io`，不继续分析/修改 CAN。
+- 根据用户提供的实际接线关系整理输出映射：
+  - 最末级（离 MCU 最远）74HC595 `D0..D7 -> OUT0..OUT7`
+  - 中间级 74HC595 `D4..D7 -> OUT8..OUT11`
+  - 最靠近 MCU 的 74HC595 `D0..D7 -> OUT12..OUT19`
+- 在 `MCUSerialBridge/mcu/bsp/CORAL-NODE-V2.1/digital_io.c` 中新增 `bsp_encode_outputs()`：
+  - 逻辑输出 `OUT0..19` 重排为 SPI 原始发送位 `output_raw`
+  - 结果位布局：
+    - raw `bit0..7 = OUT0..7`
+    - raw `bit12..15 = OUT8..11`
+    - raw `bit16..23 = OUT12..19`
+    - raw `bit8..11` 空置
+- `bsp_digital_io_refresh()` 中将
+  - `uint32_t output_raw = g_bsp_digital_outputs & BSP_SHIFT_OUTPUT_MASK;`
+  - 改为
+  - `uint32_t output_raw = bsp_encode_outputs(g_bsp_digital_outputs);`
+- 同时移除 `digital_io.c` 中未使用的 `chip/periph.h` 头文件。
+- 在 `MCUSerialBridge/mcu/bsp/CORAL-NODE-V2.1/sch.md` 增补输出位映射说明。
+- `ReadLints` 检查 `digital_io.c` 无错误。
+
+## 2026-06-08 19:14 UTC+8 — V2.1 清理重编并重生 UPG
+
+- 用户怀疑现场不亮可能是旧产物残留，明确要求确认是否执行过 `scons -c`。
+- 已执行完整流程：
+  - `scons BUILD_MCU=1 PDN=CORAL-NODE-V2.1 ENABLE_DIVER_RUNTIME=1 -c`
+  - `scons BUILD_MCU=1 PDN=CORAL-NODE-V2.1 ENABLE_DIVER_RUNTIME=1 -j 12 debug=1`
+  - `scons BUILD_MCU=1 PDN=CORAL-NODE-V2.1 ENABLE_DIVER_RUNTIME=1 -j 12 debug=1 upg`
+- 结果：
+  - 清理成功
+  - 固件重新编译成功
+  - 新 UPG 生成成功：
+    - `MCUSerialBridge/build/MCUSerialBridge_CORAL-NODE-V2.1_7b57695__20260608_191421.upg`
+- 新 UPG 元数据：
+  - `COMMIT = 7b57695`
+  - `BUILD_TIME = 2026-06-08 19:14:21`
+  - `LENGTH = 222560`
+  - `ADDRESS = 0x00010000`
+  - `CRC32 = 0x2E124A7F`
+- 备注：
+  - 链接阶段仍有 `_read/_write/_close/_isatty/_getpid/_kill/_lseek` 及 `RWX permissions` 的既有 warning，但未阻塞构建与打包。
+
+## 2026-06-08 19:24 UTC+8 — 临时强制拉高 raw bit8..11
+
+- 用户现场反馈：`OUT8` 和 `OUT11` 仍然不亮，要求做一个临时修改，用于验证是否接线偏到了中间级低 4 位。
+- 在 `MCUSerialBridge/mcu/bsp/CORAL-NODE-V2.1/digital_io.c` 中追加临时调试逻辑：
+  - `raw_outputs |= 0x00000F00u;`
+- 含义：
+  - 无论 `g_bsp_digital_outputs` 如何，`raw bit8..11` 固定为高。
+  - 如果这样做后现场对应灯/输出亮了，说明中间级实际接线更可能落在 `D0..D3`，而不是之前假设的 `D4..D7`。
+- `ReadLints` 检查 `digital_io.c` 无错误。
+- 已执行清理、重编和重生 UPG：
+  - `scons BUILD_MCU=1 PDN=CORAL-NODE-V2.1 ENABLE_DIVER_RUNTIME=1 -c`
+  - `scons BUILD_MCU=1 PDN=CORAL-NODE-V2.1 ENABLE_DIVER_RUNTIME=1 -j 12 debug=1`
+  - `scons BUILD_MCU=1 PDN=CORAL-NODE-V2.1 ENABLE_DIVER_RUNTIME=1 -j 12 debug=1 upg`
+- 新调试 UPG：
+  - `MCUSerialBridge/build/MCUSerialBridge_CORAL-NODE-V2.1_7b57695__20260608_192409.upg`
+- 元数据：
+  - `BUILD_TIME = 2026-06-08 19:24:09`
+  - `LENGTH = 222560`
+  - `ADDRESS = 0x00010000`
+  - `CRC32 = 0x5C6CD1CB`
+
+## 2026-06-08 19:50 UTC+8 — 新增 UpperIO DO 写 snapshot 最小示例
+
+- 用户要求：在 `ai-deck/kit-docs` 写一个根据 UpperIO 的 DO(`u32`) 写到 snapshot 的最小示例代码。
+- 检索确认：
+  - `RunOnMCU.WriteSnapshot(byte[] payload)` 现有文档位于：
+    - `3rd/CoralinkerKitDocs/02-logic-api.md`
+    - `3rd/CoralinkerKitDocs/05-serial-and-can.md`
+  - `snapshot` 约定为 4 字节，`bit0..bit31` 对应 `DO0..DO31`。
+- 已执行：
+  - 新增文件：
+    - `ai-deck/kit-docs/UpperIODoToSnapshot_Minimal.cs`
+  - 示例包含：
+    - `[AsUpperIO] uint doValue`
+    - MCU 逻辑中：
+      - `byte[] snapshot = BitConverter.GetBytes(cart.doValue);`
+      - `RunOnMCU.WriteSnapshot(snapshot);`
+    - Root 逻辑中：
+      - `[AsControlItem] uint commandDo`
+      - `cart.doValue = commandDo;`
+- 说明：
+  - 这是最小可读示例，未额外引入 DI/状态回读等逻辑。
+
+## 2026-06-08 19:38 UTC+8 — 每字节反位序修正
+
+- 用户现场确认真实原因：
+  - 74HC595 为 `D0 = QA`, `D7 = QH`
+  - `SPI2` 配置 `lsb_first=1`
+  - 因此每个字节先发出的 `bit0` 会被移到 `QH`
+  - 结论：每个发送字节内部的位序需要反过来
+- 代码修正：
+  - 在 `MCUSerialBridge/mcu/bsp/CORAL-NODE-V2.1/digital_io.c` 新增 `bsp_reverse_u8()`
+  - `bsp_encode_outputs()` 改为：
+    - 先按接线关系组出 3 个逻辑字节
+    - `byte0: D0..D7 <- OUT0..OUT7`
+    - `byte1: D4..D7 <- OUT8..OUT11`
+    - `byte2: D0..D7 <- OUT12..OUT19`
+    - 再对 3 个字节分别做 bit reverse 后拼成最终 `output_raw`
+  - 删除上一轮临时调试代码 `raw_outputs |= 0x00000F00u;`
+- 文档同步：
+  - 更新 `MCUSerialBridge/mcu/bsp/CORAL-NODE-V2.1/sch.md`，补充“每字节 bit reverse”说明
+- 校验：
+  - `ReadLints` 检查 `digital_io.c` 无错误
+  - `scons BUILD_MCU=1 PDN=CORAL-NODE-V2.1 ENABLE_DIVER_RUNTIME=1 -j 12 debug=1` 编译成功
+  - 固件尺寸：
+    - `text=220452`
+    - `data=2204`
+    - `bss=114188`
+
 ### [support] 处理 4499 端口占用
 - 用户反馈 ASP.NET Core Host 启动失败：`Failed to bind to address http://0.0.0.0:4499: address already in use`。
 - 给出 Windows PowerShell 处理方式：先用 `Get-NetTCPConnection -LocalPort 4499` 定位 PID，再用 `Stop-Process` 或 `taskkill` 结束占用进程。
@@ -4300,3 +4412,219 @@
     - `device.ts` dynamic/static import chunk warning。
     - 大 chunk size warning。
   - dotnet publish 仍有既有 nullable/unused field warnings，未阻塞发布。
+
+## 2026-06-05 12:08 UTC+8 — 修复全新离线部署 Host Build restore 缺包
+
+- 用户需求：
+  - 分析并解决 `ai-deck/HOST_BUILD_RESTORE_ISSUE.md` 中同事 Agent 反馈的问题：
+    - `192.168.1.101` 只部署 0605 离线包后 Build restore 失败。
+    - `192.168.1.102` 同源代码/同发布包可成功，区别是 1.102 曾经运行过在线 restore 版本。
+- 现象：
+  - 1.101 restore 报 `NU1101`，找不到多个 `runtime.<platform>.runtime.native.System.IO.Ports` 包。
+  - 旧发布包 `publish-info.json` 只列出：
+    - `system.io.ports/9.0.3`
+    - `runtime.native.system.io.ports/9.0.3`
+- 根因：
+  - `runtime.native.System.IO.Ports/9.0.3` 是 meta package。
+  - 它还依赖多个 runtime-specific package：
+    - `runtime.linux-x64.runtime.native.system.io.ports/9.0.3`
+    - `runtime.linux-arm64.runtime.native.system.io.ports/9.0.3`
+    - 以及 Android、Linux musl/bionic、macOS、Mac Catalyst 等同版本 runtime 包。
+  - 1.102 成功是因为历史在线 restore 已把这些包放进全局 NuGet cache。
+  - 1.101 全新离线部署只有发布包内离线源，所以无法解析这些 transitive runtime 包。
+- 修改：
+  - `3rd/CoralinkerHost/publish-host.ps1`
+    - `offlinePackageSpecs` 增加全部 16 个 `runtime.*.runtime.native.system.io.ports/9.0.3` 包。
+    - 发布时把这些包复制到 `res/compiler/nuget-packages/`。
+    - `publish-info.json` 的 `offlineNuGetPackages` 会同步记录这些包。
+- 发布：
+  - 在 `3rd/CoralinkerHost` 执行：
+    - `.\publish-host.ps1 -SkipNativeBuild`
+  - 输出：
+    - `3rd/CoralinkerHost/Publish/CoralinkerHost_7b57695_20260605-120558`
+  - 说明：
+    - 本次只修改 Host 发布包的离线 NuGet 包收集逻辑，未改 native runtime，因此使用 `-SkipNativeBuild`。
+- 验证：
+  - 本机 NuGet cache 中确认 16 个 runtime-specific `System.IO.Ports` 包存在。
+  - 读取新包 `publish-info.json`，确认 `offlineNuGetPackages` 已列出这些 runtime-specific 包。
+  - `Glob` 确认新发布包 `res/compiler/nuget-packages` 下存在 17 个 `runtime.*system.io.ports` nuspec（含 meta package）。
+  - 新建临时探针：
+    - `ai-deck/agent_work/20260605-offline-restore-probe/OfflineRestoreProbe.csproj`
+    - `ai-deck/agent_work/20260605-offline-restore-probe/desc.md`
+  - 使用干净包目录验证：
+    - `NUGET_PACKAGES` 指向全新空目录。
+    - NuGet source 只指定 `CoralinkerHost_7b57695_20260605-120558/res/compiler/nuget-packages`。
+    - `dotnet restore` 成功。
+- 注意：
+  - 尝试更新 `ai-deck/HOST_BUILD_RESTORE_ISSUE.md` 时遇到 permission denied，未强行修改。
+  - 发布过程中 Vite warning 仍为既有提示：
+    - SignalR pure annotation comment。
+    - `device.ts` dynamic/static import chunk warning。
+    - 大 chunk size warning。
+  - dotnet publish 仍有既有 nullable/unused field warnings，未阻塞发布。
+
+## 2026-06-05 12:12 UTC+8 — 离线 Build 包闭包与日志友好度评估
+
+- 用户问题：
+  - 离线编译用户代码是否还会遇到其他 NuGet 包。
+  - 当前把离线包列表直接写在 `publish-host.ps1` 是否合理，是否应该单独配置。
+  - 用户 Agent 反复多次才发现缺包，是否能让 Build 日志更友好。
+- 当前观察：
+  - `DiverBuildService` 生成临时 `LogicBuild.csproj` 时，通过 `res/compiler/build-packages.json` 加载顶层 `PackageReference`。
+  - `publish-host.ps1` 同时维护一份 `$defaultBuildPackages` 和一份 `$offlinePackageSpecs`。
+  - `$defaultBuildPackages` 是顶层依赖：
+    - `Fody/6.6.4`
+    - `Newtonsoft.Json/13.0.3`
+    - `System.IO.Ports/9.0.3`
+    - `System.Management/9.0.4`
+  - `$offlinePackageSpecs` 是离线源复制清单，目前仍需要手写 transitive/runtime 包。
+  - `DiverBuildService` 的 restore 阶段当前没有把 stdout/stderr 写入 `build.log`，失败时只输出 `RESTORE FAILED with exit code ...`，并抛出空 log tail。
+- 风险判断：
+  - 用户逻辑中直接使用 .NET BCL 类型通常不需要额外 NuGet。
+  - 离线缺包风险主要来自固定顶层包的 transitive dependencies、runtime-specific packages、build/analyzer packages。
+  - 继续手写 `$offlinePackageSpecs` 容易再次漏包，尤其是类似 `runtime.native.*` 的 meta package。
+- 建议：
+  - 将 Build 顶层包定义移到独立配置文件，例如 `3rd/CoralinkerHost/packaging/build-packages.json`。
+  - 发布脚本读取该文件并生成发布包内 `res/compiler/build-packages.json`。
+  - 发布时创建 probe project，执行一次 restore，读取 `project.assets.json` 或 lock file 自动得到完整 package closure。
+  - 按 assets 中的包闭包复制 `~/.nuget/packages/<id>/<version>`，不再手写 transitive 包。
+  - Restore 失败时：
+    - 把 restore stdout/stderr 写入 `build.log`。
+    - ring buffer 传入 `BuildFailedException`，让 API/前端能显示最后关键错误。
+    - 解析 `NU1101` 等错误，输出“缺少离线 NuGet 包”的摘要，包括缺包 ID、离线源路径、发布包重新生成建议。
+
+## 2026-06-05 12:31 UTC+8 — 实现离线 NuGet 包闭包自动发布与友好 restore 日志
+
+- 用户需求：
+  - “好现在修改，验证，发布，验证做完”。
+  - 不再长期手写离线 transitive 包清单。
+  - 让用户 Agent 更快从 Build 日志中定位 NuGet restore 缺包问题。
+- 修改：
+  - 新增 `3rd/CoralinkerHost/packaging/build-packages.json`：
+    - 作为 Host Build 用户逻辑临时工程的顶层包配置源。
+    - 当前包含：
+      - `Fody/6.6.4`
+      - `Newtonsoft.Json/13.0.3`
+      - `System.IO.Ports/9.0.3`
+      - `System.Management/9.0.4`
+  - 修改 `3rd/CoralinkerHost/publish-host.ps1`：
+    - 删除长期手写维护的 runtime-specific `$offlinePackageSpecs` 清单。
+    - 读取 `packaging/build-packages.json`。
+    - 生成临时 `CoralinkerBuildPackageProbe.csproj`。
+    - 执行真实 `dotnet restore`。
+    - 解析 `obj/project.assets.json`：
+      - 遍历 `libraries` 中 `type=package` 的条目。
+      - 读取 package `id/version/path`。
+      - 在 NuGet package folders 中定位实际包目录。
+    - 复制完整 package closure 到发布包：
+      - `res/compiler/nuget-packages/<id>/<version>/`
+    - `publish-info.json` 继续记录：
+      - 顶层 `buildPackages`
+      - 完整 `offlineNuGetPackages`
+    - 修复 PowerShell 函数输出污染问题：
+      - `dotnet restore` 输出通过 `Write-Host` 打印，不作为函数返回值混入 package list。
+    - 修复 PowerShell JSON 数组展开问题：
+      - 对 `ConvertFrom-Json` 结果进行显式 array flatten。
+  - 修改 `3rd/CoralinkerHost/Services/DiverBuildService.cs`：
+    - `build.log` 创建提前到 restore 阶段之前。
+    - restore stdout/stderr 写入 `build.log`。
+    - restore 和 build 复用同一个日志文件。
+    - restore 失败时不再丢弃 tail，而是传入 `BuildFailedException`。
+    - 新增 restore 失败提示：
+      - 解析 `Unable to find package <id>`。
+      - 输出缺失包列表。
+      - 输出当前 NuGet source。
+      - 输出重新发布 Host 的修复建议。
+      - 输出完整日志路径。
+- 中途问题与处理：
+  - 第一次发布失败：
+    - 原因：函数返回中混入 `dotnet restore` 输出，导致 `$offlinePackageSpecs` 包含非 package 对象。
+    - 修复：restore 输出管道到 `Write-Host`。
+  - 第二次发布失败：
+    - 原因：PowerShell 把 JSON 数组作为嵌套数组传入 `ConvertTo-PackageReferenceXml()`，生成错误 `PackageReference Include="Fody Newtonsoft.Json ..."`。
+    - 修复：函数入口和 JSON 读取后都做显式 array flatten。
+  - 失败的半成品发布目录已删除。
+- 验证：
+  - `ReadLints` 检查 `DiverBuildService.cs` 无错误。
+  - `dotnet build "3rd\CoralinkerHost\CoralinkerHost.csproj" -c Release --no-restore` 通过，仅既有 warning。
+  - `publish-host.ps1` PowerShell parser 语法检查通过。
+  - 快速 package closure probe：
+    - 使用 `packaging/build-packages.json` 生成 probe project。
+    - `dotnet restore` 成功。
+    - `PACKAGE_CLOSURE_COUNT=22`。
+  - 完整发布：
+    - `.\publish-host.ps1 -SkipNativeBuild` 成功。
+    - 最终包：
+      - `3rd/CoralinkerHost/Publish/CoralinkerHost_7b57695_20260605-122827`
+  - 最终发布包验证：
+    - `publish-info.json` 中 `buildPackages` 为正常数组。
+    - `offlineNuGetPackages` 列出 22 个包。
+    - `Glob` 确认 `res/compiler/nuget-packages` 下有 22 个 `.nuspec`。
+    - 包含 `runtime.linux-x64.runtime.native.system.io.ports/9.0.3`、`runtime.linux-arm64.runtime.native.system.io.ports/9.0.3` 等全部 `System.IO.Ports` runtime-specific 依赖。
+  - 干净离线 restore：
+    - `NUGET_PACKAGES` 指向全新空目录。
+    - NuGet source 仅指定最终发布包 `res/compiler/nuget-packages`。
+    - `dotnet restore ai-deck/agent_work/20260605-offline-restore-probe/OfflineRestoreProbe.csproj` 成功。
+  - `git diff --check` 检查相关文件通过，仅有 LF/CRLF 提示。
+- 注意：
+  - 发布过程中的 Vite warning 为既有提示：
+    - SignalR pure annotation comment。
+    - `device.ts` dynamic/static import chunk warning。
+    - 大 chunk size warning。
+  - dotnet build/publish nullable、platform compatibility warning 为既有提示，未阻塞。
+
+## 2026-06-05 12:52 UTC+8 — 发布 Host 最小端到端验证
+
+- 用户需求：
+  - 在 Windows 工作区 `d:\Documents\Coral\DIVER` 中验证父 Agent 已启动的发布 Host。
+  - Host 地址：`http://localhost:4499`。
+  - 发布目录：`3rd/CoralinkerHost/Publish/CoralinkerHost_7b57695_20260605-124439`。
+  - 使用 CoralinkerKitDocs 的 `agent_cli/coral_agent.py` 完成最小端到端流程。
+- 执行：
+  - 确认 `ai-deck/kit-docs/tools/agent_cli/coral_agent.py` 不存在，因此使用 `3rd/CoralinkerKitDocs/tools/agent_cli/coral_agent.py`。
+  - 创建临时工作目录 `ai-deck/agent_work/20260605-1248-host-e2e/`。
+  - 写入 `desc.md` 说明目录用途和文件用途。
+  - 写入 `MinimalE2E.cs`，包含：
+    - `MinimalE2ECart`：`target` UpperIO，`observed`/`ticks` LowerIO。
+    - `MinimalE2ENodeLogic`：读取 `target`，写回 `observed` 和 `ticks`。
+    - `MinimalE2ERootLogic`：写入 `target`，读取 `observed` 并更新 `statusText`。
+  - 写入 `run-e2e.ps1` 串行调用 CLI，并保存每一步 JSON 响应。
+  - 执行流程：
+    - `state`
+    - `project new`
+    - `state`
+    - `files sync --path assets/inputs/MinimalE2E.cs`
+    - `build`
+    - `logic list`
+    - `node add-simulated --name "Agent E2E Sim"`
+    - `node program --logic MinimalE2ENodeLogic`
+    - `root configure --logic MinimalE2ERootLogic`
+    - `start --require-all`
+    - `state`
+    - `node states`
+    - `variables flow`
+    - `errors fatal`
+    - `logs build/root/node`
+- 验证结果：
+  - build 成功：
+    - artifacts: `MinimalE2ENodeLogic`
+    - rootLogics: `MinimalE2ERootLogic`
+    - 0 Error(s)，45 Warning(s)。
+  - 模拟节点 UUID：`835ebf2c-45b9-4e8a-a263-089b63ccad58`。
+  - program 成功，`programSize=294`。
+  - `start --require-all` 成功，`totalNodes=1`，`successNodes=1`。
+  - final state：
+    - session `Running` / `isRunning=true`。
+    - Root `isRunning=true`，logic `MinimalE2ERootLogic`，`statusText=observed=8`。
+    - node `isConnected=true`，`runState=running`，`isConfigured=true`，`isProgrammed=true`。
+  - variables flow：
+    - Root 写 `target=7`。
+    - 节点读 `target`。
+    - 节点写 `observed=8` 和 `ticks=8400`。
+  - fatal error 为 `null`。
+- 【发现】发布包 Host 的 build、模拟节点编程、Root 配置、`start --require-all` 和变量流闭环均可用。
+- 【注意】Build 日志仍有 45 条 warning，主要为 DIVER/Fody 编译器信息、stub 字段未赋值、ARM linker RWX segment warning；本次无错误且不阻塞验证。
+- 【注意】Root 日志和节点日志为空，但状态、变量流和 fatal error 已足以确认运行成功。
+- 接下来：
+  - 若需要进一步验证真实硬件，需要用户补充硬件型号、连接、端口、协议和安全限制。
+  - 若需要发布包验收归档，可将 `ai-deck/agent_work/20260605-1248-host-e2e/*.json` 作为证据样本保留。

@@ -28,6 +28,10 @@ $publishStamp = $publishTime.ToString("yyyyMMdd-HHmmss")
 $publishName = "CoralinkerHost_${commit}_${publishStamp}"
 $publishRoot = Join-Path $scriptDir "Publish"
 $outputDir = Join-Path $publishRoot $publishName
+$appDir = Join-Path $outputDir "app"
+$setupDir = Join-Path $outputDir "setup"
+$metaDir = Join-Path $outputDir "meta"
+$packagingDir = Join-Path $scriptDir "packaging"
 
 function Write-Utf8NoBom {
     param(
@@ -44,6 +48,22 @@ function Write-LfUtf8NoBom {
         [string]$Content
     )
     Write-Utf8NoBom -Path $Path -Content ($Content -replace "`r`n", "`n")
+}
+
+function Copy-PackageScript {
+    param(
+        [string]$Source,
+        [string]$Destination
+    )
+
+    $extension = [System.IO.Path]::GetExtension($Source)
+    if ($extension -ieq ".sh") {
+        $content = Get-Content -LiteralPath $Source -Raw -Encoding UTF8
+        Write-LfUtf8NoBom -Path $Destination -Content $content
+        return
+    }
+
+    Copy-Item -LiteralPath $Source -Destination $Destination -Force
 }
 
 function Convert-InlineMarkdownToHtml {
@@ -310,6 +330,186 @@ function Publish-KitDocs {
     Compress-Archive -Path (Join-Path $mdOut "*") -DestinationPath $bundlePath -Force
 }
 
+function Write-PackageReadme {
+    param(
+        [string]$Path,
+        [string]$PackageName
+    )
+
+    $content = @"
+# CoralinkerHost Portable Package
+
+Package: $PackageName
+
+## Start
+
+Windows PowerShell:
+
+    .\start-host.ps1
+
+Windows CMD:
+
+    start-host.bat
+
+Ubuntu/Linux:
+
+    sudo bash ./start-host.sh
+
+If .NET SDK 8 is missing on Ubuntu, run:
+
+    sudo bash setup/install-dotnet-sdk-ubuntu.sh
+
+## Layout
+
+- app/: Host binaries, wwwroot/, compiler resources, runtime assets, and runtime data.
+- setup/: installation and maintenance scripts.
+- meta/: package integrity manifest.
+- publish-info.json: version and publish metadata.
+
+Run checks without starting Host:
+
+    sudo bash ./start-host.sh --check-only
+"@
+    Write-LfUtf8NoBom -Path $Path -Content $content
+}
+
+function ConvertTo-PackageReferenceXml {
+    param([array]$Packages)
+
+    $packageList = @($Packages)
+    if ($packageList.Count -eq 1 -and $packageList[0] -is [System.Array]) {
+        $packageList = @($packageList[0])
+    }
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($package in $packageList) {
+        if ([string]::IsNullOrWhiteSpace($package.include) -or [string]::IsNullOrWhiteSpace($package.version)) {
+            throw "Invalid build package entry. Each item must include 'include' and 'version'."
+        }
+
+        $include = [System.Security.SecurityElement]::Escape([string]$package.include)
+        $version = [System.Security.SecurityElement]::Escape([string]$package.version)
+        $privateAssets = [System.Security.SecurityElement]::Escape([string]$package.privateAssets)
+        $includeAssets = [System.Security.SecurityElement]::Escape([string]$package.includeAssets)
+
+        if ([string]::IsNullOrWhiteSpace($privateAssets) -and [string]::IsNullOrWhiteSpace($includeAssets)) {
+            $lines.Add("    <PackageReference Include=`"$include`" Version=`"$version`" />")
+            continue
+        }
+
+        $lines.Add("    <PackageReference Include=`"$include`" Version=`"$version`">")
+        if (-not [string]::IsNullOrWhiteSpace($privateAssets)) {
+            $lines.Add("      <PrivateAssets>$privateAssets</PrivateAssets>")
+        }
+        if (-not [string]::IsNullOrWhiteSpace($includeAssets)) {
+            $lines.Add("      <IncludeAssets>$includeAssets</IncludeAssets>")
+        }
+        $lines.Add("    </PackageReference>")
+    }
+
+    return ($lines -join "`n")
+}
+
+function Get-BuildPackageClosure {
+    param(
+        [array]$BuildPackages,
+        [string]$ProbeDir
+    )
+
+    if (Test-Path -LiteralPath $ProbeDir) {
+        Remove-Item -LiteralPath $ProbeDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $ProbeDir -Force | Out-Null
+
+    $packageReferencesXml = ConvertTo-PackageReferenceXml -Packages $BuildPackages
+    $probeProjectPath = Join-Path $ProbeDir "CoralinkerBuildPackageProbe.csproj"
+    $probeProject = @"
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+$packageReferencesXml
+  </ItemGroup>
+</Project>
+"@
+    Write-Utf8NoBom -Path $probeProjectPath -Content $probeProject
+
+    Write-Host "Restoring build package probe to calculate offline NuGet package closure..."
+    & dotnet restore $probeProjectPath --verbosity minimal 2>&1 | ForEach-Object { Write-Host $_ }
+    if ($LASTEXITCODE -ne 0) {
+        throw "Build package probe restore failed. Restore the Host project once on the development machine, or ensure NuGet sources are reachable, then publish again."
+    }
+
+    $assetsPath = Join-Path $ProbeDir "obj\project.assets.json"
+    if (-not (Test-Path -LiteralPath $assetsPath -PathType Leaf)) {
+        throw "Build package probe restore did not produce project.assets.json: $assetsPath"
+    }
+
+    $assets = Get-Content -LiteralPath $assetsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $packageFolders = @()
+    if ($assets.packageFolders) {
+        $packageFolders += $assets.packageFolders.PSObject.Properties.Name
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:NUGET_PACKAGES)) {
+        $packageFolders += $env:NUGET_PACKAGES
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+        $packageFolders += (Join-Path $env:USERPROFILE ".nuget\packages")
+    }
+    $packageFolders = $packageFolders |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        ForEach-Object { (Resolve-Path -LiteralPath $_ -ErrorAction SilentlyContinue).Path } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Select-Object -Unique
+
+    if ($packageFolders.Count -eq 0) {
+        throw "No NuGet package folders were reported by project.assets.json."
+    }
+
+    $packages = @{}
+    foreach ($library in $assets.libraries.PSObject.Properties) {
+        if ($library.Value.type -ne "package") {
+            continue
+        }
+
+        $libraryKey = [string]$library.Name
+        $slashIndex = $libraryKey.IndexOf("/")
+        if ($slashIndex -le 0 -or $slashIndex -ge ($libraryKey.Length - 1)) {
+            throw "Unexpected package library key in project.assets.json: $($library.Name)"
+        }
+
+        $id = $libraryKey.Substring(0, $slashIndex).ToLowerInvariant()
+        $version = $libraryKey.Substring($slashIndex + 1)
+        $relativePath = if ($library.Value.path) { [string]$library.Value.path } else { "$id/$version" }
+        $sourcePath = $null
+        foreach ($folder in $packageFolders) {
+            $candidate = Join-Path $folder $relativePath
+            if (Test-Path -LiteralPath $candidate -PathType Container) {
+                $sourcePath = $candidate
+                break
+            }
+        }
+
+        if ($null -eq $sourcePath) {
+            throw "Restore resolved package '$id/$version', but the package folder '$relativePath' was not found under: $($packageFolders -join '; ')"
+        }
+
+        $key = "$id/$version"
+        $packages[$key] = [pscustomobject]@{
+            Id = $id
+            Version = $version
+            RelativePath = $relativePath
+            SourcePath = $sourcePath
+        }
+    }
+
+    return $packages.Values | Sort-Object Id, Version
+}
+
 if (-not $SkipNativeBuild) {
     $nativeBuildScripts = @(
         @{ Name = "MCUSerialBridge"; Path = Join-Path $repoRoot "MCUSerialBridge\build-native.ps1" },
@@ -334,7 +534,7 @@ if (-not $SkipNativeBuild) {
     }
 }
 
-$publishArgs = @("publish", $projectPath, "-c", $Configuration, "-o", $outputDir)
+$publishArgs = @("publish", $projectPath, "-c", $Configuration, "-o", $appDir)
 if (-not [string]::IsNullOrWhiteSpace($Runtime)) {
     $publishArgs += @("-r", $Runtime, "--self-contained", "false")
 }
@@ -385,13 +585,14 @@ Write-Host "Exclude IIS config: $ExcludeIisConfig"
 Write-Host "Exclude static web assets endpoints: $ExcludeStaticWebAssetsEndpoints"
 Write-Host "Skip native build: $SkipNativeBuild"
 Write-Host "Output: $outputDir"
+Write-Host "Application directory: $appDir"
 
 & dotnet @publishArgs
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-$clientAppDir = Join-Path $outputDir "ClientApp"
+$clientAppDir = Join-Path $appDir "ClientApp"
 if (Test-Path $clientAppDir) {
     Remove-Item -Recurse -Force $clientAppDir
 }
@@ -406,7 +607,7 @@ if (-not $IncludeSdkExecutable) {
         "CoralinkerSDK.runtimeconfig.json"
     )
     foreach ($sidecar in $sdkExecutableSidecars) {
-        $sidecarPath = Join-Path $outputDir $sidecar
+        $sidecarPath = Join-Path $appDir $sidecar
         if (Test-Path $sidecarPath) {
             Remove-Item -Force $sidecarPath
         }
@@ -414,57 +615,46 @@ if (-not $IncludeSdkExecutable) {
 }
 
 if ($ExcludeIisConfig) {
-    $iisConfigPath = Join-Path $outputDir "web.config"
+    $iisConfigPath = Join-Path $appDir "web.config"
     if (Test-Path $iisConfigPath) {
         Remove-Item -Force $iisConfigPath
     }
 }
 
 if ($ExcludeStaticWebAssetsEndpoints) {
-    $staticWebAssetsEndpointsPath = Join-Path $outputDir "CoralinkerHost.staticwebassets.endpoints.json"
+    $staticWebAssetsEndpointsPath = Join-Path $appDir "CoralinkerHost.staticwebassets.endpoints.json"
     if (Test-Path $staticWebAssetsEndpointsPath) {
         Remove-Item -Force $staticWebAssetsEndpointsPath
     }
 }
 
 if (-not $IncludePdb) {
-    Get-ChildItem -Path $outputDir -Recurse -Filter "*.pdb" -File | Remove-Item -Force
+    Get-ChildItem -Path $appDir -Recurse -Filter "*.pdb" -File | Remove-Item -Force
 }
 
 $kitDocsSourceDir = Join-Path $repoRoot "3rd\CoralinkerKitDocs"
 $kitDocsVersion = if ([string]::IsNullOrWhiteSpace($tag)) { $commit } else { "${tag}-${commit}" }
 Write-Host "Publishing Coralinker Kit docs..."
-Publish-KitDocs -SourceDir $kitDocsSourceDir -OutputDir $outputDir -Version $kitDocsVersion
+Publish-KitDocs -SourceDir $kitDocsSourceDir -OutputDir $appDir -Version $kitDocsVersion
 
-$defaultBuildPackages = @(
-    [ordered]@{
-        include = "Fody"
-        version = "6.6.4"
-        privateAssets = "all"
-        includeAssets = "runtime; build; native; contentfiles; analyzers; buildtransitive"
-    },
-    [ordered]@{
-        include = "Newtonsoft.Json"
-        version = "13.0.3"
-    },
-    [ordered]@{
-        include = "System.IO.Ports"
-        version = "9.0.3"
-    },
-    [ordered]@{
-        include = "System.Management"
-        version = "9.0.4"
+$buildPackagesSourcePath = Join-Path $packagingDir "build-packages.json"
+if (-not (Test-Path -LiteralPath $buildPackagesSourcePath -PathType Leaf)) {
+    throw "Missing build package configuration: $buildPackagesSourcePath"
+}
+$buildPackagesJson = Get-Content -LiteralPath $buildPackagesSourcePath -Raw -Encoding UTF8
+$defaultBuildPackages = @($buildPackagesJson | ConvertFrom-Json)
+if ($defaultBuildPackages.Count -eq 1 -and $defaultBuildPackages[0] -is [System.Array]) {
+    $defaultBuildPackages = @($defaultBuildPackages[0])
+}
+$packageProbeDir = Join-Path ([System.IO.Path]::GetTempPath()) "coralinker-build-package-probe-$publishStamp"
+$offlinePackageSpecs = Get-BuildPackageClosure -BuildPackages $defaultBuildPackages -ProbeDir $packageProbeDir
+try {
+    if (Test-Path -LiteralPath $packageProbeDir) {
+        Remove-Item -LiteralPath $packageProbeDir -Recurse -Force
     }
-)
-
-$offlinePackageSpecs = @(
-    @{ Id = "fody"; Version = "6.6.4" },
-    @{ Id = "newtonsoft.json"; Version = "13.0.3" },
-    @{ Id = "system.io.ports"; Version = "9.0.3" },
-    @{ Id = "runtime.native.system.io.ports"; Version = "9.0.3" },
-    @{ Id = "system.management"; Version = "9.0.4" },
-    @{ Id = "system.codedom"; Version = "9.0.4" }
-)
+} catch {
+    Write-Warning "Could not remove temporary package probe directory: $packageProbeDir"
+}
 
 $manifest = [ordered]@{
     app = "CoralinkerHost"
@@ -481,73 +671,78 @@ $manifest = [ordered]@{
     dirty = $dirty
     publishTime = $publishTime.ToString("o")
     outputDirectory = $outputDir
+    appDirectory = "app"
+    setupDirectory = "setup"
+    metaDirectory = "meta"
     startScripts = @("start-host.ps1", "start-host.bat", "start-host.sh")
-    setupScripts = @("install-dotnet-sdk-ubuntu.sh", "refresh-package-manifest.sh")
+    setupScripts = @("setup/install-dotnet-sdk-ubuntu.sh", "setup/refresh-package-manifest.sh")
     nativeBridgeRuntimes = @("win-x64", "linux-x64", "linux-arm64")
     nativeSimNodeRuntimes = @("win-x64", "linux-x64", "linux-arm64")
     kitDocs = [ordered]@{
         version = $kitDocsVersion
-        markdown = "res/docs/kit/md"
-        html = "wwwroot/docs/kit"
+        markdown = "app/res/docs/kit/md"
+        html = "app/wwwroot/docs/kit"
     }
-    buildPackages = $defaultBuildPackages
+    buildPackages = @($defaultBuildPackages)
     offlineNuGetPackages = $offlinePackageSpecs | ForEach-Object { "$($_.Id)/$($_.Version)" }
-    integrityManifest = "package-manifest.sha256"
+    integrityManifest = "meta/package-manifest.sha256"
 }
 
 $manifestPath = Join-Path $outputDir "publish-info.json"
 $manifest | ConvertTo-Json | Set-Content -Path $manifestPath -Encoding UTF8
 
-$packagingDir = Join-Path $scriptDir "packaging"
-$packagingFiles = @(
-    "start-host.ps1",
-    "start-host.bat",
-    "start-host.sh",
-    "install-dotnet-sdk-ubuntu.sh",
-    "refresh-package-manifest.sh"
-)
-foreach ($packagingFile in $packagingFiles) {
+$rootScripts = @("start-host.ps1", "start-host.bat", "start-host.sh")
+foreach ($packagingFile in $rootScripts) {
     $packagingSource = Join-Path $packagingDir $packagingFile
     if (-not (Test-Path $packagingSource)) {
         throw "Missing packaging file: $packagingSource"
     }
-    Copy-Item -LiteralPath $packagingSource -Destination (Join-Path $outputDir $packagingFile) -Force
+    Copy-PackageScript -Source $packagingSource -Destination (Join-Path $outputDir $packagingFile)
 }
 
-$offlinePackagesDir = Join-Path $outputDir "res\compiler\nuget-packages"
+New-Item -ItemType Directory -Path $setupDir -Force | Out-Null
+$setupScripts = @("install-dotnet-sdk-ubuntu.sh", "refresh-package-manifest.sh")
+foreach ($packagingFile in $setupScripts) {
+    $packagingSource = Join-Path $packagingDir $packagingFile
+    if (-not (Test-Path $packagingSource)) {
+        throw "Missing packaging file: $packagingSource"
+    }
+    Copy-PackageScript -Source $packagingSource -Destination (Join-Path $setupDir $packagingFile)
+}
+
+Write-PackageReadme -Path (Join-Path $outputDir "README.md") -PackageName $publishName
+
+$offlinePackagesDir = Join-Path $appDir "res\compiler\nuget-packages"
 if (Test-Path -LiteralPath $offlinePackagesDir) {
     Remove-Item -LiteralPath $offlinePackagesDir -Recurse -Force
 }
 New-Item -ItemType Directory -Path $offlinePackagesDir -Force | Out-Null
 
-$buildPackagesPath = Join-Path $outputDir "res\compiler\build-packages.json"
-Write-Utf8NoBom -Path $buildPackagesPath -Content ($defaultBuildPackages | ConvertTo-Json -Depth 5)
+$buildPackagesPath = Join-Path $appDir "res\compiler\build-packages.json"
+Write-Utf8NoBom -Path $buildPackagesPath -Content (@($defaultBuildPackages) | ConvertTo-Json -Depth 5)
 
-$userNuGetPackages = $env:NUGET_PACKAGES
-if ([string]::IsNullOrWhiteSpace($userNuGetPackages)) {
-    $userNuGetPackages = Join-Path $env:USERPROFILE ".nuget\packages"
-}
 foreach ($package in $offlinePackageSpecs) {
-    $source = Join-Path $userNuGetPackages (Join-Path $package.Id $package.Version)
+    $source = $package.SourcePath
     if (-not (Test-Path -LiteralPath $source -PathType Container)) {
-        throw "Missing offline NuGet package '$($package.Id)/$($package.Version)' under '$userNuGetPackages'. Run dotnet restore once on the development machine before publishing."
+        throw "Missing offline NuGet package '$($package.Id)/$($package.Version)' at '$source'. Run dotnet restore once on the development machine before publishing."
     }
 
-    $destination = Join-Path $offlinePackagesDir (Join-Path $package.Id $package.Version)
+    $destination = Join-Path $offlinePackagesDir $package.RelativePath
     New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
     Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
 }
 
+New-Item -ItemType Directory -Path $metaDir -Force | Out-Null
 $outputRootForManifest = (Resolve-Path $outputDir).Path.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
 $integrityLines = Get-ChildItem -Path $outputDir -Recurse -File |
-    Where-Object { $_.Name -ne "package-manifest.sha256" } |
+    Where-Object { $_.FullName -ne (Join-Path $metaDir "package-manifest.sha256") } |
     Sort-Object FullName |
     ForEach-Object {
         $relative = $_.FullName.Substring($outputRootForManifest.Length).Replace('\', '/')
         $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         "$hash *$relative"
     }
-Write-LfUtf8NoBom -Path (Join-Path $outputDir "package-manifest.sha256") -Content (($integrityLines -join "`n") + "`n")
+Write-LfUtf8NoBom -Path (Join-Path $metaDir "package-manifest.sha256") -Content (($integrityLines -join "`n") + "`n")
 
 Write-Host "Publish completed."
 Write-Host "Manifest: $manifestPath"

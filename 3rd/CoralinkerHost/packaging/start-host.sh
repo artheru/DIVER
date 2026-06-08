@@ -2,7 +2,10 @@
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-cd "$SCRIPT_DIR"
+PACKAGE_ROOT="$SCRIPT_DIR"
+APP_DIR="$PACKAGE_ROOT/app"
+SETUP_DIR="$PACKAGE_ROOT/setup"
+META_DIR="$PACKAGE_ROOT/meta"
 CHECK_ONLY=0
 SKIP_INTEGRITY_CHECK=0
 while [ "$#" -gt 0 ]; do
@@ -34,7 +37,7 @@ dotnet_install_hint() {
   cat >&2 <<'EOF'
 Install guidance:
 - Ubuntu: run the bundled installer from the package directory:
-  sudo ./install-dotnet-sdk-ubuntu.sh
+  sudo bash setup/install-dotnet-sdk-ubuntu.sh
 - Other Linux distributions: install .NET SDK 8.0 using your distribution package manager or Microsoft's guide:
   https://learn.microsoft.com/dotnet/core/install/linux
 
@@ -91,31 +94,33 @@ printf '%s\n' "$RUNTIME_LIST" | grep -q '^Microsoft\.AspNetCore\.App 8\.' || fai
 command -v git >/dev/null 2>&1 || fail_git "git command was not found."
 git --version >/dev/null 2>&1 || fail_git "git command exists but failed to run git --version."
 
-require_file "CoralinkerHost.dll"
-require_file "CoralinkerHost.deps.json"
-require_file "CoralinkerHost.runtimeconfig.json"
-require_file "publish-info.json"
-require_dir "wwwroot"
-require_dir "res"
-require_dir "res/compiler"
-require_file "res/compiler/DiverCompiler.dll"
-require_file "res/compiler/DiverCompiler.deps.json"
-require_file "res/compiler/RunOnMCU.cs"
-require_file "res/compiler/DIVERInterface.cs"
-require_file "res/compiler/DIVERCommonUtils.cs"
-require_file "res/compiler/Extensions.cs"
-require_file "res/compiler/build-packages.json"
-require_dir "res/compiler/nuget-packages"
-require_file "runtimes/win-x64/native/mcu_serial_bridge.dll"
-require_file "runtimes/linux-x64/native/libmcu_serial_bridge.so"
-require_file "runtimes/linux-arm64/native/libmcu_serial_bridge.so"
+require_file "$APP_DIR/CoralinkerHost.dll"
+require_file "$APP_DIR/CoralinkerHost.deps.json"
+require_file "$APP_DIR/CoralinkerHost.runtimeconfig.json"
+require_file "$PACKAGE_ROOT/publish-info.json"
+require_dir "$APP_DIR/wwwroot"
+require_dir "$APP_DIR/res"
+require_dir "$APP_DIR/res/compiler"
+require_file "$APP_DIR/res/compiler/DiverCompiler.dll"
+require_file "$APP_DIR/res/compiler/DiverCompiler.deps.json"
+require_file "$APP_DIR/res/compiler/RunOnMCU.cs"
+require_file "$APP_DIR/res/compiler/DIVERInterface.cs"
+require_file "$APP_DIR/res/compiler/DIVERCommonUtils.cs"
+require_file "$APP_DIR/res/compiler/Extensions.cs"
+require_file "$APP_DIR/res/compiler/build-packages.json"
+require_dir "$APP_DIR/res/compiler/nuget-packages"
+require_file "$APP_DIR/runtimes/win-x64/native/mcu_serial_bridge.dll"
+require_file "$APP_DIR/runtimes/linux-x64/native/libmcu_serial_bridge.so"
+require_file "$APP_DIR/runtimes/linux-arm64/native/libmcu_serial_bridge.so"
+require_file "$SETUP_DIR/install-dotnet-sdk-ubuntu.sh"
+require_file "$SETUP_DIR/refresh-package-manifest.sh"
 
 if [ "$SKIP_INTEGRITY_CHECK" = "1" ]; then
   echo "WARNING: package integrity check skipped by --skip-integrity-check."
 else
-  require_file "package-manifest.sha256"
+  require_file "$META_DIR/package-manifest.sha256"
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum -c package-manifest.sha256
+    (cd "$PACKAGE_ROOT" && sha256sum -c "meta/package-manifest.sha256")
   else
     fail "sha256sum command was not found; cannot verify package integrity."
   fi
@@ -127,4 +132,5 @@ if [ "$CHECK_ONLY" = "1" ]; then
 fi
 
 echo "Starting CoralinkerHost..."
-exec dotnet "$SCRIPT_DIR/CoralinkerHost.dll" "$@"
+cd "$APP_DIR"
+exec dotnet "$APP_DIR/CoralinkerHost.dll" "$@"

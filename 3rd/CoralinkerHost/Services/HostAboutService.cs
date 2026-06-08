@@ -63,7 +63,7 @@ public sealed class HostAboutService
 
     private PublishInfoDocument? TryReadPublishInfo()
     {
-        var path = Path.Combine(_paths.ContentRoot, "publish-info.json");
+        var path = ResolvePublishInfoPath();
         if (!File.Exists(path))
         {
             return null;
@@ -78,6 +78,18 @@ public sealed class HostAboutService
         {
             return null;
         }
+    }
+
+    private string ResolvePublishInfoPath()
+    {
+        var contentRootPath = Path.Combine(_paths.ContentRoot, "publish-info.json");
+        if (File.Exists(contentRootPath))
+        {
+            return contentRootPath;
+        }
+
+        var packageRootPath = Path.GetFullPath(Path.Combine(_paths.ContentRoot, "..", "publish-info.json"));
+        return packageRootPath;
     }
 
     private HostVersionInfo? TryReadFrontendBuildInfo()

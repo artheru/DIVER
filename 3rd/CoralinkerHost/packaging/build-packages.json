@@ -1,0 +1,20 @@
+[
+  {
+    "include": "Fody",
+    "version": "6.6.4",
+    "privateAssets": "all",
+    "includeAssets": "runtime; build; native; contentfiles; analyzers; buildtransitive"
+  },
+  {
+    "include": "Newtonsoft.Json",
+    "version": "13.0.3"
+  },
+  {
+    "include": "System.IO.Ports",
+    "version": "9.0.3"
+  },
+  {
+    "include": "System.Management",
+    "version": "9.0.4"
+  }
+]

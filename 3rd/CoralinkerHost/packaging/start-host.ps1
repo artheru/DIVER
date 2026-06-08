@@ -6,7 +6,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-Set-Location $ScriptDir
+$PackageRoot = $ScriptDir
+$AppDir = Join-Path $PackageRoot "app"
+$SetupDir = Join-Path $PackageRoot "setup"
+$MetaDir = Join-Path $PackageRoot "meta"
 
 function Fail([string]$Message) {
     Write-Error $Message
@@ -17,7 +20,7 @@ function DotnetInstallHint {
     return @"
 Install guidance:
 - Ubuntu: run the bundled installer from the package directory:
-  sudo ./install-dotnet-sdk-ubuntu.sh
+  sudo bash setup/install-dotnet-sdk-ubuntu.sh
 - Other Linux distributions: install .NET SDK 8.0 using your distribution package manager or Microsoft's guide:
   https://learn.microsoft.com/dotnet/core/install/linux
 - Windows: install .NET SDK 8.0 from:
@@ -44,13 +47,13 @@ Git is required by CoralinkerHost file history, diff, checkout, revert, and proj
 }
 
 function Require-File([string]$RelativePath) {
-    if (-not (Test-Path -LiteralPath (Join-Path $ScriptDir $RelativePath) -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath (Join-Path $PackageRoot $RelativePath) -PathType Leaf)) {
         Fail "Missing required file: $RelativePath"
     }
 }
 
 function Require-Directory([string]$RelativePath) {
-    if (-not (Test-Path -LiteralPath (Join-Path $ScriptDir $RelativePath) -PathType Container)) {
+    if (-not (Test-Path -LiteralPath (Join-Path $PackageRoot $RelativePath) -PathType Container)) {
         Fail "Missing required directory: $RelativePath"
     }
 }
@@ -110,29 +113,31 @@ function Check-GitEnvironment {
 }
 
 function Check-PackageFiles {
-    Require-File "CoralinkerHost.dll"
-    Require-File "CoralinkerHost.deps.json"
-    Require-File "CoralinkerHost.runtimeconfig.json"
+    Require-File "app/CoralinkerHost.dll"
+    Require-File "app/CoralinkerHost.deps.json"
+    Require-File "app/CoralinkerHost.runtimeconfig.json"
     Require-File "publish-info.json"
-    Require-Directory "wwwroot"
-    Require-Directory "res"
-    Require-Directory "res/compiler"
-    Require-File "res/compiler/DiverCompiler.dll"
-    Require-File "res/compiler/DiverCompiler.deps.json"
-    Require-File "res/compiler/RunOnMCU.cs"
-    Require-File "res/compiler/DIVERInterface.cs"
-    Require-File "res/compiler/DIVERCommonUtils.cs"
-    Require-File "res/compiler/Extensions.cs"
-    Require-File "res/compiler/build-packages.json"
-    Require-Directory "res/compiler/nuget-packages"
-    Require-File "runtimes/win-x64/native/mcu_serial_bridge.dll"
-    Require-File "runtimes/linux-x64/native/libmcu_serial_bridge.so"
-    Require-File "runtimes/linux-arm64/native/libmcu_serial_bridge.so"
-    Require-File "package-manifest.sha256"
+    Require-Directory "app/wwwroot"
+    Require-Directory "app/res"
+    Require-Directory "app/res/compiler"
+    Require-File "app/res/compiler/DiverCompiler.dll"
+    Require-File "app/res/compiler/DiverCompiler.deps.json"
+    Require-File "app/res/compiler/RunOnMCU.cs"
+    Require-File "app/res/compiler/DIVERInterface.cs"
+    Require-File "app/res/compiler/DIVERCommonUtils.cs"
+    Require-File "app/res/compiler/Extensions.cs"
+    Require-File "app/res/compiler/build-packages.json"
+    Require-Directory "app/res/compiler/nuget-packages"
+    Require-File "app/runtimes/win-x64/native/mcu_serial_bridge.dll"
+    Require-File "app/runtimes/linux-x64/native/libmcu_serial_bridge.so"
+    Require-File "app/runtimes/linux-arm64/native/libmcu_serial_bridge.so"
+    Require-File "setup/install-dotnet-sdk-ubuntu.sh"
+    Require-File "setup/refresh-package-manifest.sh"
+    Require-File "meta/package-manifest.sha256"
 }
 
 function Check-PackageIntegrity {
-    $manifestPath = Join-Path $ScriptDir "package-manifest.sha256"
+    $manifestPath = Join-Path $MetaDir "package-manifest.sha256"
     $lines = Get-Content -LiteralPath $manifestPath
     foreach ($line in $lines) {
         if ([string]::IsNullOrWhiteSpace($line)) {
@@ -145,7 +150,7 @@ function Check-PackageIntegrity {
         $expected = $line.Substring(0, 64).ToLowerInvariant()
         $relative = $line.Substring(66).TrimStart('*')
         $relativePath = $relative.Replace('/', [System.IO.Path]::DirectorySeparatorChar)
-        $fullPath = Join-Path $ScriptDir $relativePath
+        $fullPath = Join-Path $PackageRoot $relativePath
         if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
             Fail "Integrity check failed; missing file: $relative"
         }
@@ -171,5 +176,6 @@ if ($CheckOnly) {
 }
 Write-Host "Starting CoralinkerHost..."
 
-& dotnet (Join-Path $ScriptDir "CoralinkerHost.dll") @HostArgs
+Set-Location $AppDir
+& dotnet (Join-Path $AppDir "CoralinkerHost.dll") @HostArgs
 exit $LASTEXITCODE
